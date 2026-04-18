@@ -1,0 +1,26 @@
+# Flutter
+multi_model_client/build/
+multi_model_client/.dart_tool/
+multi_model_client/.flutter-plugins
+multi_model_client/.flutter-plugins-dependencies
+multi_model_client/.packages
+multi_model_client/pubspec.lock
+
+# macOS
+.DS_Store
+multi_model_client/macos/Runner.xcworkspace/xcuserdata/
+multi_model_client/macos/Pods/
+multi_model_client/macos/.symlinks/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temporary
+*.tmp
+temp/

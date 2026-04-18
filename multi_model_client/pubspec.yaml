@@ -1,0 +1,132 @@
+name: multi_model_client
+description: "Multi-model LLM client with session isolation, memory engine, RAG, and full-modal interaction"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State Management (保持 2.x 系列以兼容其他依赖)
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Navigation
+  go_router: ^17.2.1
+
+  # Network
+  dio: ^5.7.0
+  connectivity_plus: ^7.1.1
+
+  # Database
+  drift: ^2.28.2
+  sqlite3_flutter_libs: ^0.5.42
+  path_provider: ^2.1.5
+  path: ^1.9.0
+
+  # UI Components
+  cupertino_icons: ^1.0.8
+
+  # Markdown & Code Highlighting (flutter_markdown_plus 替代已停止维护的 flutter_markdown)
+  flutter_markdown_plus: ^1.0.3
+  highlight: ^0.7.0
+
+  # Utils
+  uuid: ^4.5.1
+  intl: ^0.20.1
+  shared_preferences: ^2.3.4
+  flutter_secure_storage: ^10.0.0
+  local_auth: ^3.0.1
+  encrypt: ^5.0.3
+
+  # File Operations
+  file_picker: ^11.0.2
+  image_picker: ^1.1.2
+  share_plus: ^10.1.4
+
+  # Networking & Parsing
+  url_launcher: ^6.3.1
+  html: ^0.15.5
+
+  # FFI
+  ffi: ^2.1.0
+
+  # Local LLM Inference (llama.cpp FFI)
+  llama_cpp_dart: ^0.2.2
+
+  # Crypto
+  crypto: ^3.0.3
+
+  # Async utilities
+  async: ^2.11.0
+
+  # Text-to-Speech - Sherpa-ONNX (本地离线 TTS，中文优化)
+  sherpa_onnx: ^1.10.10
+
+  # Tools & Utilities
+  math_expressions: ^3.1.0
+
+  # WebSocket
+  web_socket_channel: ^3.0.3
+
+  # HTTP
+  http: ^1.2.0
+  
+  # Chinese Segmentation
+  jieba_flutter: ^0.2.0
+
+  # Document parsing
+  archive: ^4.0.9
+  
+  # PDF rendering (for OCR: render PDF pages to images)
+  pdfx: ^2.8.0
+
+  # PDF text extraction (native Dart, supports all platforms)
+  syncfusion_flutter_pdf: ^28.2.8
+  
+  # OCR - Tesseract 4.0 (LSTM-based, supports 100+ languages, offline)
+  flutter_tesseract_ocr: ^0.4.30
+  
+  # Audio player with control (play/pause/stop)
+  just_audio: ^0.10.5
+  audio_session: ^0.2.3
+  
+  csv: ^8.0.0
+  permission_handler: ^12.0.1
+
+  # Audio recording for ASR (hold-to-record)
+  record: ^6.2.0
+  
+  # System TTS (使用系统内置语音合成)
+  flutter_tts: ^4.2.2
+  file_selector: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # Lints
+  flutter_lints: ^6.0.0
+
+  # Code Generation
+  riverpod_generator: ^2.6.5
+  build_runner: ^2.4.14
+  drift_dev: ^2.28.0
+
+  # Testing
+  mocktail: ^1.0.5
+
+flutter:
+  generate: true
+  uses-material-design: true
+  
+  # Assets for OCR (Tesseract language data)
+  assets:
+    - assets/ocr/
+    - assets/ocr/tessdata/
