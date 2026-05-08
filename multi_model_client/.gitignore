@@ -23,6 +23,17 @@ migrate_working_dir/
 # is commented out by default.
 #.vscode/
 
+# Documentation - Only keep README files for open source
+CHANGELOG.md
+FINAL_VERIFICATION_REPORT.md
+IMPLEMENTATION_PLAN.md
+LLAMA_CPP_BUILD_GUIDE.md
+TECHNICAL_REVIEW_REPORT_20260409.md
+包体积优化方案.md
+版本检查功能增强方案.md
+项目文档索引.md
+docs/
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
