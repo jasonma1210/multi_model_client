@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0-beta] - 2026-05-15
+
+### ✨ Added - 新增功能
+
+#### 多会话与任务流
+- ✨ **多会话隔离机制（Phase 2）** — `session_context.dart` 会话上下文容器、`session_isolator.dart` 会话资源隔离器、`cross_session_bus.dart` 跨会话通信总线
+- ✨ **任务流编排引擎（Phase 3）** — `workflow_definition.dart` 工作流定义（DAG）、`workflow_node.dart` 工作流节点类型、`workflow_state_machine.dart` 状态机、`workflow_executor.dart` 执行引擎、`workflow_scheduler.dart` 调度器、`cross_session_coordinator.dart` 跨会话协调器、`workflow_repository.dart` 持久化层
+- ✨ **数据库 Schema 升级** — 从版本 9 升级到 10，新增 4 张表：SessionResources、WorkflowDefinitions、WorkflowExecutions、WorkflowLogs
+
+#### 语音功能
+- ✨ **异步语音克隆功能** — `voice_clone_service.dart` 支持异步克隆任务提交和进度追踪，`voice_clone_page.dart` 提供录音/播放/进度 UI，TTS 服务自动路由克隆模式
+
+#### 上下文管理
+- ✨ **上下文自动压缩** — `context_compressor_service.dart` 新增 `truncateToFit()` 静态方法，硬截断确保适配 token 预算
+- ✨ **系统能力自动检测** — `local_ffi_engine.dart` `_getRecommendedConfig()` 根据设备内存自动配置上下文大小（8GB→8192、16GB→16384、32GB→32768）
+- ✨ **推理错误恢复机制** — `dialogue_engine.dart` 新增预截断安全检查（85% 预算）和 prompt too long 错误恢复（50% 激进截断+重试）
+
+#### 模型管理
+- ✨ **模型删除级联** — 下载列表删除模型时级联删除模型文件+模型列表记录+所有关联会话；模型管理页面删除远程/本地模型时级联删除关联会话
+
+### 🔧 Changed - 改进优化
+
+#### 性能优化
+- 🔄 **OCR 内存优化** — 修复 `_bytesToUiImage` 中 `codec.dispose()` 泄漏、`recognizeImage`/`recognizeBytes` 中 `uiImage.dispose()` 泄漏
+- 🔄 **数据库分页查询** — 新增 `getSessionMessagesPaginated(limit, offset)` 和 `getSessionMessageCount()`，支持大数据量分页加载
+- 🔄 **macOS 上下文大小优化** — `_buildModelParams()` 所有平台统一使用推荐配置，macOS 不再固定 8192
+- 🔄 **Token 估算安全余量** — `estimateTokens()` 增加 20% 安全余量避免低估
+
+#### 语音优化
+- 🔄 **TTS 句子分割修复** — `splitIntoSentences()` 修复正则 Bug：`\s+` 匹配空白而非字母 s，增加英文标点支持
+
+### 🐛 Fixed - 问题修复
+
+#### 数据库修复
+- 🐛 **Null check operator used on a null value** — 修复 Messages 表 `hasImages` 列添加时未执行 migration 导致的 NULL 崩溃，升级 schemaVersion 10→11
+- 🐛 **NoSuchMethodError: Message.isImportant** — 修复 `_identifyImportantMessages()` 访问不存在的属性导致崩溃，使用防御性 dynamic 访问
+
+#### 语音修复
+- 🐛 **TTS 播放不一致** — 修复用户输入新内容后旧语音仍在播放的问题，停止 `_cachedTtsService` 实例
+- 🐛 **TTS 无法恢复播放** — 修复 `_isSpeaking` 标志在外部停止后未重置的问题
+
+#### 上下文修复
+- 🐛 **上下文超限崩溃** — 修复 "Tokenization failed or prompt too long" 错误，增加预截断和错误恢复机制
+
+---
+
+## [1.0.1] - 2026-05-14
+
+### 🐛 Fixed - 问题修复
+
+#### 会话管理
+- 🐛 **会话列表自动刷新** — 进入页面时自动刷新会话列表，添加100ms延迟确保数据库写入完成
+- 🐛 **AI重复响应** — 添加 `_isSending` 守卫标志，防止并发/重复发送消息
+
+#### 语音功能
+- 🐛 **TTS播报不稳定** — 缓存 `TTSService` 实例，仅在设置变更时重建，解决Android系统TTS引擎绑定丢失问题
+- 🐛 **语音输入无反馈** — 新增实时中间结果流 (`intermediateTextStream`)，支持微信风格浮动气泡显示识别文本
+
+#### UI适配
+- 🐛 **SafeArea遮挡** — 使用 `SafeArea(top: true, bottom: false)` 包装页面主体，避免Android状态栏遮挡内容
+
+### 🔧 Changed - 改进优化
+
+#### 性能优化
+- 🔄 **消息列表渲染** — 为消息气泡添加 `RepaintBoundary`，隔离重绘区域，提升滚动流畅度
+- 🔄 **ASR服务重构** — `_startSystemAsr()` 支持中间结果实时推送和最终结果分离
+- 🔄 **TTS服务缓存** — 使用设置指纹 (`_ttsSettingsFingerprint`) 判断是否需要重建实例
+
+#### 交互优化
+- 🔄 **语音浮动气泡** — 新增 `_buildVoiceFloatingBubble()` widget，录音时实时显示识别文本
+- 🔄 **会话列表刷新** — `didChangeDependencies` 中添加 `addPostFrameCallback` + `Future.delayed` 优化
+
+### ✨ Added - 新增功能
+
+#### 语音交互
+- ✨ **ASR中间结果流** — `AsrInputService` 新增 `_intermediateTextController` 和 `intermediateTextStream`
+- ✨ **语音浮动气泡UI** — 录音时显示浮动气泡，包含录音指示器和实时识别文本
+
+---
+
 ## [1.0.0] - 2026-04-05
 
 ### ✨ Added - 新增功能
@@ -301,6 +381,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-**最后更新**: 2026-04-05
-**当前版本**: v1.0.0
-**下一版本**: v1.1.0（计划2026-05）
+**最后更新**: 2026-05-15
+**当前版本**: v0.21.0-beta
+**下一版本**: v0.22.0-beta（计划2026-05）

@@ -1,8 +1,8 @@
-name: multi_model_client
-description: "Multi-model LLM client with session isolation, memory engine, RAG, and full-modal interaction"
+name: mj_nexus
+description: "MJ Nexus - Multi-Model AI Assistant with local/remote model support, voice dialogue, RAG knowledge base, and memory engine"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 0.21.0-beta
 
 environment:
   sdk: ^3.10.7
@@ -13,7 +13,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
-  # State Management (保持 2.x 系列以兼容其他依赖)
+  # State Management (保持 2.x 系列以兼容 drift_dev)
   flutter_riverpod: ^2.6.1
   riverpod_annotation: ^2.6.1
 
@@ -21,7 +21,7 @@ dependencies:
   go_router: ^17.2.1
 
   # Network
-  dio: ^5.7.0
+  dio: ^5.9.2
   connectivity_plus: ^7.1.1
 
   # Database
@@ -38,10 +38,11 @@ dependencies:
   highlight: ^0.7.0
 
   # Utils
+  package_info_plus: ^8.0.3
   uuid: ^4.5.1
   intl: ^0.20.1
   shared_preferences: ^2.3.4
-  flutter_secure_storage: ^10.0.0
+  flutter_secure_storage: ^9.2.0
   local_auth: ^3.0.1
   encrypt: ^5.0.3
 
@@ -57,17 +58,21 @@ dependencies:
   # FFI
   ffi: ^2.1.0
 
-  # Local LLM Inference (llama.cpp FFI)
-  llama_cpp_dart: ^0.2.2
+  # Local LLM Inference (llama.cpp FFI) - 使用 llamadart 替代 llama_cpp_dart
+  llamadart: ^0.6.10
 
   # Crypto
   crypto: ^3.0.3
+
+  # Background Downloader - 原生后台下载服务，支持断点续传
+  # 相比 Dio，App 被划掉后仍能继续下载（使用 Android WorkManager / iOS BackgroundSession）
+  background_downloader: ^9.5.4
 
   # Async utilities
   async: ^2.11.0
 
   # Text-to-Speech - Sherpa-ONNX (本地离线 TTS，中文优化)
-  sherpa_onnx: ^1.10.10
+  sherpa_onnx: ^1.12.39
 
   # Tools & Utilities
   math_expressions: ^3.1.0
@@ -77,6 +82,9 @@ dependencies:
 
   # HTTP
   http: ^1.2.0
+
+  # Location Services
+  geolocator: ^13.0.2
   
   # Chinese Segmentation
   jieba_flutter: ^0.2.0
@@ -90,8 +98,8 @@ dependencies:
   # PDF text extraction (native Dart, supports all platforms)
   syncfusion_flutter_pdf: ^28.2.8
   
-  # OCR - Tesseract 4.0 (LSTM-based, supports 100+ languages, offline)
-  flutter_tesseract_ocr: ^0.4.30
+  # OCR - textify (纯 Dart 实现，跨平台支持：Android/iOS/Linux/macOS/Windows/Web)
+  textify: ^0.5.2
   
   # Audio player with control (play/pause/stop)
   just_audio: ^0.10.5
@@ -104,12 +112,23 @@ dependencies:
   record: ^6.2.0
   
   # System TTS (使用系统内置语音合成)
-  flutter_tts: ^4.2.2
+  flutter_tts: ^4.2.5
   file_selector: ^1.1.0
+
+  # Video/Audio 处理（使用系统原生 API）
+  video_compress: ^3.1.3
+  
+  # OCR - 使用系统原生 API（iOS Vision / Android ML Kit）
+  # 模型通过 Google Play Services 按需下载，APK 仅增加几百 KB
+  google_mlkit_text_recognition: ^0.14.0
+  speech_to_text: ^7.3.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # Crash Monitoring - Sentry 崩溃监控（由于网络问题暂时禁用）
+  # sentry_flutter: ^8.0.0
 
   # Lints
   flutter_lints: ^6.0.0
@@ -122,11 +141,72 @@ dev_dependencies:
   # Testing
   mocktail: ^1.0.5
 
+  # App Icon Generator
+  flutter_launcher_icons: ^0.14.4
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/mj_icon_1024.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icons/mj_icon_1024.png"
+
 flutter:
   generate: true
   uses-material-design: true
   
-  # Assets for OCR (Tesseract language data)
+  # Assets - 优化：移除大型静态资源，改为按需下载
   assets:
+    # App 图标原图（用于 flutter_launcher_icons 生成各尺寸图标）
+    - assets/icons/
+    
+    # OCR tessdata: 65MB → 移除，改用运行时下载
+    # 首次使用 OCR 时自动检测并下载
     - assets/ocr/
-    - assets/ocr/tessdata/
+    # - assets/ocr/tessdata/  # 运行时下载，不打包
+    
+    # jieba 分词词典: 11MB（保留，因为 jieba_flutter 依赖此路径）
+    - assets/jieba/
+    - assets/dict.txt
+    - assets/prob_emit.txt
+    
+    # 应用图标
+    - assets/icons/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# llamadart Native Assets 配置
+#
+# 背景：llamadart 默认打包 7 个 CPU 变体 SO（armv8.0 ~ armv9.2），
+# 运行时 ggml 自动选最高版本。
+# 问题：armv9.2_1 和 armv9.2_2 均含 SME（Scalable Matrix Extension）指令，
+#       部分骁龙 Lite 系列固件上报支持 SME，但实际内核未开启（或 Android 16
+#       内核对 SME 的支持有 bug），推理时触发 SIGILL（非法指令）闪退。
+# 修复：显式排除含 SME 的 armv9.2 变体，只保留稳定的 armv8.x + armv9.0。
+#
+# 变体特性对照表：
+#   android_armv8.0_1  - baseline，全设备兼容
+#   android_armv8.2_1  - + DotProd（骁龙 845+）
+#   android_armv8.2_2  - + DotProd + FP16
+#   android_armv8.6_1  - + DotProd + FP16 + MatMul INT8
+#   android_armv9.0_1  - + DotProd + FP16 + MatMul INT8 + SVE2（安全）
+#   android_armv9.2_1  - + SVE + SME ← ★ 排除！SME 不稳定
+#   android_armv9.2_2  - + SVE + SVE2 + SME ← ★ 排除！SME 不稳定
+#
+# ⚠️ 修改后必须执行：flutter clean && flutter pub get，否则缓存旧 SO 仍会打包！
+# ─────────────────────────────────────────────────────────────────────────────
+hooks:
+  user_defines:
+    llamadart:
+      llamadart_native_backends:
+        platforms:
+          android-arm64:
+            backends: [cpu, vulkan]
+            # 只打包不含 SME 的变体，排除 armv9.2_1 和 armv9.2_2
+            cpu_variants:
+              - android_armv8.0_1
+              - android_armv8.2_1
+              - android_armv8.2_2
+              - android_armv8.6_1
+              - android_armv9.0_1
+              # android_armv9.2_1 ← 含 SME，排除
+              # android_armv9.2_2 ← 含 SME+SVE2，排除（崩溃根因）
