@@ -12,27 +12,38 @@
 .swiftpm/
 migrate_working_dir/
 
+# Agent system and backups
+.agents/
+.backups/
+
 # IntelliJ related
 *.iml
 *.ipr
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
+# VS Code
 #.vscode/
 
-# Documentation - Only keep README files for open source
+# Documentation - Only keep README files
 CHANGELOG.md
+docs/
+tts.md
 FINAL_VERIFICATION_REPORT.md
 IMPLEMENTATION_PLAN.md
 LLAMA_CPP_BUILD_GUIDE.md
 TECHNICAL_REVIEW_REPORT_20260409.md
-包体积优化方案.md
-版本检查功能增强方案.md
-项目文档索引.md
-docs/
+
+# Test files at root
+test_download.dart
+test_local_model.dart
+
+# Screenshot files
+flutter_01.png
+flutter_02.png
+
+# Scripts
+init_agents.sh
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -54,3 +65,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Release builds
+/release/
