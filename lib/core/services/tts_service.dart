@@ -19,6 +19,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -138,6 +139,19 @@ enum AudioPlayerState {
   playing,
   paused,
   stopped,
+}
+
+/// WAV 文件解析数据（用于交叉淡入淡出和音量归一化）
+class _WavFileData {
+  final String path;
+  final int headerSize;
+  final List<int> pcmBytes;
+
+  _WavFileData({
+    required this.path,
+    required this.headerSize,
+    required this.pcmBytes,
+  });
 }
 
 /// 语音合成服务 (TTS)
@@ -326,7 +340,28 @@ class TTSService {
     final cleanText = cleanThinkTags(text);
     debugPrint('[$_tag] speakLongText() think标签清洗: ${text.length}字 → ${cleanText.length}字');
     
-    // 1. 分句：按常见标点切分
+    // ★ 检测是否包含 TTS 控制标签
+    final hasControl = TTSStyleParser.hasControlDirective(cleanText);
+    final segmentCount = hasControl ? TTSStyleParser.parseAll(cleanText).length : 0;
+    debugPrint('[$_tag] speakLongText() TTS标签检测: hasControl=$hasControl, 段落数=$segmentCount');
+    
+    if (hasControl) {
+      debugPrint('[$_tag] speakLongText() 检测到 TTS 控制标签，使用 TTS 标签分段模式');
+      // 包含 TTS 标签：直接调用 synthesize，内部会自动按标签分段合成
+      try {
+        final path = await synthesize(cleanText);
+        debugPrint('[$_tag] speakLongText() 合成完成: path=$path');
+        await _playAudio(path);
+        debugPrint('[$_tag] speakLongText() 播放完成');
+        return true;
+      } catch (e, stack) {
+        debugPrint('[$_tag] speakLongText() TTS 标签模式失败: $e');
+        debugPrint('[$_tag] speakLongText() 堆栈: $stack');
+        return false;
+      }
+    }
+    
+    // 1. 分句：按常见标点切分（仅对无 TTS 标签的文本）
     final sentences = splitIntoSentences(cleanText);
     debugPrint('[$_tag] speakLongText() 分句结果: ${sentences.length}句');
     if (sentences.isEmpty) {
@@ -869,10 +904,20 @@ class TTSService {
   ///
   /// 原理：保留第一个文件的 WAV 头部，删除后续文件的头部，
   /// 仅拼接 PCM 数据部分，然后更新合并后文件的总大小。
-  /// 这是实现真正无间隔播放的核心方法。
-  Future<String> _concatenateWavFiles(List<String> filePaths) async {
+  ///
+  /// [enableCrossfade] 是否启用交叉淡入淡出（默认 true），
+  /// 在段落衔接处进行平滑过渡，消除语调硬切感。
+  /// [crossfadeMs] 交叉淡入淡出时长（毫秒），默认 120ms。
+  /// [enableNormalization] 是否启用音量归一化（默认 true），
+  /// 统一各段音量，避免忽大忽小。
+  Future<String> _concatenateWavFiles(
+    List<String> filePaths, {
+    bool enableCrossfade = true,
+    int crossfadeMs = 120,
+    bool enableNormalization = true,
+  }) async {
     if (filePaths.isEmpty) throw Exception('没有音频文件可以合并');
-    
+
     // 过滤掉不存在的文件
     final validFiles = <String>[];
     for (final path in filePaths) {
@@ -889,63 +934,310 @@ class TTSService {
     final outPath = '${tempDir.path}/tts_combined_${DateTime.now().millisecondsSinceEpoch}.wav';
 
     debugPrint('[$_tag] _concatenateWavFiles: 合并 ${validFiles.length} 个文件 → $outPath');
+    debugPrint('[$_tag]   crossfade=${enableCrossfade ? '${crossfadeMs}ms' : '关闭'}, normalization=${enableNormalization ? '开启' : '关闭'}');
 
-    // 读取第一个文件，解析 WAV 头部大小
-    final firstBytes = await File(validFiles.first).readAsBytes();
+    // 解析每个文件的 WAV 头部，提取 PCM 数据和元信息
+    final fileDataList = <_WavFileData>[];
+    int headerSize = 44;
+    int sampleRate = 24000;
+    int bitsPerSample = 16;
+    int channels = 1;
 
-    // 查找 "data" 子块标记确定头部真实大小（兼容非标准 44 字节头部）
-    int headerSize = 44; // 标准 PCM WAV 头部
-    for (int i = 0; i < firstBytes.length - 4; i++) {
-      if (firstBytes[i] == 0x64 && firstBytes[i+1] == 0x61 &&
-          firstBytes[i+2] == 0x74 && firstBytes[i+3] == 0x61) {
-        // "data" + 4 字节 size = i + 8
-        headerSize = i + 8;
-        break;
+    for (final path in validFiles) {
+      final bytes = await File(path).readAsBytes();
+      final offset = _findDataOffset(bytes);
+      if (path == validFiles.first) {
+        headerSize = offset;
+        // 从 WAV 头部解析音频参数
+        if (bytes.length >= 28) {
+          sampleRate = bytes[24] | (bytes[25] << 8) | (bytes[26] << 16) | (bytes[27] << 24);
+          channels = bytes[22] | (bytes[23] << 8);
+          bitsPerSample = bytes[34] | (bytes[35] << 8);
+        }
       }
-    }
-    debugPrint('[$_tag]   WAV 头部大小: $headerSize bytes');
-
-    // 收集校验：确保所有文件头部格式一致
-    int totalDataSize = 0;
-    final raf = await File(outPath).open(mode: FileMode.write);
-    try {
-      // 写入第一个文件的完整头部
-      await raf.writeFrom(firstBytes.sublist(0, headerSize));
-
-      // 逐文件追加 PCM 数据（跳过头部）
-      for (final path in validFiles) {
-        final bytes = await File(path).readAsBytes();
-        // 跳过头部，只取 PCM 数据
-        final actualOffset = path == validFiles.first
-            ? headerSize
-            : _findDataOffset(bytes);
-        final dataBytes = bytes.sublist(actualOffset);
-        await raf.writeFrom(dataBytes);
-        totalDataSize += dataBytes.length;
-        debugPrint('[$_tag]   追加: ${path.split('/').last} → ${dataBytes.length} bytes PCM');
-      }
-
-      // 回写：更新 WAV 头部中的大小字段
-      final riffSize = 36 + totalDataSize;
-
-      await raf.setPosition(4);
-      await raf.writeByte(riffSize & 0xFF);
-      await raf.writeByte((riffSize >> 8) & 0xFF);
-      await raf.writeByte((riffSize >> 16) & 0xFF);
-      await raf.writeByte((riffSize >> 24) & 0xFF);
-
-      await raf.setPosition(headerSize - 4);
-      await raf.writeByte(totalDataSize & 0xFF);
-      await raf.writeByte((totalDataSize >> 8) & 0xFF);
-      await raf.writeByte((totalDataSize >> 16) & 0xFF);
-      await raf.writeByte((totalDataSize >> 24) & 0xFF);
-
-      debugPrint('[$_tag] _concatenateWavFiles ✅ 完成: totalDataSize=$totalDataSize bytes, riffSize=$riffSize');
-    } finally {
-      await raf.close();
+      final pcmBytes = bytes.sublist(offset);
+      fileDataList.add(_WavFileData(path: path, headerSize: offset, pcmBytes: pcmBytes));
     }
 
+    debugPrint('[$_tag]   WAV 参数: sampleRate=$sampleRate, channels=$channels, bitsPerSample=$bitsPerSample, headerSize=$headerSize');
+
+    // 音量归一化：统一各段 RMS 响度
+    if (enableNormalization && fileDataList.length > 1) {
+      _normalizeSegments(fileDataList, bitsPerSample, channels);
+    }
+
+    final int bytesPerSample = bitsPerSample ~/ 8;
+
+    // 自适应交叉淡入淡出：根据相邻段落的音频特征差异自动调整时长
+    // 差异越大 → crossfade 越长（平滑过渡），差异越小 → crossfade 越短（保持节奏）
+    final adaptiveCrossfadeBytes = <int>[];
+    if (enableCrossfade && fileDataList.length > 1) {
+      for (int i = 0; i < fileDataList.length - 1; i++) {
+        final prevSeg = fileDataList[i].pcmBytes;
+        final nextSeg = fileDataList[i + 1].pcmBytes;
+
+        // 计算相邻段落的 RMS 和过零率差异
+        final double prevRms = _computeSegmentRms(prevSeg, bytesPerSample);
+        final double nextRms = _computeSegmentRms(nextSeg, bytesPerSample);
+        final double prevZcr = _computeZeroCrossingRate(prevSeg, bytesPerSample);
+        final double nextZcr = _computeZeroCrossingRate(nextSeg, bytesPerSample);
+
+        // RMS 差异比（归一化到 0~1）
+        final maxRms = prevRms > nextRms ? prevRms : nextRms;
+        final rmsDiff = maxRms > 0 ? (prevRms - nextRms).abs() / maxRms : 0.0;
+
+        // 过零率差异（语速/频谱变化的代理指标）
+        final zcrDiff = (prevZcr - nextZcr).abs();
+
+        // 综合差异分值 → 映射到 crossfade 时长
+        // 低差异（<0.3）→ 50ms，中差异（0.3~0.7）→ 80~120ms，高差异（>0.7）→ 150ms
+        final diffScore = (rmsDiff * 0.6 + zcrDiff * 0.4).clamp(0.0, 1.0);
+        int cfMs;
+        if (diffScore < 0.3) {
+          cfMs = 50;
+        } else if (diffScore < 0.7) {
+          cfMs = 80 + ((diffScore - 0.3) / 0.4 * 40).round();
+        } else {
+          cfMs = 120 + ((diffScore - 0.7) / 0.3 * 30).round();
+        }
+        cfMs = cfMs.clamp(30, 150);
+
+        final cfBytes = (sampleRate * cfMs / 1000).round() * bytesPerSample * channels;
+        adaptiveCrossfadeBytes.add(cfBytes);
+        debugPrint('[$_tag]   边界 $i→${i + 1}: rmsDiff=${rmsDiff.toStringAsFixed(3)}, zcrDiff=${zcrDiff.toStringAsFixed(4)}, diffScore=${diffScore.toStringAsFixed(3)}, crossfade=${cfMs}ms');
+      }
+    }
+
+    // 合并 PCM 数据（含自适应交叉淡入淡出）
+    final outputPcm = <int>[];
+    for (int i = 0; i < fileDataList.length; i++) {
+      final current = fileDataList[i].pcmBytes;
+
+      // 获取当前边界的 crossfade 字节数
+      final cfBytes = (enableCrossfade && i < adaptiveCrossfadeBytes.length)
+          ? adaptiveCrossfadeBytes[i]
+          : 0;
+
+      if (i == 0) {
+        // 第一段：直接写入（去掉尾部交叉区域，留给淡出）
+        if (cfBytes > 0 && current.length > cfBytes) {
+          outputPcm.addAll(current.sublist(0, current.length - cfBytes));
+        } else {
+          outputPcm.addAll(current);
+        }
+      } else {
+        final prev = fileDataList[i - 1].pcmBytes;
+
+        if (cfBytes > 0) {
+          // 获取前一段尾部和当前段头部用于交叉混合
+          final prevTail = prev.length >= cfBytes
+              ? prev.sublist(prev.length - cfBytes)
+              : prev;
+          final currHead = current.length >= cfBytes
+              ? current.sublist(0, cfBytes)
+              : current;
+
+          // 交叉混合：前段淡出 + 当前段淡入
+          final mixed = _crossfadeMix(prevTail, currHead, bytesPerSample, channels);
+          outputPcm.addAll(mixed);
+
+          // 写入当前段剩余部分（去掉头部交叉区域和尾部交叉区域）
+          final remainingStart = cfBytes;
+          // 获取下一段边界的 crossfade 字节数（用于去掉尾部）
+          final nextCfBytes = (enableCrossfade && i < adaptiveCrossfadeBytes.length)
+              ? adaptiveCrossfadeBytes[i]
+              : 0;
+          final remainingEnd = (i < fileDataList.length - 1 && current.length > nextCfBytes)
+              ? current.length - nextCfBytes
+              : current.length;
+          if (remainingEnd > remainingStart) {
+            outputPcm.addAll(current.sublist(remainingStart, remainingEnd));
+          }
+        } else {
+          // 无交叉：直接拼接
+          outputPcm.addAll(current);
+        }
+      }
+
+      debugPrint('[$_tag]   段落 ${i + 1}: ${current.length} bytes PCM');
+    }
+
+    // 构建输出 WAV 文件
+    final wavHeader = _createWavHeader(
+      dataSize: outputPcm.length,
+      sampleRate: sampleRate,
+      bitsPerSample: bitsPerSample,
+      channels: channels,
+    );
+
+    final outBytes = Uint8List(wavHeader.length + outputPcm.length);
+    outBytes.setAll(0, wavHeader);
+    for (int i = 0; i < outputPcm.length; i++) {
+      outBytes[wavHeader.length + i] = outputPcm[i] & 0xFF;
+    }
+
+    await File(outPath).writeAsBytes(outBytes);
+
+    debugPrint('[$_tag] _concatenateWavFiles ✅ 完成: ${outBytes.length} bytes (header=${wavHeader.length} + pcm=${outputPcm.length})');
     return outPath;
+  }
+
+  /// 交叉混合两段 PCM 数据
+  ///
+  /// 前段线性淡出（1→0），当前段线性淡入（0→1），
+  /// 混合后的每个采样 = 前段 × 淡出系数 + 当前段 × 淡入系数。
+  List<int> _crossfadeMix(
+    List<int> tailPcm,
+    List<int> headPcm,
+    int bytesPerSample,
+    int channels,
+  ) {
+    final len = tailPcm.length < headPcm.length ? tailPcm.length : headPcm.length;
+    final result = List<int>.filled(len, 0);
+
+    // 确保长度按采样对齐
+    final alignedLen = (len ~/ (bytesPerSample * channels)) * bytesPerSample * channels;
+    final totalSamples = alignedLen ~/ bytesPerSample;
+
+    for (int s = 0; s < totalSamples; s++) {
+      final t = totalSamples > 1 ? s / (totalSamples - 1) : 1.0;
+      final fadeOut = 1.0 - t; // 前段淡出系数
+      final fadeIn = t;        // 当前段淡入系数
+
+      final byteOffset = s * bytesPerSample;
+      if (byteOffset + bytesPerSample <= alignedLen) {
+        if (bytesPerSample == 2) {
+          // 16-bit PCM
+          final prevSample = (tailPcm[byteOffset] | (tailPcm[byteOffset + 1] << 8)).toSigned(16);
+          final currSample = (headPcm[byteOffset] | (headPcm[byteOffset + 1] << 8)).toSigned(16);
+          final mixed = (prevSample * fadeOut + currSample * fadeIn).round().clamp(-32768, 32767);
+          result[byteOffset] = mixed & 0xFF;
+          result[byteOffset + 1] = (mixed >> 8) & 0xFF;
+        } else {
+          // 其他位深：直接复制当前段
+          for (int b = 0; b < bytesPerSample; b++) {
+            if (byteOffset + b < len) {
+              result[byteOffset + b] = headPcm[byteOffset + b];
+            }
+          }
+        }
+      }
+    }
+
+    // 处理尾部未对齐的字节
+    for (int i = alignedLen; i < len; i++) {
+      result[i] = headPcm[i];
+    }
+
+    return result;
+  }
+
+  /// 音量归一化：统一各段的 RMS 响度
+  ///
+  /// 计算所有段落的平均 RMS，然后将每段缩放到目标 RMS 水平，
+  /// 避免不同段落音量忽大忽小。
+  void _normalizeSegments(
+    List<_WavFileData> fileDataList,
+    int bitsPerSample,
+    int channels,
+  ) {
+    if (fileDataList.length < 2) return;
+
+    final bytesPerSample = bitsPerSample ~/ 8;
+
+    // 计算每段的 RMS
+    final rmsValues = <double>[];
+    for (final fd in fileDataList) {
+      double sumSquares = 0;
+      int sampleCount = 0;
+      final pcm = fd.pcmBytes;
+      for (int i = 0; i + bytesPerSample <= pcm.length; i += bytesPerSample) {
+        int sample;
+        if (bytesPerSample == 2) {
+          sample = (pcm[i] | (pcm[i + 1] << 8)).toSigned(16);
+        } else {
+          sample = pcm[i];
+        }
+        sumSquares += sample * sample;
+        sampleCount++;
+      }
+      final rms = sampleCount > 0 ? math.sqrt(sumSquares / sampleCount) : 0.0;
+      rmsValues.add(rms);
+    }
+
+    // 计算目标 RMS（所有段落的平均值）
+    final avgRms = rmsValues.reduce((a, b) => a + b) / rmsValues.length;
+    debugPrint('[$_tag]   音量归一化: avgRMS=${avgRms.toStringAsFixed(1)}');
+
+    if (avgRms < 1.0) return; // 太安静，跳过归一化
+
+    // 对每段进行缩放
+    for (int i = 0; i < fileDataList.length; i++) {
+      final rms = rmsValues[i];
+      if (rms < 1.0) continue; // 静音段跳过
+
+      final scale = avgRms / rms;
+      // 限制缩放范围，防止过度放大噪声
+      final clampedScale = scale.clamp(0.3, 3.0);
+      debugPrint('[$_tag]   段落 ${i + 1}: rms=${rms.toStringAsFixed(1)}, scale=${clampedScale.toStringAsFixed(3)}');
+
+      if ((clampedScale - 1.0).abs() < 0.05) continue; // 差异太小，跳过
+
+      // 应用缩放
+      final pcm = fileDataList[i].pcmBytes;
+      for (int j = 0; j + bytesPerSample <= pcm.length; j += bytesPerSample) {
+        if (bytesPerSample == 2) {
+          int sample = (pcm[j] | (pcm[j + 1] << 8)).toSigned(16);
+          sample = (sample * clampedScale).round().clamp(-32768, 32767);
+          pcm[j] = sample & 0xFF;
+          pcm[j + 1] = (sample >> 8) & 0xFF;
+        }
+      }
+    }
+  }
+
+  /// 计算 PCM 段落的 RMS（均方根）响度
+  double _computeSegmentRms(List<int> pcmBytes, int bytesPerSample) {
+    double sumSquares = 0;
+    int count = 0;
+    for (int i = 0; i + bytesPerSample <= pcmBytes.length; i += bytesPerSample) {
+      int sample;
+      if (bytesPerSample == 2) {
+        sample = (pcmBytes[i] | (pcmBytes[i + 1] << 8)).toSigned(16);
+      } else {
+        sample = pcmBytes[i];
+      }
+      sumSquares += sample * sample;
+      count++;
+    }
+    return count > 0 ? math.sqrt(sumSquares / count) : 0.0;
+  }
+
+  /// 计算 PCM 段落的过零率（Zero Crossing Rate）
+  ///
+  /// 过零率 = 信号穿过零点的次数 / 总采样数
+  /// 高过零率 → 高频成分多（如摩擦音、气声），低过零率 → 低频为主（如元音、胸腔共鸣）
+  /// 用于衡量相邻段落的频谱/语速差异。
+  double _computeZeroCrossingRate(List<int> pcmBytes, int bytesPerSample) {
+    if (pcmBytes.length < bytesPerSample * 2) return 0.0;
+    int crossings = 0;
+    int prevSample = 0;
+    int count = 0;
+
+    for (int i = 0; i + bytesPerSample <= pcmBytes.length; i += bytesPerSample) {
+      int sample;
+      if (bytesPerSample == 2) {
+        sample = (pcmBytes[i] | (pcmBytes[i + 1] << 8)).toSigned(16);
+      } else {
+        sample = pcmBytes[i];
+      }
+      if (count > 0 && ((prevSample >= 0 && sample < 0) || (prevSample < 0 && sample >= 0))) {
+        crossings++;
+      }
+      prevSample = sample;
+      count++;
+    }
+    return count > 0 ? crossings / count : 0.0;
   }
 
   /// 查找 WAV 文件中 "data" 子块的偏移量（跳过头部后 PCM 数据的起始位置）
@@ -1030,9 +1322,18 @@ class TTSService {
     final baseUrl = _mimoBaseUrl ?? await _getMiMoBaseUrl();
     final url = '$baseUrl/chat/completions';
     
-    // 解析 TTS 控制指令
-    final ttsData = TTSStyleParser.parse(text);
-    debugPrint('[$_tag] MiMo TTS 请求: url=$url, voice=${_mimoVoice.name}, text长度=${text.length}, hasControl=${ttsData.hasControl}');
+    // 解析所有 TTS 控制指令
+    final allSegments = TTSStyleParser.parseAll(text);
+    debugPrint('[$_tag] MiMo TTS 请求: url=$url, voice=${_mimoVoice.name}, text长度=${text.length}, 段落数=${allSegments.length}');
+    
+    // 多标签分段合成
+    if (allSegments.length > 1) {
+      debugPrint('[$_tag] 检测到多个 TTS 标签，分段合成...');
+      return _synthesizeMultipleSegments(allSegments, url, outputPath);
+    }
+    
+    // 单标签合成
+    final ttsData = allSegments.first;
     if (ttsData.hasControl) {
       debugPrint('[$_tag] MiMo TTS 控制指令: type=${ttsData.type}, control=${ttsData.controlContent}');
     }
@@ -1102,6 +1403,110 @@ class TTSService {
     }
   }
 
+  /// 多标签分段合成
+  ///
+  /// 将包含多个 TTS 标签的文本拆分为多个段落，逐段合成后拼接音频。
+  Future<String> _synthesizeMultipleSegments(List<TTSControlData> segments, String url, String? outputPath) async {
+    final tempDir = await getTemporaryDirectory();
+    final audioFiles = <String>[];
+
+    // 提取全局角色锚定，确保所有段落保持一致的人格语调
+    final globalAnchor = TTSStyleParser.extractGlobalAnchor(segments);
+    debugPrint('[$_tag] ========== 多标签分段合成开始 ==========');
+    debugPrint('[$_tag] 总段落数: ${segments.length}');
+    debugPrint('[$_tag] 全局锚定: ${globalAnchor.isNotEmpty ? globalAnchor.substring(0, globalAnchor.length > 80 ? 80 : globalAnchor.length) : "无"}');
+
+    for (int i = 0; i < segments.length; i++) {
+      final segment = segments[i];
+      final previewText = segment.displayContent.length > 30
+          ? segment.displayContent.substring(0, 30)
+          : segment.displayContent;
+      debugPrint('[$_tag] --- 段落 ${i + 1}/${segments.length} ---');
+      debugPrint('[$_tag]   type=${segment.type}, hasControl=${segment.hasControl}');
+      debugPrint('[$_tag]   displayContent: $previewText...');
+      debugPrint('[$_tag]   originalContent长度: ${segment.originalContent.length}');
+
+      try {
+        final requestData = TTSStyleParser.buildMiMoRequest(
+          text: segment.originalContent,
+          voice: _mimoVoice.name,
+          format: 'wav',
+          model: 'mimo-v2.5-tts',
+          globalAnchor: globalAnchor,
+        );
+        
+        debugPrint('[$_tag]   请求数据: messages=${requestData['messages']}');
+        
+        final dio = Dio();
+        dio.options.connectTimeout = const Duration(seconds: 15);
+        dio.options.receiveTimeout = const Duration(seconds: 60);
+        
+        final response = await dio.post(
+          url,
+          data: requestData,
+          options: Options(
+            headers: {
+              'api-key': _apiKey,
+              'Content-Type': 'application/json',
+            },
+            responseType: ResponseType.json,
+          ),
+        );
+        
+        debugPrint('[$_tag]   响应状态: ${response.statusCode}');
+        
+        if (response.statusCode == 200) {
+          final data = response.data as Map<String, dynamic>;
+          final choices = data['choices'] as List<dynamic>?;
+          if (choices != null && choices.isNotEmpty) {
+            final message = choices[0]['message'] as Map<String, dynamic>?;
+            final audio = message?['audio'] as Map<String, dynamic>?;
+            final base64Data = audio?['data'] as String?;
+            
+            if (base64Data != null && base64Data.isNotEmpty) {
+              final audioBytes = base64Decode(base64Data);
+              final segmentPath = '${tempDir.path}/tts_segment_$i.wav';
+              await File(segmentPath).writeAsBytes(audioBytes);
+              audioFiles.add(segmentPath);
+              debugPrint('[$_tag]   ✅ 段落 ${i + 1} 合成成功: ${audioBytes.length} bytes');
+            } else {
+              debugPrint('[$_tag]   ❌ 段落 ${i + 1} 响应中无音频数据: data=$data');
+            }
+          } else {
+            debugPrint('[$_tag]   ❌ 段落 ${i + 1} 响应中无 choices');
+          }
+        } else {
+          debugPrint('[$_tag]   ❌ 段落 ${i + 1} HTTP 错误: ${response.statusCode}');
+        }
+      } catch (e, stack) {
+        debugPrint('[$_tag]   ❌ 段落 ${i + 1} 合成异常: $e');
+        debugPrint('[$_tag]   堆栈: $stack');
+      }
+    }
+    
+    debugPrint('[$_tag] ========== 分段合成结果: ${audioFiles.length}/${segments.length} 成功 ==========');
+    
+    if (audioFiles.isEmpty) {
+      throw Exception('所有段落合成失败');
+    }
+    
+    // 拼接音频文件
+    final finalPath = outputPath ?? '${tempDir.path}/tts_mimo_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final combinedPath = await _concatenateWavFiles(audioFiles);
+    if (finalPath != combinedPath) {
+      await File(combinedPath).copy(finalPath);
+      try { await File(combinedPath).delete(); } catch (_) {}
+    }
+    
+    // 清理临时文件
+    for (final file in audioFiles) {
+      try { await File(file).delete(); } catch (_) {}
+    }
+    
+    debugPrint('[$_tag] 多段落合成完成: $finalPath');
+    return finalPath;
+  }
+
   /// 使用小米 MiMo TTS 声音克隆合成
   ///
   /// [referenceAudioPath] 参考音频文件路径（mp3 或 wav 格式）
@@ -1141,16 +1546,25 @@ class TTSService {
     final mimeType = (ext == 'mp3' || ext == 'mpeg') ? 'audio/mpeg' : 'audio/wav';
     final voiceData = 'data:$mimeType;base64,$base64Audio';
 
-    // 解析 TTS 控制指令
-    final ttsData = TTSStyleParser.parse(text);
-    debugPrint('[$_tag] MiMo VoiceClone 请求: text长度=${text.length}, audioSize=${audioBytes.length} bytes, hasControl=${ttsData.hasControl}');
-    if (ttsData.hasControl) {
-      debugPrint('[$_tag] MiMo VoiceClone 控制指令: type=${ttsData.type}, control=${ttsData.controlContent}');
-    }
+    // 使用 parseAll 解析所有 TTS 控制指令（支持多标签）
+    final allSegments = TTSStyleParser.parseAll(text);
+    debugPrint('[$_tag] MiMo VoiceClone 请求: text长度=${text.length}, audioSize=${audioBytes.length} bytes, 段落数=${allSegments.length}');
 
     // 优先使用构造参数，否则从 SharedPreferences 读取自定义地址
     final baseUrl = _mimoBaseUrl ?? await _getMiMoBaseUrl();
     final url = '$baseUrl/chat/completions';
+
+    // 多标签分段合成
+    if (allSegments.length > 1) {
+      debugPrint('[$_tag] VoiceClone 检测到多个 TTS 标签(${allSegments.length}段)，分段合成...');
+      return _synthesizeMultipleCloneSegments(allSegments, voiceData, url, outputPath);
+    }
+
+    // 单标签合成
+    final ttsData = allSegments.first;
+    if (ttsData.hasControl) {
+      debugPrint('[$_tag] MiMo VoiceClone 控制指令: type=${ttsData.type}, control=${ttsData.controlContent}');
+    }
 
     try {
       final dio = Dio();
@@ -1246,6 +1660,147 @@ class TTSService {
       debugPrint('[$_tag] MiMo VoiceClone 未知错误: $e');
       throw Exception('Failed to synthesize speech with MiMo VoiceClone: $e');
     }
+  }
+
+  /// VoiceClone 多标签分段合成
+  ///
+  /// 将包含多个 TTS 标签的文本拆分为多个段落，逐段使用 VoiceClone API 合成后拼接音频。
+  /// 通过全局角色锚定确保所有段落保持一致的人格语调。
+  Future<String> _synthesizeMultipleCloneSegments(
+    List<TTSControlData> segments,
+    String voiceData,
+    String url,
+    String? outputPath,
+  ) async {
+    final tempDir = await getTemporaryDirectory();
+    final audioFiles = <String>[];
+
+    // 提取全局角色锚定，确保所有段落保持一致的人格语调
+    final globalAnchor = TTSStyleParser.extractGlobalAnchor(segments);
+    debugPrint('[$_tag] ========== VoiceClone 多标签分段合成开始 ==========');
+    debugPrint('[$_tag] 总段落数: ${segments.length}');
+    debugPrint('[$_tag] 全局锚定: ${globalAnchor.isNotEmpty ? globalAnchor.substring(0, globalAnchor.length > 80 ? 80 : globalAnchor.length) : "无"}');
+
+    for (int i = 0; i < segments.length; i++) {
+      final segment = segments[i];
+      final previewText = segment.displayContent.length > 30
+          ? segment.displayContent.substring(0, 30)
+          : segment.displayContent;
+      debugPrint('[$_tag] --- VoiceClone 段落 ${i + 1}/${segments.length} ---');
+      debugPrint('[$_tag]   type=${segment.type}, hasControl=${segment.hasControl}');
+      debugPrint('[$_tag]   displayContent: $previewText...');
+      debugPrint('[$_tag]   originalContent长度: ${segment.originalContent.length}');
+
+      try {
+        final requestData = TTSStyleParser.buildMiMoCloneRequest(
+          text: segment.originalContent,
+          voiceDataUrl: voiceData,
+          format: 'wav',
+          model: 'mimo-v2.5-tts-voiceclone',
+          globalAnchor: globalAnchor,
+        );
+
+        debugPrint('[$_tag]   请求数据: messages=${requestData['messages']}');
+
+        final dio = Dio();
+        dio.options.connectTimeout = const Duration(seconds: 30);
+        dio.options.receiveTimeout = const Duration(seconds: 60);
+
+        // 429 限流重试
+        Response? response;
+        for (int attempt = 0; attempt < 3; attempt++) {
+          try {
+            response = await dio.post(
+              url,
+              data: requestData,
+              options: Options(
+                headers: {
+                  'api-key': _apiKey,
+                  'Content-Type': 'application/json',
+                },
+                responseType: ResponseType.json,
+                validateStatus: (status) => status != null && (status >= 200 && status < 300 || status == 429),
+              ),
+            );
+
+            if (response.statusCode == 429) {
+              final retryAfter = response.headers.value('retry-after');
+              final waitMs = retryAfter != null
+                  ? int.parse(retryAfter) * 1000
+                  : (1000 * (1 << attempt));
+              debugPrint('[$_tag]   ⚠️ 429 限流，${waitMs}ms 后重试 (${attempt + 1}/3)');
+              await Future.delayed(Duration(milliseconds: waitMs));
+              continue;
+            }
+            break;
+          } on DioException catch (e) {
+            if (e.response?.statusCode == 429 && attempt < 2) {
+              final waitMs = 1000 * (1 << attempt);
+              debugPrint('[$_tag]   ⚠️ 429 限流(DioException)，${waitMs}ms 后重试 (${attempt + 1}/3)');
+              await Future.delayed(Duration(milliseconds: waitMs));
+              continue;
+            }
+            rethrow;
+          }
+        }
+
+        if (response == null) {
+          debugPrint('[$_tag]   ❌ 段落 ${i + 1} 请求失败（重试耗尽）');
+          continue;
+        }
+
+        debugPrint('[$_tag]   响应状态: ${response.statusCode}');
+
+        if (response.statusCode == 200) {
+          final data = response.data as Map<String, dynamic>;
+          final choices = data['choices'] as List<dynamic>?;
+          if (choices != null && choices.isNotEmpty) {
+            final message = choices[0]['message'] as Map<String, dynamic>?;
+            final audio = message?['audio'] as Map<String, dynamic>?;
+            final base64Data = audio?['data'] as String?;
+
+            if (base64Data != null && base64Data.isNotEmpty) {
+              final audioBytes = base64Decode(base64Data);
+              final segmentPath = '${tempDir.path}/tts_clone_segment_$i.wav';
+              await File(segmentPath).writeAsBytes(audioBytes);
+              audioFiles.add(segmentPath);
+              debugPrint('[$_tag]   ✅ 段落 ${i + 1} 合成成功: ${audioBytes.length} bytes');
+            } else {
+              debugPrint('[$_tag]   ❌ 段落 ${i + 1} 响应中无音频数据');
+            }
+          } else {
+            debugPrint('[$_tag]   ❌ 段落 ${i + 1} 响应中无 choices');
+          }
+        } else {
+          debugPrint('[$_tag]   ❌ 段落 ${i + 1} HTTP 错误: ${response.statusCode}');
+        }
+      } catch (e, stack) {
+        debugPrint('[$_tag]   ❌ 段落 ${i + 1} 合成异常: $e');
+        debugPrint('[$_tag]   堆栈: $stack');
+      }
+    }
+
+    debugPrint('[$_tag] ========== VoiceClone 分段合成结果: ${audioFiles.length}/${segments.length} 成功 ==========');
+
+    if (audioFiles.isEmpty) {
+      throw Exception('所有 VoiceClone 段落合成失败');
+    }
+
+    // 拼接音频文件
+    final finalPath = outputPath ?? '${tempDir.path}/tts_clone_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final combinedPath = await _concatenateWavFiles(audioFiles);
+    if (finalPath != combinedPath) {
+      await File(combinedPath).copy(finalPath);
+      try { await File(combinedPath).delete(); } catch (_) {}
+    }
+
+    // 清理临时文件
+    for (final file in audioFiles) {
+      try { await File(file).delete(); } catch (_) {}
+    }
+
+    debugPrint('[$_tag] VoiceClone 多段落合成完成: $finalPath');
+    return finalPath;
   }
 
   /// 初始化系统 TTS

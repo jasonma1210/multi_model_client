@@ -25,6 +25,144 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'voice_model_service.dart';
 import 'asset_model_service.dart';
 
+/// 后台 Isolate 识别函数（顶层函数，供 compute 使用）
+Future<String> _sherpaRecognizeInBackground(Map<String, String> params) async {
+  final modelPath = params['modelPath']!;
+  final tokensPath = params['tokensPath']!;
+  final ruleFst = params['ruleFst'] ?? '';
+  final filePath = params['filePath']!;
+
+  // 初始化 bindings
+  initBindings();
+
+  // 根据模型类型选择配置
+  final modelPathLower = modelPath.toLowerCase();
+  OfflineModelConfig modelConfig;
+
+  if (modelPathLower.contains('sense_voice') ||
+      modelPathLower.contains('sensevoice') ||
+      modelPathLower.contains('sense-voice')) {
+    modelConfig = OfflineModelConfig(
+      senseVoice: OfflineSenseVoiceModelConfig(model: modelPath),
+      tokens: tokensPath,
+      numThreads: 2,
+      provider: 'cpu',
+    );
+  } else if (modelPathLower.contains('whisper')) {
+    modelConfig = OfflineModelConfig(
+      whisper: OfflineWhisperModelConfig(encoder: modelPath, decoder: modelPath),
+      tokens: tokensPath,
+      numThreads: 2,
+      provider: 'cpu',
+    );
+  } else if (modelPathLower.contains('paraformer')) {
+    modelConfig = OfflineModelConfig(
+      paraformer: OfflineParaformerModelConfig(model: modelPath),
+      tokens: tokensPath,
+      numThreads: 2,
+      provider: 'cpu',
+    );
+  } else {
+    modelConfig = OfflineModelConfig(
+      senseVoice: OfflineSenseVoiceModelConfig(model: modelPath),
+      tokens: tokensPath,
+      numThreads: 2,
+      provider: 'cpu',
+    );
+  }
+
+  final config = OfflineRecognizerConfig(
+    model: modelConfig,
+    ruleFsts: ruleFst,
+    ruleFars: '',
+    maxActivePaths: 4,
+  );
+
+  final recognizer = OfflineRecognizer(config);
+
+  try {
+    // 读取 WAV 文件
+    final file = File(filePath);
+    final bytes = await file.readAsBytes();
+
+    if (bytes.length < 44) throw Exception('WAV 文件太小');
+
+    // 解析 WAV 头
+    final riff = String.fromCharCodes(bytes.sublist(0, 4));
+    if (riff != 'RIFF') throw Exception('不是有效的 WAV 文件');
+
+    int fmtOffset = 12;
+    int audioFormat = 1;
+    int numChannels = 1;
+    int sampleRate = 16000;
+    int bitsPerSample = 16;
+    int dataOffset = -1;
+    int dataSize = 0;
+
+    while (fmtOffset < bytes.length - 8) {
+      if (fmtOffset + 8 > bytes.length) break;
+      final chunkId = String.fromCharCodes(bytes.sublist(fmtOffset, fmtOffset + 4));
+      if (chunkId.length != 4) break;
+      final chunkSize = ByteData.sublistView(bytes, fmtOffset + 4, fmtOffset + 8).getUint32(0, Endian.little);
+
+      if (chunkId == 'fmt ') {
+        audioFormat = ByteData.sublistView(bytes, fmtOffset + 8, fmtOffset + 10).getUint16(0, Endian.little);
+        numChannels = ByteData.sublistView(bytes, fmtOffset + 10, fmtOffset + 12).getUint16(0, Endian.little);
+        sampleRate = ByteData.sublistView(bytes, fmtOffset + 12, fmtOffset + 16).getUint32(0, Endian.little);
+        bitsPerSample = ByteData.sublistView(bytes, fmtOffset + 22, fmtOffset + 24).getUint16(0, Endian.little);
+        fmtOffset += 8 + chunkSize;
+      } else if (chunkId == 'data') {
+        dataSize = chunkSize;
+        dataOffset = fmtOffset + 8;
+        break;
+      } else {
+        fmtOffset += 8 + chunkSize;
+      }
+    }
+
+    if (dataOffset < 0) throw Exception('WAV 文件中未找到 data chunk');
+    if (audioFormat != 1 && audioFormat != 3 && audioFormat != 65534) {
+      throw Exception('不支持的 WAV 格式: $audioFormat');
+    }
+
+    // 提取音频样本
+    final samples = <double>[];
+    final bytesPerSample = bitsPerSample ~/ 8;
+    final blockSize = bytesPerSample * numChannels;
+
+    for (int i = dataOffset; i < dataOffset + dataSize && i + bytesPerSample <= bytes.length; i += blockSize) {
+      double sample;
+      if (audioFormat == 3 && bitsPerSample == 32) {
+        sample = ByteData.sublistView(bytes, i, i + 4).getFloat32(0, Endian.little);
+      } else if (bitsPerSample == 16) {
+        sample = ByteData.sublistView(bytes, i, i + 2).getInt16(0, Endian.little) / 32768.0;
+      } else if (bitsPerSample == 32) {
+        sample = ByteData.sublistView(bytes, i, i + 4).getInt32(0, Endian.little) / 2147483648.0;
+      } else if (bitsPerSample == 8) {
+        sample = (bytes[i] - 128) / 128.0;
+      } else {
+        throw Exception('不支持的位深: $bitsPerSample');
+      }
+      samples.add(sample.clamp(-1.0, 1.0));
+    }
+
+    if (samples.isEmpty) throw Exception('音频文件为空');
+
+    // 执行识别
+    final stream = recognizer.createStream();
+    final floatData = Float32List.fromList(samples);
+    stream.acceptWaveform(samples: floatData, sampleRate: sampleRate);
+    recognizer.decode(stream);
+    final result = recognizer.getResult(stream);
+    final text = result.text;
+    stream.free();
+
+    return text;
+  } finally {
+    recognizer.free();
+  }
+}
+
 /// ASR 提供商类型
 enum ASRProvider {
   openai,    // OpenAI Whisper API
@@ -212,7 +350,12 @@ class ASRService {
     
     // 初始化 sherpa-onnx 绑定
     initBindings();
-    
+
+    // 保存解析后的路径供后台 Isolate 使用
+    _resolvedModelPath = resolvedModelPath;
+    _resolvedTokensPath = resolvedTokensPath;
+    _resolvedRuleFst = resolvedRuleFst;
+
     _recognizer = OfflineRecognizer(config);
     _initialized = true;
     debugPrint('[ASRService] Sherpa-ONNX 初始化成功: $resolvedModelPath');
@@ -235,43 +378,34 @@ class ASRService {
     }
   }
 
-  /// 使用 Sherpa-ONNX 识别音频文件
+  /// 使用 Sherpa-ONNX 识别音频文件（在后台 Isolate 中执行）
   Future<String> _recognizeWithSherpa(String filePath) async {
     if (!_initialized) {
       await initSherpa();
     }
-    
-    if (_recognizer == null) {
-      throw StateError('Sherpa 识别器未初始化');
+
+    if (_resolvedModelPath == null || _resolvedTokensPath == null) {
+      throw StateError('Sherpa 模型路径未解析');
     }
-    
+
     try {
-      // 读取音频文件
-      final waveData = await readWaveFile(filePath);
-      if (waveData == null) {
-        throw Exception('无法读取音频文件: $filePath');
-      }
-      
-      // 创建识别器输入 - 使用 Float32List
-      final stream = _recognizer!.createStream();
-      final floatData = Float32List.fromList(waveData.map((e) => e).toList());
-      stream.acceptWaveform(samples: floatData, sampleRate: 16000);
-      
-      // 执行识别 - 使用 decode 方法
-      _recognizer!.decode(stream);
-      
-      // 获取识别结果
-      final result = _recognizer!.getResult(stream);
-      final text = result.text;
-      
-      // 释放资源
-      stream.free();
-      
+      final params = {
+        'modelPath': _resolvedModelPath!,
+        'tokensPath': _resolvedTokensPath!,
+        'ruleFst': _resolvedRuleFst ?? '',
+        'filePath': filePath,
+      };
+
+      final text = await compute(_sherpaRecognizeInBackground, params);
       return text;
     } catch (e) {
       throw Exception('Sherpa 识别失败: $e');
     }
   }
+
+  String? _resolvedModelPath;
+  String? _resolvedTokensPath;
+  String? _resolvedRuleFst;
 
   /// 读取 WAV 文件并返回音频数据（支持多种格式）
   @visibleForTesting
@@ -343,12 +477,12 @@ class ASRService {
       
       debugPrint('[ASRService] WAV: format=$audioFormat, channels=$numChannels, rate=$sampleRate, bits=$bitsPerSample, dataOffset=$dataOffset');
       
-      // 支持 PCM (1) 和 WAVEFORMATEXTENSIBLE (65534)
-      if (audioFormat != 1 && audioFormat != 65534) {
+      // 支持 PCM (1)、IEEE float (3) 和 WAVEFORMATEXTENSIBLE (65534)
+      if (audioFormat != 1 && audioFormat != 3 && audioFormat != 65534) {
         debugPrint('[ASRService] Only PCM format is supported, got format $audioFormat');
         return null;
       }
-      
+
       // 如果是 WAVEFORMATEXTENSIBLE，尝试读取实际的编码格式
       if (audioFormat == 65534) {
         // SubFormat 位于 fmtOffset + 24，GUID 格式
@@ -362,16 +496,19 @@ class ASRService {
           // 尝试从文件推断
         }
       }
-      
+
       // 计算音频样本
       final samples = <double>[];
       final bytesPerSample = bitsPerSample ~/ 8;
       final blockSize = bytesPerSample * numChannels;
-      
+
       for (int i = dataOffset; i < dataOffset + dataSize && i + bytesPerSample <= bytes.length; i += blockSize) {
         // 只取第一个通道
         double sample;
-        if (bitsPerSample == 16) {
+        if (audioFormat == 3 && bitsPerSample == 32) {
+          // IEEE float 32位格式
+          sample = ByteData.sublistView(bytes, i, i + 4).getFloat32(0, Endian.little);
+        } else if (bitsPerSample == 16) {
           sample = ByteData.sublistView(bytes, i, i + 2).getInt16(0, Endian.little) / 32768.0;
         } else if (bitsPerSample == 32) {
           sample = ByteData.sublistView(bytes, i, i + 4).getInt32(0, Endian.little) / 2147483648.0;

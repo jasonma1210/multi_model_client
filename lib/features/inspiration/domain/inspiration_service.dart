@@ -170,7 +170,7 @@ class InspirationService extends StateNotifier<InspirationSession> {
     _notifyState();
     
     try {
-      final transcription = await _asrService.recognize(segment.filePath);
+      final transcription = await _asrService.recognizeFile(segment.filePath);
       
       // 更新段落的转录文本
       final updatedSegments = state.segments.map((s) {

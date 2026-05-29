@@ -122,11 +122,13 @@ ${DateTime.now().toIso8601String()}
     
     // XMind 8 格式：ZIP 包含 content.json
     final contentJson = _buildXMindContent(title, mindMapData);
+    final contentBytes = utf8.encode(jsonEncode(contentJson));
+    final metadataBytes = utf8.encode(jsonEncode({
+      'creator': {'name': 'MJ Nexus', 'version': '1.0.0'},
+    }));
     final archive = Archive()
-      ..addFile(ArchiveFile('content.json', utf8.encode(jsonEncode(contentJson))))
-      ..addFile(ArchiveFile('metadata.json', utf8.encode(jsonEncode({
-        'creator': {'name': 'MJ Nexus', 'version': '1.0.0'},
-      }))));
+      ..addFile(ArchiveFile('content.json', contentBytes.length, contentBytes))
+      ..addFile(ArchiveFile('metadata.json', metadataBytes.length, metadataBytes));
     
     final zipData = ZipEncoder().encode(archive);
     final file = File(filePath);

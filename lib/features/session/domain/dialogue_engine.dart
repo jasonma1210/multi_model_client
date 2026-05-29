@@ -444,8 +444,8 @@ class DialogueEngine implements IDialogueEngine {
 
     // ✅ TTS 控制指令：当启用语音播报时，注入 TTS 控制指令提示词
     if (session.enableVoiceOutput) {
-      messages.add(ChatMessage.system(TTSPromptTemplate.simplifiedPrompt));
-      debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词');
+      messages.add(ChatMessage.system(TTSPromptTemplate.getPrompt(enableDirectorMode: true)));
+      debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词（完整版）');
     }
 
     // ✅ 检查是否需要压缩上下文
@@ -543,8 +543,8 @@ class DialogueEngine implements IDialogueEngine {
 
     // ✅ TTS 控制指令：当启用语音播报时，注入 TTS 控制指令提示词
     if (session.enableVoiceOutput) {
-      messages.add(ChatMessage.system(TTSPromptTemplate.simplifiedPrompt));
-      debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词');
+      messages.add(ChatMessage.system(TTSPromptTemplate.getPrompt(enableDirectorMode: true)));
+      debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词（完整版）');
     }
 
     // ✅ RAG 知识库上下文：以独立 system 消息注入（标准 RAG 做法）

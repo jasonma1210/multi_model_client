@@ -92,6 +92,9 @@ dependencies:
 
   # Document parsing
   archive: ^4.0.9
+
+  # Mind map rendering
+  flutter_mind_map: ^1.1.2
   
   # PDF rendering (for OCR: render PDF pages to images)
   pdfx: ^2.8.0

@@ -205,3 +205,128 @@ flutter build ios --release
 ## 📞 联系方式
 
 如有问题或建议，请在 GitHub 上提交 Issue。
+
+---
+
+## 📝 会话记录
+
+### Session #42 — 灵感一瞬播放按钮简化 + 全选/一键总结 + mmproj 模型过滤 (2026-05-29)
+
+**会话背景**：用户提出3个问题：(1) 播放按钮过于复杂（4个按钮），需要简化为播放/停止两个按钮切换；(2) 详细页面缺少全选勾选按钮和一键总结功能；(3) 加载模型时报错 `Failed to load model gemma-4-26B-A4B-it-mmproj-BF16.gguf`，原因是加载了 mmproj（视觉模型投影器）文件而非主模型。
+
+**会话目的**：简化播放控件、补全详细页面功能、修复模型加载错误。
+
+**完成的主要任务**：
+1. 主页面录音项播放控件简化：从4个按钮（播放/暂停/停止/速度）改为2个按钮切换（播放/停止）
+2. 详细页面录音项同样简化为播放/停止切换
+3. 详细页面顶部添加全选 Checkbox，支持一键全选/取消全选所有录音
+4. 详细页面底部添加"一键总结"按钮（仅在有选中录音时显示）
+5. 添加 `_loadFilteredModels()` 方法，过滤掉 filePath 包含 'mmproj' 的模型文件
+6. 在3处模型加载代码中应用过滤
+7. 验证 `flutter analyze` 和 `flutter build macos --debug` 均通过
+
+**技术栈**：Flutter, Dart, SharedPreferences, ModelEntry, LocalFFIEngine, globalModelEngine
+
+**关键决策和解决方案**：
+1. 播放控件简化：使用 `isPlaying ? Icons.stop_circle : Icons.play_circle` 实现图标切换
+2. 全选逻辑：`allIds.every((id) => _selectedRecordingIds.contains(id))` 判断是否全选
+3. mmproj 过滤：检查 `m.filePath!.contains('mmproj')`，跳过视觉模型投影器文件
+4. 详细页面一键总结按钮放在 ListView 底部，仅当有选中录音时显示
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `inspiration_page.dart` | 添加 `_loadFilteredModels()` 方法，过滤 mmproj 文件 | 防止加载视觉模型投影器导致崩溃 |
+| `inspiration_page.dart` | 主页面和详细页面播放按钮简化为播放/停止切换 | 用户要求简化操作 |
+| `inspiration_page.dart` | 详细页面添加全选 Checkbox + 一键总结按钮 | 用户要求补全功能 |
+| `README.md` | 追加 Session #42 会话记录 | 按要求记录会话总结 |
+| `README_zh.md` | 追加 Session #42 会话记录 | 按要求记录会话总结 |
+
+### Session #43 — 播放按钮切换修复 + 一键总结加载动画 + 模型选择记忆 (2026-05-29)
+
+**会话背景**：用户反馈两个问题：(1) 播放按钮点击播放后，再次点击不会停止播放（逻辑 bug）；(2) 一键总结按钮没有加载动画，且模型选择没有记忆功能。
+
+**会话目的**：修复播放按钮切换逻辑、添加加载动画、实现模型选择记忆。
+
+**完成的主要任务**：
+1. 修复主页面和详细页面的 `_playRecording` 方法：当录音正在播放时，再次点击调用 `_stopPlayback()` 停止播放
+2. 详细页面 AppBar 和底部一键总结按钮：生成中显示加载动画
+3. 模型选择记忆：用户选择模型后保存到 `SharedPreferences`，下次自动选中
+
+**技术栈**：Flutter, Dart, SharedPreferences, AudioPlayer, CircularProgressIndicator
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `inspiration_page.dart` | 修复播放/停止切换逻辑 | 修复点击播放后无法停止的 bug |
+| `inspiration_page.dart` | 添加加载动画 | 用户体验优化 |
+| `inspiration_page.dart` | 添加模型保存逻辑 | 实现模型选择记忆功能 |
+| `README.md` | 追加 Session #43 会话记录 | 按要求记录会话总结 |
+| `README_zh.md` | 追加 Session #43 会话记录 | 按要求记录会话总结 |
+
+### Session #44 — 播放按钮颜色优化：停止按钮改为红色 (2026-05-29)
+
+**会话背景**：用户要求播放按钮点击播放后变成红色停止按钮，再次点击停止后变回播放按钮。
+
+**会话目的**：优化播放按钮颜色，停止状态使用明确的红色。
+
+**完成的主要任务**：
+1. 主页面和详细页面播放按钮：停止状态颜色改为 `Colors.red`
+2. 验证构建通过
+
+**技术栈**：Flutter, Dart, Colors
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `inspiration_page.dart` | 播放按钮停止状态改为 `Colors.red` | 用户要求红色停止按钮 |
+| `README.md` | 追加 Session #44 会话记录 | 按要求记录会话总结 |
+| `README_zh.md` | 追加 Session #44 会话记录 | 按要求记录会话总结 |
+
+### Session #45 — ASR 架构升级：VAD预处理 + 说话人分离 + 模型更新检测 (2026-05-29)
+
+**会话背景**：用户要求对 ASR 功能进行全面升级，包括 VAD 预处理、说话人分离、模型版本管理。
+
+**会话目的**：设计并实现企业级 ASR 架构。
+
+**完成的主要任务**：
+1. 创建 VAD 服务：Silero VAD 模型集成，语音活动检测
+2. 创建说话人分离服务：ECAPA-TDNN 声纹嵌入，AHC 聚类算法
+3. 创建音频处理管道：整合 VAD + ASR + 说话人分离
+4. 创建模型更新服务：GitHub Release 检测，多源下载
+
+**技术栈**：Flutter, Dart, Sherpa-ONNX, Silero VAD, ECAPA-TDNN
+
+**新增的文件**：
+| 文件 | 内容 | 用途 |
+|------|------|------|
+| `vad_service.dart` | VAD 预处理服务 | 语音活动检测 |
+| `speaker_diarization_service.dart` | 说话人分离服务 | 声纹嵌入，聚类 |
+| `audio_processing_pipeline.dart` | 音频处理管道 | 整合处理流程 |
+| `model_update_service.dart` | 模型更新服务 | 版本检测，下载 |
+
+**架构设计**：
+```
+原始音频 → VAD → ASR + 说话人分离（并行）→ 时间戳对齐 → 最终输出
+```
+
+### Session #46 — 灵感一瞬录音时间限制 + 计时显示 + 倒计时提示 (2026-05-29)
+
+**会话背景**：用户要求灵感一瞬录音功能增加时间限制，方便管理录音时长。
+
+**会话目的**：实现5分钟录音时间限制，录制时显示计时，剩余10秒时提示。
+
+**完成的主要任务**：
+1. 添加录音时间限制：最大5分钟（300秒），超时自动停止
+2. 录制计时显示：实时显示已录制时长和总时长（如 01:30 / 05:00）
+3. 进度条显示：LinearProgressIndicator 显示录制进度
+4. 10秒倒计时提示：剩余10秒时显示橙色警告，SnackBar 提示用户
+
+**技术栈**：Flutter, Dart, Timer, LinearProgressIndicator
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `inspiration_page.dart` | 添加5分钟时间限制和倒计时功能 | 用户要求限制录音时长 |
+| `README.md` | 追加 Session #46 会话记录 | 按要求记录会话总结 |
+| `README_zh.md` | 追加 Session #46 会话记录 | 按要求记录会话总结 |
