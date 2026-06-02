@@ -176,16 +176,59 @@ class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    // 获取内存信息
+    // 获取内存信息（优先使用 /proc/meminfo，更可靠）
     private fun getMemoryInfo(): MemoryInfo {
+        // 方法1: 读取 /proc/meminfo（最可靠，适用于所有 Android 设备）
+        try {
+            val procMemInfo = readProcMemInfo()
+            if (procMemInfo != null) {
+                return procMemInfo
+            }
+        } catch (e: Exception) {
+            // 降级到 ActivityManager
+        }
+
+        // 方法2: 使用 ActivityManager（降级方案）
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memInfo = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(memInfo)
 
-        val totalMB = memInfo.totalMem / 1024 / 1024
-        val availableMB = memInfo.availMem / 1024 / 1024
+        val totalMB = (memInfo.totalMem / 1024L / 1024L).toInt()
+        val availableMB = (memInfo.availMem / 1024L / 1024L).toInt()
 
-        return MemoryInfo(totalMB.toInt(), availableMB.toInt())
+        return MemoryInfo(totalMB, availableMB)
+    }
+
+    // 从 /proc/meminfo 读取内存信息
+    private fun readProcMemInfo(): MemoryInfo? {
+        return try {
+            val file = File("/proc/meminfo")
+            if (!file.exists()) return null
+
+            var totalKB = 0L
+            var availableKB = 0L
+
+            file.readLines().forEach { line ->
+                when {
+                    line.startsWith("MemTotal:") -> {
+                        totalKB = line.split("\\s+".toRegex())[1].toLongOrNull() ?: 0L
+                    }
+                    line.startsWith("MemAvailable:") -> {
+                        availableKB = line.split("\\s+".toRegex())[1].toLongOrNull() ?: 0L
+                    }
+                }
+            }
+
+            if (totalKB > 0) {
+                val totalMB = (totalKB / 1024).toInt()
+                val availableMB = (availableKB / 1024).toInt()
+                MemoryInfo(totalMB, availableMB)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     // 获取可用内存

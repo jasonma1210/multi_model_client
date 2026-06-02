@@ -14,6 +14,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' show max;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -231,7 +232,7 @@ class DialogueEngine implements IDialogueEngine {
     // ✅ 第三步半：安全截断 - 确保消息总 token 在上下文预算内
     try {
       final ctxSize = await _modelEngine.getContextSize(session.modelId);
-      final tokenBudget = (ctxSize * 0.85).round(); // 使用 85% 预算（给输出留空间）
+      final tokenBudget = (ctxSize * 0.90).round(); // 使用 90% 预算（给输出留空间）
       final estimatedTokens = ContextCompressorService.estimateTotalTokens(
         messages.map((m) => _MessageAdapter(m.role, m.content)).toList(),
       );
@@ -442,10 +443,25 @@ class DialogueEngine implements IDialogueEngine {
       }
     }
 
-    // ✅ TTS 控制指令：当启用语音播报时，注入 TTS 控制指令提示词
+    // ✅ TTS 控制指令：当启用语音播报时，根据上下文预算注入适当版本的 TTS 提示词
     if (session.enableVoiceOutput) {
-      messages.add(ChatMessage.system(TTSPromptTemplate.getPrompt(enableDirectorMode: true)));
-      debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词（完整版）');
+      int? ttsBudget;
+      try {
+        final ctxSize = await _modelEngine.getContextSize(session.modelId);
+        final usedBySystem = messages.fold<int>(0, (sum, m) =>
+            sum + TTSPromptTemplate.estimateTokenCount(m.content));
+        ttsBudget = (ctxSize * 0.90).round() - usedBySystem - 200;
+      } catch (_) {}
+      final ttsPrompt = TTSPromptTemplate.getPrompt(
+        enableDirectorMode: true,
+        tokenBudget: ttsBudget,
+      );
+      if (ttsPrompt.isNotEmpty) {
+        messages.add(ChatMessage.system(ttsPrompt));
+        debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词 (预算=${ttsBudget ?? "无限制"}tokens)');
+      } else {
+        debugPrint('[DialogueEngine] ⚠️ 上下文预算不足，跳过 TTS 提示词注入');
+      }
     }
 
     // ✅ 检查是否需要压缩上下文
@@ -541,10 +557,25 @@ class DialogueEngine implements IDialogueEngine {
       }
     }
 
-    // ✅ TTS 控制指令：当启用语音播报时，注入 TTS 控制指令提示词
+    // ✅ TTS 控制指令：当启用语音播报时，根据上下文预算注入适当版本的 TTS 提示词
     if (session.enableVoiceOutput) {
-      messages.add(ChatMessage.system(TTSPromptTemplate.getPrompt(enableDirectorMode: true)));
-      debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词（完整版）');
+      int? ttsBudget;
+      try {
+        final ctxSize = await _modelEngine.getContextSize(session.modelId);
+        final usedBySystem = messages.fold<int>(0, (sum, m) =>
+            sum + TTSPromptTemplate.estimateTokenCount(m.content));
+        ttsBudget = (ctxSize * 0.90).round() - usedBySystem - 200;
+      } catch (_) {}
+      final ttsPrompt = TTSPromptTemplate.getPrompt(
+        enableDirectorMode: true,
+        tokenBudget: ttsBudget,
+      );
+      if (ttsPrompt.isNotEmpty) {
+        messages.add(ChatMessage.system(ttsPrompt));
+        debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词 (预算=${ttsBudget ?? "无限制"}tokens)');
+      } else {
+        debugPrint('[DialogueEngine] ⚠️ 上下文预算不足，跳过 TTS 提示词注入');
+      }
     }
 
     // ✅ RAG 知识库上下文：以独立 system 消息注入（标准 RAG 做法）
@@ -729,8 +760,8 @@ class DialogueEngine implements IDialogueEngine {
       // 获取会话的所有消息
       final dbMessages = await _messageRepository.getSessionMessages(sessionId);
       
-      // 至少需要有一定数量的消息才考虑压缩
-      if (dbMessages.length < 10) return;
+      // 至少需要 4 条消息（2 轮对话）才考虑压缩
+      if (dbMessages.length < 4) return;
       
       // 检查是否需要压缩（基于 90% 阈值）
       if (!_compressor.needsCompression(dbMessages)) return;
@@ -752,6 +783,11 @@ class DialogueEngine implements IDialogueEngine {
       
       debugPrint('[DialogueEngine] 上下文使用率超过 90%，执行压缩...');
       
+      // ★★★ 根据上下文大小动态调整压缩策略 ★★★
+      // 移动端小上下文：更激进的压缩
+      final isSmallContext = ctxSize < 8192;
+      final maxMessagesToKeep = isSmallContext ? 6 : 20;
+      
       // 执行上下文压缩（优先使用 LLM 摘要）
       List<CompressedMessage> compressedMessages;
       if (_llmSummaryCallback != null && dbMessages.length > 50) {
@@ -759,8 +795,14 @@ class DialogueEngine implements IDialogueEngine {
         debugPrint('[DialogueEngine] 使用 LLM 摘要压缩...');
         compressedMessages = await _compressor.compressWithLlmSummary(dbMessages);
       } else {
-        // 使用规则压缩
+        // 使用规则压缩，移动端更激进
         compressedMessages = _compressor.compress(dbMessages);
+      }
+      
+      // ★★★ 移动端：进一步裁剪压缩结果 ★★★
+      if (isSmallContext && compressedMessages.length > maxMessagesToKeep) {
+        debugPrint('[DialogueEngine] 移动端：裁剪压缩结果从 ${compressedMessages.length} 到 $maxMessagesToKeep 条');
+        compressedMessages = _trimCompressedMessages(compressedMessages, maxMessagesToKeep);
       }
       
       // ★★★ 关键：清空历史消息，写入压缩结果到数据库 ★★★
@@ -815,13 +857,11 @@ class DialogueEngine implements IDialogueEngine {
         );
       }
       
-      // ★★★ 第四步：添加压缩说明消息 ★★★
+      // ★★★ 第四步：添加压缩说明消息（简洁版，节省空间）★★★
       await _messageRepository.createMessage(
         sessionId: sessionId,
         role: 'system',
-        content: '[🗜️ 上下文压缩] 已将 $originalCount 条历史消息压缩为 ${compressedMessages.length} 条。\n'
-            '✅ 原始对话已归档到记忆宫殿，可通过"回忆"功能检索。\n'
-            '当前会话继续，上下文空间已释放。',
+        content: '[🗜️ 压缩] $originalCount→${compressedMessages.length}条，已归档记忆宫殿',
       );
       
       // ★★★ 第五步：刷新会话，确保 UI 显示最新数据 ★★★
@@ -830,6 +870,41 @@ class DialogueEngine implements IDialogueEngine {
       debugPrint('[DialogueEngine] 写入压缩消息失败: $e');
       rethrow;
     }
+  }
+
+  /// ★★★ 裁剪压缩消息（移动端专用）★★★
+  ///
+  /// 保留：
+  /// 1. 所有 system 消息（不含压缩说明）
+  /// 2. 摘要消息
+  /// 3. 最近的 N 条用户/助手消息
+  List<CompressedMessage> _trimCompressedMessages(
+    List<CompressedMessage> messages,
+    int maxCount,
+  ) {
+    if (messages.length <= maxCount) return messages;
+    
+    final result = <CompressedMessage>[];
+    
+    // 1. 保留所有 system 消息（摘要等）
+    final systemMessages = messages.where((m) => m.role == 'system' && m.isSummary).toList();
+    result.addAll(systemMessages);
+    
+    // 2. 保留最近的用户/助手消息
+    final conversationMessages = messages.where((m) => m.role != 'system' || !m.isSummary).toList();
+    final remainingSlots = maxCount - result.length;
+    
+    if (remainingSlots > 0 && conversationMessages.isNotEmpty) {
+      final startIndex = max(0, conversationMessages.length - remainingSlots);
+      result.addAll(conversationMessages.sublist(startIndex));
+    }
+    
+    // 如果还是超过限制，只保留最近的消息
+    if (result.length > maxCount) {
+      return result.sublist(result.length - maxCount);
+    }
+    
+    return result;
   }
 
   /// ★★★ 将历史消息归档到记忆宫殿 ★★★
@@ -1305,6 +1380,50 @@ class DialogueEngine implements IDialogueEngine {
   /// 传入从数据库加载的完整历史消息（List<Message>）
   void updateContextUsageFromMessages(List<dynamic> messages) {
     _modelEngine.updateContextUsageFromMessages(messages);
+  }
+
+  /// 更新上下文使用率（包含 system 消息注入的 token）
+  ///
+  /// 比 [updateContextUsageFromMessages] 更准确，因为会计算
+  /// systemPrompt、TTS 提示词、技能提示词等注入的 token。
+  Future<void> updateContextUsageWithSystemPrompts(
+    String sessionId,
+    List<dynamic> messages,
+  ) async {
+    int systemTokens = 0;
+    try {
+      final session = await _sessionManager.getSession(sessionId);
+
+      if (session.systemPrompt != null && session.systemPrompt!.isNotEmpty) {
+        systemTokens += TTSPromptTemplate.estimateTokenCount(session.systemPrompt!);
+      }
+
+      if (session.enabledSkill != null && session.enabledSkill!.isNotEmpty) {
+        final skillDispatcher = SkillDispatcher();
+        final skill = skillDispatcher.getSkill(session.enabledSkill!);
+        if (skill != null && skill.type == SkillType.expert && skill.expertPrompt != null) {
+          systemTokens += TTSPromptTemplate.estimateTokenCount(skill.expertPrompt!);
+        }
+      }
+
+      if (session.enableVoiceOutput) {
+        int? ttsBudget;
+        try {
+          final ctxSize = await _modelEngine.getContextSize(session.modelId);
+          final usedBySystem = systemTokens;
+          ttsBudget = (ctxSize * 0.90).round() - usedBySystem - 200;
+        } catch (_) {}
+        final ttsPrompt = TTSPromptTemplate.getPrompt(
+          enableDirectorMode: true,
+          tokenBudget: ttsBudget,
+        );
+        if (ttsPrompt.isNotEmpty) {
+          systemTokens += TTSPromptTemplate.estimateTokenCount(ttsPrompt);
+        }
+      }
+    } catch (_) {}
+
+    _modelEngine.updateContextUsageFromMessages(messages, extraTokens: systemTokens);
   }
 
   /// 手动触发上下文压缩（UI 调用）

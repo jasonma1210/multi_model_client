@@ -805,9 +805,11 @@ class ContextCompressorService {
     final systemTokens = estimateTotalTokens(systemMessages);
 
     if (systemTokens >= tokenBudget) {
-      // system 消息本身就超预算了，只保留 system 消息（无解）
-      debugPrint('[ContextCompressor] ❌ system 消息已超预算 (${systemTokens}tokens)');
-      return systemMessages;
+      // system 消息本身就超预算了，尝试截断 system 消息内容
+      debugPrint('[ContextCompressor] ❌ system 消息已超预算 (${systemTokens}tokens)，尝试截断...');
+      final truncatedSystem = _truncateSystemMessages(systemMessages, tokenBudget);
+      debugPrint('[ContextCompressor] 🔧 system 消息截断后: ${estimateTotalTokens(truncatedSystem)}tokens');
+      return truncatedSystem;
     }
 
     final remainingBudget = tokenBudget - systemTokens;
@@ -865,6 +867,67 @@ class ContextCompressorService {
     final result = [...systemMessages, ...keptMessages];
       debugPrint('[ContextCompressor] ✅ 截断完成: ${messages.length} → ${result.length} 条消息, '
         '${estimateTotalTokens(result)}tokens (预算$tokenBudget)');
+    return result;
+  }
+
+  /// 截断超预算的 system 消息
+  ///
+  /// 策略：
+  /// 1. 保留第一条 system 消息（通常是 systemPrompt，最重要）
+  /// 2. 对后续 system 消息按比例截断内容
+  /// 3. 如果仍超预算，逐步丢弃非关键 system 消息
+  static List<dynamic> _truncateSystemMessages(
+    List<dynamic> systemMessages,
+    int tokenBudget,
+  ) {
+    if (systemMessages.isEmpty) return [];
+
+    final result = <dynamic>[];
+    int usedTokens = 0;
+
+    for (int i = 0; i < systemMessages.length; i++) {
+      final msg = systemMessages[i];
+      final content = msg.content?.toString() ?? '';
+      final msgTokens = estimateTokens(content);
+
+      if (i == 0) {
+        // 第一条 system 消息（systemPrompt）优先保留
+        if (msgTokens <= tokenBudget) {
+          result.add(msg);
+          usedTokens += msgTokens;
+        } else {
+          // 即使第一条也超预算，截断内容
+          final maxChars = (tokenBudget / 1.5).round();
+          final truncated = content.length > maxChars
+              ? '${content.substring(0, maxChars)}...'
+              : content;
+          result.add(_TruncationNotice(role: 'system', content: truncated));
+          usedTokens += estimateTokens(truncated);
+        }
+        continue;
+      }
+
+      final remainingBudget = tokenBudget - usedTokens;
+      if (remainingBudget <= 50) break; // 预算不足，丢弃剩余 system 消息
+
+      if (msgTokens <= remainingBudget) {
+        result.add(msg);
+        usedTokens += msgTokens;
+      } else {
+        // 截断内容以适配剩余预算
+        final maxChars = (remainingBudget / 1.5).round();
+        if (maxChars > 50) {
+          final truncated = content.length > maxChars
+              ? '${content.substring(0, maxChars)}...'
+              : content;
+          result.add(_TruncationNotice(role: 'system', content: truncated));
+          debugPrint('[ContextCompressor] 🔧 截断 system 消息 #$i: ${msgTokens} → ${estimateTokens(truncated)} tokens');
+        }
+        // 不管截断与否，预算已耗尽，停止
+        break;
+      }
+    }
+
     return result;
   }
 

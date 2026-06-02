@@ -332,6 +332,7 @@ class TTSStyleParser {
         'format': format,
         'voice': voice,
       },
+      'n': 1,
     };
   }
 
@@ -384,6 +385,7 @@ class TTSStyleParser {
         'format': format,
         'voice': voiceDataUrl,
       },
+      'n': 1,
     };
   }
 }

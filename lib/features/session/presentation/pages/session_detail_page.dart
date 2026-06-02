@@ -26,6 +26,7 @@ import '../../../../core/services/asr_service.dart';
 import '../../../../core/services/voice_dialog_engine.dart';
 import '../../../../core/services/asr_input_service.dart';
 import '../../../../core/services/location_service.dart';
+import 'realtime_voice_page.dart';
 import '../../../../core/storage/database.dart';
 import '../../../../core/providers/database_provider.dart';
 import 'package:mj_nexus/generated/app_localizations.dart';
@@ -154,7 +155,6 @@ class _ActionButton extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
   final Color? iconColor;
-  final bool isActive;
 
   const _ActionButton({
     super.key,
@@ -162,7 +162,6 @@ class _ActionButton extends StatelessWidget {
     required this.color,
     required this.onTap,
     this.iconColor,
-    this.isActive = true,
   });
 
   @override
@@ -174,10 +173,10 @@ class _ActionButton extends StatelessWidget {
       type: MaterialType.circle,
       color: Colors.transparent,
       child: InkWell(
-        onTap: isActive ? onTap : null,
+        onTap: onTap,
         borderRadius: BorderRadius.circular(20),
-        highlightColor: theme.colorScheme.onSurface.withOpacity(0.08),
-        splashColor: theme.colorScheme.onSurface.withOpacity(0.12),
+        highlightColor: theme.colorScheme.onSurface.withValues(alpha: 0.08),
+        splashColor: theme.colorScheme.onSurface.withValues(alpha: 0.12),
         child: Container(
           width: 40,
           height: 40,
@@ -187,7 +186,7 @@ class _ActionButton extends StatelessWidget {
             boxShadow: isEnabled
                 ? [
                     BoxShadow(
-                      color: color.withOpacity(0.25),
+                      color: color.withValues(alpha: 0.25),
                       blurRadius: 6,
                       offset: const Offset(0, 2),
                     ),
@@ -743,12 +742,14 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           _isVoiceRecording = false;
           _voiceAmplitude = 0.0;
           _voiceBubbleText = '';
-          // 弹出可编辑弹出层
-          _showVoiceOverlay = true;
-          _voiceOverlayController.text = text;
         });
-        // 震动反馈
         HapticFeedback.lightImpact();
+        final trimmed = text.trim();
+        if (trimmed.isNotEmpty) {
+          _messageController.text = trimmed;
+          final l10n = AppLocalizations.of(context) ?? _createFallbackLocalizations();
+          _sendMessage(l10n);
+        }
       }
     });
 
@@ -1014,7 +1015,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           : Row(
               children: [
                 AppTheme.buildModelAvatar(
-                  modelId: session?.modelId ?? 'default',
+                  modelId: session.modelId,
                   size: 36,
                 ),
                 const SizedBox(width: AppTheme.spacingM),
@@ -1024,7 +1025,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        session?.name ?? l10n.sessions,
+                        session.name,
                         style: theme.textTheme.titleMedium,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1038,7 +1039,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                           const SizedBox(width: AppTheme.spacingXS),
                           Expanded(
                             child: Text(
-                              _isGenerating ? l10n.generating : session?.modelId ?? 'Unknown',
+                              _isGenerating ? l10n.generating : session.modelId,
                               style: theme.textTheme.bodySmall,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -2275,15 +2276,14 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     }
   }
 
-  /// 更新上下文使用率（从当前会话消息列表计算 token 估算）
+  /// 更新上下文使用率（从当前会话消息列表计算 token 估算，包含 system 消息注入）
   void _updateContextUsage() {
     try {
       final engine = ref.read(dialogueEngineProvider);
-      // 从 session state 获取当前会话的实际消息列表
       final sessionState = ref.read(sessionStateProvider);
       final messages = sessionState.messages;
       if (messages.isNotEmpty) {
-        engine.updateContextUsageFromMessages(messages);
+        engine.updateContextUsageWithSystemPrompts(widget.sessionId, messages);
       }
       final usage = engine.getContextUsage();
       if (mounted) {
@@ -2305,8 +2305,9 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     try {
       final engine = ref.read(dialogueEngineProvider);
       await engine.autoCompressContext(widget.sessionId);
-      engine.refreshContextUsage();
-      _updateContextUsage();
+      // 等待异步操作完成后再更新使用率
+      await Future.delayed(const Duration(milliseconds: 200));
+      await _updateContextUsageAsync();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('上下文已压缩'), duration: Duration(seconds: 2)),
@@ -2317,6 +2318,26 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     } finally {
       if (mounted) setState(() => _isCompressing = false);
     }
+  }
+
+  /// 异步更新上下文使用率（等待完成）
+  Future<void> _updateContextUsageAsync() async {
+    try {
+      final engine = ref.read(dialogueEngineProvider);
+      final sessionState = ref.read(sessionStateProvider);
+      final messages = sessionState.messages;
+      if (messages.isNotEmpty) {
+        await engine.updateContextUsageWithSystemPrompts(widget.sessionId, messages);
+      }
+      final usage = engine.getContextUsage();
+      if (mounted) {
+        setState(() {
+          _contextUsedTokens = usage.used;
+          _contextMaxTokens = usage.max;
+          _contextUsageRatio = usage.ratio.clamp(0.0, 1.0);
+        });
+      }
+    } catch (_) {}
   }
 
   /// WorkBuddy 风格输入区域
@@ -2344,7 +2365,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
               ),
               boxShadow: [
                 BoxShadow(
-                  color: theme.colorScheme.shadow.withOpacity(0.08),
+                  color: theme.colorScheme.shadow.withValues(alpha: 0.08),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -2449,7 +2470,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           boxShadow: _isVoiceMode
               ? [
                   BoxShadow(
-                    color: theme.colorScheme.primary.withOpacity(0.3),
+                    color: theme.colorScheme.primary.withValues(alpha: 0.3),
                     blurRadius: 6,
                     offset: const Offset(0, 2),
                   ),
@@ -2479,17 +2500,17 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     final Color textColor;
     final Color glowColor;
     if (!hasModel) {
-      fillColor = theme.colorScheme.outline.withOpacity(0.3);
+      fillColor = theme.colorScheme.outline.withValues(alpha: 0.3);
       textColor = theme.colorScheme.outline;
       glowColor = Colors.transparent;
     } else if (ratio >= 0.9) {
       fillColor = theme.colorScheme.error;
       textColor = theme.colorScheme.onError;
-      glowColor = theme.colorScheme.error.withOpacity(0.4);
+      glowColor = theme.colorScheme.error.withValues(alpha: 0.4);
     } else if (ratio >= 0.8) {
       fillColor = theme.colorScheme.secondary;
       textColor = theme.colorScheme.onSecondary;
-      glowColor = theme.colorScheme.secondary.withOpacity(0.3);
+      glowColor = theme.colorScheme.secondary.withValues(alpha: 0.3);
     } else if (ratio >= 0.6) {
       fillColor = theme.colorScheme.onSurfaceVariant;
       textColor = theme.colorScheme.onSurfaceVariant;
@@ -2540,7 +2561,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
             border: Border.all(color: theme.colorScheme.outlineVariant),
             boxShadow: [
               BoxShadow(
-                color: theme.colorScheme.shadow.withOpacity(0.15),
+                color: theme.colorScheme.shadow.withValues(alpha: 0.15),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -2884,8 +2905,8 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       onPressed: () => _showInspirationPanel(context, theme),
       backgroundColor: theme.colorScheme.primaryContainer,
       foregroundColor: theme.colorScheme.onPrimaryContainer,
-      child: const Icon(Icons.lightbulb_outline),
       tooltip: '灵感一瞬',
+      child: const Icon(Icons.lightbulb_outline),
     );
   }
 
@@ -2905,26 +2926,27 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       context: context,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black26,
-      isScrollControlled: false,
+      isScrollControlled: true,
       builder: (ctx) {
         return Container(
           decoration: BoxDecoration(
             color: theme.colorScheme.surface,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 拖拽条
-              Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(2),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 6),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
               // 工具列表
               _ToolMenuItem(
                 icon: Icons.language,
@@ -2976,12 +2998,21 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                   _showKnowledgeBaseSheet(context);
                 },
               ),
-              SizedBox(height: MediaQuery.paddingOf(ctx).bottom + 8),
+              _ToolMenuItem(
+                icon: Icons.record_voice_over_rounded,
+                label: '实时语音',
+                subtitle: '持续语音对话，支持打断',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openRealtimeVoicePage();
+                },
+              ),
             ],
           ),
-        );
-      },
-    );
+        ),
+      );
+    },
+  );
   }
 
   /// 显示搜索模式选择底部弹窗
@@ -3209,7 +3240,16 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       ),
     );
   }
-  
+
+  void _openRealtimeVoicePage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RealtimeVoicePage(sessionId: widget.sessionId),
+      ),
+    );
+  }
+
   /// 显示知识库选择底部弹窗
   void _showKnowledgeBaseSheet(BuildContext context) {
     final theme = Theme.of(context);
@@ -3746,8 +3786,9 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       try {
         final engine = ref.read(dialogueEngineProvider);
         await engine.autoCompressContext(widget.sessionId);
-        engine.refreshContextUsage();
-        _updateContextUsage();
+        // 等待异步操作完成后再更新使用率
+        await Future.delayed(const Duration(milliseconds: 300));
+        await _updateContextUsageAsync();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('上下文已自动压缩'), duration: Duration(seconds: 2)),
@@ -4384,10 +4425,14 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           speakerId: ttsVoice.isNotEmpty ? int.tryParse(ttsVoice) ?? 0 : 0,
         );
         _ttsSettingsFingerprint = settingsFingerprint;
-        // 预热系统 TTS（Android 需要绑定引擎）
-        debugPrint('[VoiceOutput] [步骤7] 开始预热系统 TTS...');
-        await _cachedTtsService!.warmUpSystemTts();
-        debugPrint('[VoiceOutput] [步骤7] 系统 TTS 预热完成');
+        // 仅 system TTS 需要预热（MiMo/OpenAI/Sherpa 不需要系统 TTS 绑定）
+        if (ttsProvider == 'system') {
+          debugPrint('[VoiceOutput] [步骤7] 开始预热系统 TTS...');
+          await _cachedTtsService!.warmUpSystemTts();
+          debugPrint('[VoiceOutput] [步骤7] 系统 TTS 预热完成');
+        } else {
+          debugPrint('[VoiceOutput] [步骤7] 非 system TTS ($ttsProvider)，跳过系统 TTS 预热');
+        }
       }
 
       // 使用 speakLongText 自动分句分块，避免长文本卡死
@@ -5990,7 +6035,6 @@ class _InspirationPanelState extends State<_InspirationPanel> {
   bool _isRecording = false;
   bool _isPaused = false;
   final List<_AudioSegment> _segments = [];
-  String? _currentTranscription;
   String? _summary;
 
   @override

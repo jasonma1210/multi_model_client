@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.30.0-blue" alt="版本"/>
+  <img src="https://img.shields.io/badge/version-0.30.5-blue" alt="版本"/>
   <img src="https://img.shields.io/badge/flutter-3.x-blue" alt="Flutter"/>
   <img src="https://img.shields.io/badge/dart-3.10.7+-blue" alt="Dart"/>
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20macOS-green" alt="平台"/>

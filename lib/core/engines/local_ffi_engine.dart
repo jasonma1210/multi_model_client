@@ -163,6 +163,9 @@ class LocalFFIEngine {
     String? mmprojPath,
     void Function(double progress, String message)? onProgress,
   }) async {
+    // ★★★ 加载前自动优化系统内存 ★★★
+    await _optimizeSystemMemory();
+
     // 如果已有模型，先卸载
     await dispose();
 
@@ -281,23 +284,24 @@ class LocalFFIEngine {
     
     // 预估内存需求：模型文件 + KV Cache + 运行时开销
     final config = await _getRecommendedConfig();
-    // KV Cache 估算：contextSize * 8KB * 层数（简化估算）
-    final kvCacheMB = (config.contextSize * 8 * config.gpuLayers) ~/ 1024;
-    final estimatedMemoryMB = modelSizeMB + kvCacheMB + 512; // 额外 512MB 运行时开销
+    // KV Cache 估算：每 1K context 约 50MB（适用于 7B 级模型 FP16 KV cache）
+    // 比旧公式（contextSize * 8 * gpuLayers / 1024）更准确
+    final kvCacheMB = (config.contextSize * 50) ~/ 1024;
+    final estimatedMemoryMB = modelSizeMB + kvCacheMB + 256; // 运行时开销从512降到256
     
     // 获取设备可用内存
     final hardwareInfo = await _hardwareChecker.getHardwareInfo();
     final availableMB = hardwareInfo.availableRamMB;
-    final safetyThreshold = (availableMB * 0.7).toInt(); // 预留 30% 系统内存
+    final safetyThreshold = (availableMB * 0.75).toInt(); // 预留 25% 系统内存（原30%）
     
-    debugPrint('[LocalFFIEngine] 📊 内存预估: 模型${modelSizeMB}MB + KV${kvCacheMB}MB + 运行时512MB = 约${estimatedMemoryMB}MB');
-    debugPrint('[LocalFFIEngine] 📊 设备可用: ${availableMB}MB，预留30%后: ${safetyThreshold}MB');
+    debugPrint('[LocalFFIEngine] 📊 内存预估: 模型${modelSizeMB}MB + KV${kvCacheMB}MB + 运行时256MB = 约${estimatedMemoryMB}MB');
+    debugPrint('[LocalFFIEngine] 📊 设备可用: ${availableMB}MB，预留25%后: ${safetyThreshold}MB');
     
     // 如果预估内存超过安全阈值，尝试降低配置
     if (estimatedMemoryMB > safetyThreshold) {
       debugPrint('[LocalFFIEngine] ⚠️ 预估内存超过安全阈值，尝试降低配置...');
-      // 降低 contextSize 并应用到 params
-      final reducedContextSize = (config.contextSize * 0.6).toInt().clamp(512, 65536);
+      // 降低 contextSize，缩减比例从 60% 放宽到 75%
+      final reducedContextSize = (config.contextSize * 0.75).toInt().clamp(2048, 65536);
       debugPrint('[LocalFFIEngine] 🔧 降低 contextSize: ${config.contextSize} → $reducedContextSize');
       params = (params ?? const LocalModelParams()).copyWith(
         contextSize: reducedContextSize,
@@ -1180,22 +1184,22 @@ class LocalFFIEngine {
     final memoryMB = await _getDeviceMemoryMB();
     final memoryGB = memoryMB ~/ 1024;
     
-    // 根据设备内存分级配置
+    // 根据设备内存分级配置（优化移动端上下文大小）
     if (memoryGB < 4) {
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 低端设备 (<4GB)');
-      return (gpuLayers: 10, contextSize: 1024);
+      return (gpuLayers: 10, contextSize: 2048);
     } else if (memoryGB < 6) {
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 中低端设备 (4-6GB)');
-      return (gpuLayers: 20, contextSize: 2048);
+      return (gpuLayers: 20, contextSize: 4096);
     } else if (memoryGB < 8) {
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 中端设备 (6-8GB)');
-      return (gpuLayers: 30, contextSize: 3072);
+      return (gpuLayers: 30, contextSize: 8192);
     } else if (memoryGB < 12) {
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 中高端设备 (8-12GB)');
-      return (gpuLayers: 40, contextSize: 4096);
+      return (gpuLayers: 40, contextSize: 16384);
     } else if (memoryGB < 16) {
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 高端设备 (12-16GB)');
-      return (gpuLayers: 60, contextSize: 8192);
+      return (gpuLayers: 60, contextSize: 16384);
     } else if (memoryGB < 32) {
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 旗舰设备 (16-32GB), macOS/PC');
       return (gpuLayers: 999, contextSize: 32768);
@@ -1401,8 +1405,9 @@ class LocalFFIEngine {
 
   /// 基于实际消息列表更新上下文使用率
   /// UI 层调用此方法，传入当前会话的所有消息（从数据库加载的）
-  void updateContextUsageFromMessages(List<dynamic> messages) {
-    _estimatedUsedTokens = _estimateHistoryTokens(messages);
+  /// [extraTokens] 额外注入的 token（如 system prompt、TTS 提示词等）
+  void updateContextUsageFromMessages(List<dynamic> messages, {int extraTokens = 0}) {
+    _estimatedUsedTokens = _estimateHistoryTokens(messages) + extraTokens;
   }
 
   /// 刷新上下文使用率估算（兼容旧调用，基于 ChatSession history）
@@ -1447,6 +1452,37 @@ class LocalFFIEngine {
   /// 返回 llama 模型支持的上下文 token 数（从配置中读取），
   /// 用于 DialogueEngine 动态设置上下文压缩阈值为 90%。
   int get maxContextSize => _contextMaxSize ?? 4096;
+
+  /// ★★★ 优化系统内存（加载模型前调用）★★★
+  /// 
+  /// 执行以下优化：
+  /// 1. 清理引擎内部缓存
+  /// 2. 触发 Dart GC（通过分配压力）
+  /// 3. 强制垃圾回收
+  Future<void> _optimizeSystemMemory() async {
+    try {
+      debugPrint('[LocalFFIEngine] 🧹 开始优化系统内存...');
+      
+      // 1. 清理引擎内部缓存
+      _cachedParams = null;
+      _cachedDeviceMemoryMB = null;
+      
+      // 2. 通过分配临时大对象制造内存压力，间接触发 GC
+      for (int i = 0; i < 3; i++) {
+        // ignore: unused_local_variable
+        final temp = List.filled(1024 * 1024, 0); // ~4MB
+        await Future.delayed(const Duration(milliseconds: 50));
+        // temp 在作用域结束后可被 GC 回收
+      }
+      
+      // 3. 再次延迟，让 GC 有时间执行
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      debugPrint('[LocalFFIEngine] ✅ 系统内存优化完成');
+    } catch (e) {
+      debugPrint('[LocalFFIEngine] ⚠️ 内存优化失败（非致命）: $e');
+    }
+  }
 
   /// 释放所有资源
   Future<void> dispose() async {

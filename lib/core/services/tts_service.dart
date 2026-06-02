@@ -174,6 +174,24 @@ class TTSService {
   static const String _tag = 'TTSService';
   static const String _defaultMiMoBaseUrl = 'https://api.xiaomimimo.com/v1';
 
+  /// 全局 MiMo API 调用限流：记录上次调用时间
+  static DateTime? _lastMiMoCallTime;
+  /// 两次 MiMo API 调用之间的最小间隔
+  static const Duration _minCallInterval = Duration(seconds: 3);
+
+  /// 等待限流间隔，确保两次调用之间有足够的间隔
+  static Future<void> _waitForRateLimit() async {
+    if (_lastMiMoCallTime != null) {
+      final elapsed = DateTime.now().difference(_lastMiMoCallTime!);
+      if (elapsed < _minCallInterval) {
+        final waitMs = _minCallInterval.inMilliseconds - elapsed.inMilliseconds;
+        debugPrint('$_tag   ⏳ 限流等待 ${waitMs}ms');
+        await Future.delayed(Duration(milliseconds: waitMs));
+      }
+    }
+    _lastMiMoCallTime = DateTime.now();
+  }
+
   /// 从 SharedPreferences 读取自定义 MiMo API 地址
   Future<String> _getMiMoBaseUrl() async {
     try {
@@ -1351,7 +1369,8 @@ class TTSService {
         format: 'wav',
         model: 'mimo-v2.5-tts',
       );
-      
+
+      await _waitForRateLimit();
       final response = await dio.post(
         url,
         data: requestData,
@@ -1410,11 +1429,8 @@ class TTSService {
     final tempDir = await getTemporaryDirectory();
     final audioFiles = <String>[];
 
-    // 提取全局角色锚定，确保所有段落保持一致的人格语调
-    final globalAnchor = TTSStyleParser.extractGlobalAnchor(segments);
     debugPrint('[$_tag] ========== 多标签分段合成开始 ==========');
     debugPrint('[$_tag] 总段落数: ${segments.length}');
-    debugPrint('[$_tag] 全局锚定: ${globalAnchor.isNotEmpty ? globalAnchor.substring(0, globalAnchor.length > 80 ? 80 : globalAnchor.length) : "无"}');
 
     for (int i = 0; i < segments.length; i++) {
       final segment = segments[i];
@@ -1432,7 +1448,6 @@ class TTSService {
           voice: _mimoVoice.name,
           format: 'wav',
           model: 'mimo-v2.5-tts',
-          globalAnchor: globalAnchor,
         );
         
         debugPrint('[$_tag]   请求数据: messages=${requestData['messages']}');
@@ -1441,6 +1456,7 @@ class TTSService {
         dio.options.connectTimeout = const Duration(seconds: 15);
         dio.options.receiveTimeout = const Duration(seconds: 60);
         
+        await _waitForRateLimit();
         final response = await dio.post(
           url,
           data: requestData,
@@ -1579,10 +1595,11 @@ class TTSService {
         model: 'mimo-v2.5-tts-voiceclone',
       );
 
-      // 429 限流重试：最多重试 3 次，指数退避
+      // 429 限流重试：最多重试 2 次，指数退避
       Response? response;
-      for (int attempt = 0; attempt < 3; attempt++) {
+      for (int attempt = 0; attempt < 2; attempt++) {
         try {
+          await _waitForRateLimit();
           response = await dio.post(
             url,
             data: requestData,
@@ -1600,16 +1617,16 @@ class TTSService {
             final retryAfter = response.headers.value('retry-after');
             final waitMs = retryAfter != null
                 ? int.parse(retryAfter) * 1000
-                : (1000 * (1 << attempt)); // 1s, 2s, 4s
-            debugPrint('[$_tag] ⚠️ MiMo 429 限流，${waitMs}ms 后重试 (${attempt + 1}/3)');
+                : (2000 * (1 << attempt)); // 2s, 4s
+            debugPrint('[$_tag] ⚠️ MiMo 429 限流，${waitMs}ms 后重试 (${attempt + 1}/2)');
             await Future.delayed(Duration(milliseconds: waitMs));
             continue;
           }
           break; // 2xx 成功，跳出重试循环
         } on DioException catch (e) {
-          if (e.response?.statusCode == 429 && attempt < 2) {
-            final waitMs = 1000 * (1 << attempt);
-            debugPrint('[$_tag] ⚠️ MiMo 429 限流(DioException)，${waitMs}ms 后重试 (${attempt + 1}/3)');
+          if (e.response?.statusCode == 429 && attempt < 1) {
+            final waitMs = 2000 * (1 << attempt);
+            debugPrint('[$_tag] ⚠️ MiMo 429 限流(DioException)，${waitMs}ms 后重试 (${attempt + 1}/2)');
             await Future.delayed(Duration(milliseconds: waitMs));
             continue;
           }
@@ -1675,11 +1692,8 @@ class TTSService {
     final tempDir = await getTemporaryDirectory();
     final audioFiles = <String>[];
 
-    // 提取全局角色锚定，确保所有段落保持一致的人格语调
-    final globalAnchor = TTSStyleParser.extractGlobalAnchor(segments);
     debugPrint('[$_tag] ========== VoiceClone 多标签分段合成开始 ==========');
     debugPrint('[$_tag] 总段落数: ${segments.length}');
-    debugPrint('[$_tag] 全局锚定: ${globalAnchor.isNotEmpty ? globalAnchor.substring(0, globalAnchor.length > 80 ? 80 : globalAnchor.length) : "无"}');
 
     for (int i = 0; i < segments.length; i++) {
       final segment = segments[i];
@@ -1697,7 +1711,6 @@ class TTSService {
           voiceDataUrl: voiceData,
           format: 'wav',
           model: 'mimo-v2.5-tts-voiceclone',
-          globalAnchor: globalAnchor,
         );
 
         debugPrint('[$_tag]   请求数据: messages=${requestData['messages']}');
@@ -1706,10 +1719,11 @@ class TTSService {
         dio.options.connectTimeout = const Duration(seconds: 30);
         dio.options.receiveTimeout = const Duration(seconds: 60);
 
-        // 429 限流重试
+        // 429 限流重试：最多重试 2 次
         Response? response;
-        for (int attempt = 0; attempt < 3; attempt++) {
+        for (int attempt = 0; attempt < 2; attempt++) {
           try {
+            await _waitForRateLimit();
             response = await dio.post(
               url,
               data: requestData,
@@ -1727,16 +1741,16 @@ class TTSService {
               final retryAfter = response.headers.value('retry-after');
               final waitMs = retryAfter != null
                   ? int.parse(retryAfter) * 1000
-                  : (1000 * (1 << attempt));
-              debugPrint('[$_tag]   ⚠️ 429 限流，${waitMs}ms 后重试 (${attempt + 1}/3)');
+                  : (2000 * (1 << attempt)); // 2s, 4s
+              debugPrint('[$_tag]   ⚠️ 429 限流，${waitMs}ms 后重试 (${attempt + 1}/2)');
               await Future.delayed(Duration(milliseconds: waitMs));
               continue;
             }
             break;
           } on DioException catch (e) {
-            if (e.response?.statusCode == 429 && attempt < 2) {
-              final waitMs = 1000 * (1 << attempt);
-              debugPrint('[$_tag]   ⚠️ 429 限流(DioException)，${waitMs}ms 后重试 (${attempt + 1}/3)');
+            if (e.response?.statusCode == 429 && attempt < 1) {
+              final waitMs = 2000 * (1 << attempt);
+              debugPrint('[$_tag]   ⚠️ 429 限流(DioException)，${waitMs}ms 后重试 (${attempt + 1}/2)');
               await Future.delayed(Duration(milliseconds: waitMs));
               continue;
             }
@@ -1819,9 +1833,6 @@ class TTSService {
       _systemTts = FlutterTts();
 
       if (PlatformUtils.isAndroid) {
-        // ★★★ Android 核心修复：轮询 speak(' ') 直到绑定成功 ★★★
-        // 某些设备上 speak(' ') 首次返回 -1（未绑定），需要多次重试
-        // 使用 Completer + 轮询双重保障
         final bindCompleter = Completer<void>();
 
         _systemTts!.setCompletionHandler(() {
@@ -1837,15 +1848,12 @@ class TTSService {
         });
         _systemTts!.setErrorHandler((msg) {
           debugPrint('[TTSService] Android TTS 错误: $msg');
-          // 错误时也完成 Completer，避免永久阻塞
           if (!bindCompleter.isCompleted) bindCompleter.complete();
           _isPlaying = false;
         });
 
-        // ★ 轮询绑定：最多尝试 10 次，每次间隔 500ms
-        // speak(' ') 返回 1 表示绑定成功，-1 表示未绑定
         bool bound = false;
-        for (int i = 0; i < 10 && !bound; i++) {
+        for (int i = 0; i < 15 && !bound; i++) {
           try {
             final result = await _systemTts!.speak(' ');
             debugPrint('[TTSService] Android TTS 绑定尝试 ${i + 1}: speak 返回 $result');
@@ -1859,15 +1867,13 @@ class TTSService {
           } catch (e) {
             debugPrint('[TTSService] Android TTS 绑定尝试 ${i + 1} 异常: $e');
           }
-          // 等待 500ms 后重试
-          await Future.delayed(const Duration(milliseconds: 500));
+          await Future.delayed(const Duration(milliseconds: 600));
         }
 
-        // 等待回调确认（最多额外 3 秒）
         if (!bound) {
           debugPrint('[TTSService] Android TTS 轮询未绑定，等待回调...');
           await bindCompleter.future.timeout(
-            const Duration(seconds: 3),
+            const Duration(seconds: 5),
             onTimeout: () {
               debugPrint('[TTSService] Android TTS 回调也超时，强制标记为已绑定');
               _systemTtsBound = true;
@@ -1876,22 +1882,16 @@ class TTSService {
           );
         }
 
-        // 引擎绑定完成后，设置共享实例
         try {
           await _systemTts!.setSharedInstance(true);
-        } catch (_) {
-          // ignore: non-critical error
-        }
+        } catch (_) {}
 
-        // 设置中文语言，失败则降级英文（仅保留一个关键日志）
         try {
           await _systemTts!.setLanguage('zh-CN');
         } catch (_) {
           try {
             await _systemTts!.setLanguage('en-US');
-          } catch (_) {
-            // ignore: non-critical error
-          }
+          } catch (_) {}
         }
 
       } else if (PlatformUtils.isIOS) {
@@ -1900,46 +1900,30 @@ class TTSService {
         } catch (_) {
           try {
             await _systemTts!.setLanguage('en-US');
-          } catch (_) {
-            // ignore: non-critical error
-          }
+          } catch (_) {}
         }
       } else if (PlatformUtils.isMacOS) {
-        // ★★★ macOS TTS 修复：使用 setSharedInstance 保持引擎活跃 ★★★
-        // macOS 上 completionHandler 可能不会为空字符串触发，使用更可靠的方案
-        
-        // 1. 先设置共享实例（防止引擎被释放）
         try {
           await _systemTts!.setSharedInstance(true);
-        } catch (_) {
-          // ignore: non-critical error
-        }
+        } catch (_) {}
         
-        // 2. 设置语言（这会触发引擎初始化）
         try {
           await _systemTts!.setLanguage('zh-CN');
         } catch (_) {
           try {
             await _systemTts!.setLanguage('en-US');
-          } catch (_) {
-            // ignore: non-critical error
-          }
+          } catch (_) {}
         }
         
-        // 3. 等待引擎完全初始化（macOS 需要一点时间）
         await Future.delayed(const Duration(milliseconds: 300));
         
-        // 4. 验证引擎是否可用
         try {
           await _systemTts!.getVoices;
         } catch (_) {
-          // 再次尝试初始化
           try {
             await _systemTts!.setLanguage('zh-CN');
             await Future.delayed(const Duration(milliseconds: 500));
-          } catch (_) {
-            // ignore: non-critical error
-          }
+          } catch (_) {}
         }
       } else if (PlatformUtils.isWindows) {
         try {
@@ -1947,25 +1931,17 @@ class TTSService {
         } catch (_) {
           try {
             await _systemTts!.setLanguage('en-US');
-          } catch (_) {
-            // ignore: non-critical error
-          }
+          } catch (_) {}
         }
       }
 
-      // 设置语速和音调（对所有平台）
       try {
         await _systemTts!.setSpeechRate(_speechRate);
-      } catch (_) {
-        // ignore: non-critical error
-      }
+      } catch (_) {}
       try {
         await _systemTts!.setPitch(1.0);
-      } catch (_) {
-        // ignore: non-critical error
-      }
+      } catch (_) {}
 
-      // 设置正常的完成/错误回调
       _systemTts!.setCompletionHandler(() {
         _isPlaying = false;
       });
@@ -1976,19 +1952,14 @@ class TTSService {
       _systemTtsInitialized = true;
       debugPrint('[$_tag] _initSystemTts() ✅ 初始化完成: initialized=$_systemTtsInitialized, bound=$_systemTtsBound');
     } catch (e) {
-      // 初始化失败，不输出 debugPrint 避免日志风暴（LogService 会记录）
       _systemTtsInitialized = false;
       debugPrint('[$_tag] _initSystemTts() ❌ 初始化失败: $e');
-      // 不抛出，降级静默模式
     }
   }
 
   /// 使用系统 TTS 直接播放
   Future<void> _speakWithSystem(String text) async {
     debugPrint('[$_tag] _speakWithSystem() 开始: text长度=${text.length}');
-    // ★★★ 修复：不每次重建实例，仅在未初始化时才初始化 ★★★
-    // 之前的逻辑每次重置 _systemTtsInitialized=false 导致反复重建 FlutterTts 实例
-    // 新实例上的 speak('') 空字符串不会触发引擎绑定（Android 会静默忽略）
     if (!_systemTtsInitialized || _systemTts == null) {
       debugPrint('[$_tag] _speakWithSystem() 系统TTS未初始化，开始初始化...');
       await _initSystemTts();
@@ -1998,23 +1969,30 @@ class TTSService {
       debugPrint('[$_tag] _speakWithSystem() ❌ _systemTts 为 null，初始化失败');
       throw Exception('系统 TTS 未初始化，请检查系统语音设置');
     }
+
+    if (!_systemTtsBound && PlatformUtils.isAndroid) {
+      debugPrint('[$_tag] _speakWithSystem() 引擎未绑定，尝试重新绑定...');
+      final rebindResult = await _systemTts!.speak(' ');
+      debugPrint('[$_tag] _speakWithSystem() 重新绑定结果: $rebindResult');
+      if (rebindResult == 1) {
+        _systemTtsBound = true;
+      } else {
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
+    }
+
     debugPrint('[$_tag] _speakWithSystem() 系统TTS已就绪: initialized=$_systemTtsInitialized, bound=$_systemTtsBound');
 
-    // ★★★ 重试机制：引擎未绑定时等待并重试 ★★★
-    // 仅在最终失败时输出一条 debugPrint，减少日志风暴
     const maxRetries = 3;
     String? lastError;
     for (int attempt = 0; attempt < maxRetries; attempt++) {
       try {
         _isPlaying = true;
         
-        // ★ 修复：首次尝试前启用 awaitSpeakCompletion
         if (attempt == 0) {
           try {
             await _systemTts!.awaitSpeakCompletion(true);
-          } catch (_) {
-            // ignore: non-critical error
-          }
+          } catch (_) {}
         }
 
         debugPrint('[$_tag] _speakWithSystem() 第${attempt + 1}次 speak 调用');
@@ -2029,17 +2007,13 @@ class TTSService {
         // result == -1 表示引擎未绑定
         debugPrint('[$_tag] ⚠️ 系统 TTS speak 返回 $result（第 ${attempt + 1} 次，可能引擎未绑定）');
         
-        // ★ 修复：不是每次都重建实例，而是先尝试重新绑定
-        // 只有在第 2 次失败后才重建实例
         if (attempt >= 1) {
           debugPrint('[$_tag] 第${attempt + 1}次失败，重建系统TTS实例...');
           _systemTtsBound = false;
           _systemTtsInitialized = false;
           try {
             await _systemTts!.stop();
-          } catch (_) {
-            // ignore: non-critical error
-          }
+          } catch (_) {}
           _systemTts = null;
           await _initSystemTts();
           
@@ -2050,17 +2024,13 @@ class TTSService {
           }
           debugPrint('[$_tag] 系统TTS实例重建完成');
         } else {
-          // 第一次失败，等待 1 秒后重试（给引擎更多绑定时间）
           debugPrint('[$_tag] 等待1秒后重试...');
           await Future.delayed(const Duration(seconds: 1));
         }
 
-        // 重试 speak
         try {
           await _systemTts!.awaitSpeakCompletion(true);
-        } catch (_) {
-          // ignore: non-critical error
-        }
+        } catch (_) {}
         
         debugPrint('[$_tag] 重试 speak...');
         final retryResult = await _systemTts!.speak(text);

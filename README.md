@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.30.0-blue" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-0.30.5-blue" alt="Version"/>
   <img src="https://img.shields.io/badge/flutter-3.x-blue" alt="Flutter"/>
   <img src="https://img.shields.io/badge/dart-3.10.7+-blue" alt="Dart"/>
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20macOS-green" alt="Platform"/>
@@ -205,6 +205,50 @@ Issues and Pull Requests are welcome!
 ## 📞 Contact
 
 For questions or suggestions, please open an issue on GitHub.
+
+---
+
+## 📋 会话开发记录
+
+### 会话 2026-06-02：实时语音对话功能优化
+
+**会话背景**：基于已有的实时语音对话功能，用户要求进一步优化UI风格和会话集成体验。
+
+**会话主要目的**：
+1. 确保实时语音对话使用语音设置中配置的音色
+2. 优化实时语音页面UI为类豆包app风格
+3. 实时语音对话依赖当前会话（模型及上下文传入）
+4. 会话界面语音按钮ASR转文字后自动发送到聊天
+
+**完成的主要任务**：
+1. 重写 `realtime_voice_page.dart`，实现类豆包app风格的实时语音交互界面
+2. 实时语音页面正确读取语音设置中的音色配置（TTS Provider、MiMo音色、克隆音色等）
+3. 实时语音页面通过 `widget.sessionId` 与当前会话绑定，使用 `DialogueEngine` 传入模型和上下文
+4. 修改 `session_detail_page.dart` 中ASR识别结果处理逻辑，从弹出层手动确认改为自动发送
+
+**主要技术栈**：
+- Flutter + Dart（Riverpod 状态管理）
+- ASR（Sherpa-ONNX / 系统 / OpenAI Whisper）
+- TTS（MiMo / Sherpa-ONNX / OpenAI / 系统）
+- just_audio 音频播放 + record 音频录制
+- DialogueEngine 流式对话引擎
+
+**关键决策和解决方案**：
+- **音色配置读取**：通过 `SettingsService` + `SharedPreferences` 直接读取TTS配置，避免依赖未实现的Provider
+- **UI风格**：采用深色全屏布局，中央消息气泡列表 + 底部大麦克风按钮 + 脉冲波纹动画反馈
+- **会话集成**：`RealtimeVoicePage` 接收 `sessionId`，通过 `DialogueEngine.streamResponse(sessionId, text)` 使用当前会话的模型和上下文
+- **ASR自动发送**：将 `_voiceResultSub` 中的弹出层逻辑替换为直接调用 `_sendMessage(l10n)`
+
+**会话中主要使用的工具**：
+- Flutter Analyze（静态代码检查）
+- SearchCodebase / Grep（代码搜索）
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `realtime_voice_page.dart` | 完全重写UI和业务逻辑，实现豆包风格界面、会话集成、音色配置读取 | 用户要求优化UI风格并集成当前会话 |
+| `session_detail_page.dart` | 修改 `_voiceResultSub` 处理逻辑，ASR结果直接发送而非弹出层确认 | 用户要求语音按钮识别后自动发送到聊天 |
 
 ---
 
@@ -1001,3 +1045,571 @@ speakLongText()
 | `tts_prompt_template.dart` | 更新使用原则（3条→4条） | 新增"以段落为单位"和"情感转变时切换" |
 | `tts_prompt_template.dart` | 更新简化版提示词 | 保持完整版和简化版一致 |
 | `README.md` | 追加 Session #49 会话记录 | 按要求记录会话总结 |
+
+### Session #50 — 安卓无法对话修复 + 上下文使用率准确性优化 (2026-06-02)
+
+**会话背景**：用户反馈安卓端运行时无法对话，即便是新创建的会话页面也直接报错 `Tokenization failed or prompt too long`。同时之前创建的会话上下文压缩比已显示 100%，点击压缩后虽然提示"上下文已压缩"，但比率仍显示 100%。
+
+**会话主要目的**：
+1. 修复安卓端无法对话的根本原因
+2. 修复上下文使用率显示不准确（压缩后仍 100%）的问题
+
+**完成的主要任务**：
+1. **定位根因**：TTS 完整版控制指令提示词约 9754 tokens，而安卓小模型上下文预算仅约 1044 tokens，system 消息本身就远超预算
+2. **TTS 提示词自适应注入**：根据模型上下文预算自动选择完整版/简化版/跳过
+3. **truncateToFit 兜底机制**：system 消息超预算时不再直接返回，而是逐条截断内容
+4. **上下文使用率精确计算**：将 systemPrompt、TTS 提示词、技能提示词等注入的 token 纳入使用率统计
+
+**主要使用的技术栈**：Flutter/Dart, llama.cpp FFI, Token 估算算法
+
+**关键决策和解决方案**：
+- **自适应 TTS 提示词**：当 token 预算 < 200 时跳过 TTS 注入；当预算不足以容纳完整版时自动降级为简化版
+- **system 消息截断**：优先保留第一条 system 消息（systemPrompt），后续消息按剩余预算比例截断
+- **使用率精确统计**：新增 `updateContextUsageWithSystemPrompts()` 方法，在 UI 轮询时计算所有注入的 system 消息 token
+
+**主要使用的工具**：SearchCodebase, SearchReplace, GetDiagnostics, TodoWrite
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `tts_prompt_template.dart` | `getPrompt()` 新增 `tokenBudget` 参数，根据预算返回完整版/简化版/空字符串 | 小上下文模型注入完整 TTS 提示词会导致 prompt too long |
+| `tts_prompt_template.dart` | 新增 `estimateTokenCount()` 静态方法 | 用于估算 TTS 提示词 token 数量 |
+| `dialogue_engine.dart` | `_buildStructuredMessages` 和 `_buildStructuredMessagesWithContent` 中 TTS 注入改为自适应模式 | 计算预算后选择合适的 TTS 提示词版本 |
+| `dialogue_engine.dart` | 新增 `updateContextUsageWithSystemPrompts()` 方法 | 计算包含 system 消息注入的准确使用率 |
+| `context_compressor_service.dart` | `truncateToFit()` 中 system 消息超预算时调用 `_truncateSystemMessages()` | 之前直接返回超预算的 system 消息，模型仍无法处理 |
+| `context_compressor_service.dart` | 新增 `_truncateSystemMessages()` 方法 | 逐条截断 system 消息内容以适配预算 |
+| `model_inference_engine.dart` | `updateContextUsageFromMessages()` 新增 `extraTokens` 参数 | 支持额外 token 注入 |
+| `local_ffi_engine.dart` | `updateContextUsageFromMessages()` 新增 `extraTokens` 参数 | 将额外 token 加入使用量计算 |
+| `session_detail_page.dart` | `_updateContextUsage()` 改为调用 `updateContextUsageWithSystemPrompts()` | 包含 system 消息的准确使用率统计 |
+| `README.md` | 追加 Session #50 会话记录 | 按要求记录会话总结 |
+
+### Session #51 — 移动设备上下文大小优化 (2026-06-02)
+
+**会话背景**：用户反馈移动设备上可用上下文太少，导致对话体验受限。经分析发现 `_getRecommendedConfig` 对移动设备的 contextSize 配置过于保守（4-6GB 设备仅 2048），且内存预检机制过于激进（直接砍 60%），导致最终可用上下文极小。
+
+**会话主要目的**：优化移动设备的上下文大小配置，提升对话体验。
+
+**完成的主要任务**：
+1. **提升默认 contextSize**：4-6GB 设备从 2048 提升到 4096，6-8GB 从 3072 提升到 8192
+2. **优化内存预检机制**：修复 KV Cache 估算公式，缩减比例从 60% 放宽到 75%
+3. **提升对话引擎预算**：从 85% 提升到 90%，给 system 消息和输出留更多空间
+
+**主要使用的技术栈**：Flutter/Dart, llama.cpp FFI, 内存管理
+
+**关键决策和解决方案**：
+- **提升默认值**：现代手机内存充足，保守配置浪费了可用资源
+- **修复 KV Cache 公式**：旧公式用 gpuLayers 计算，与模型层数无关，导致估算不准
+- **放宽缩减比例**：从 `* 0.6` 改为 `* 0.75`，保留更多上下文空间
+
+**主要使用的工具**：SearchCodebase, SearchReplace, GetDiagnostics, TodoWrite
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `local_ffi_engine.dart` | `_getRecommendedConfig()` 提升各档位 contextSize | 移动设备默认上下文太小 |
+| `local_ffi_engine.dart` | 修复 KV Cache 估算公式，从 `contextSize * 8 * gpuLayers / 1024` 改为 `contextSize * 50 / 1024` | 旧公式用 gpuLayers 不准确 |
+| `local_ffi_engine.dart` | 运行时开销从 512MB 降到 256MB | 减少不必要的预留 |
+| `local_ffi_engine.dart` | 安全阈值从 70% 提升到 75% | 减少系统内存预留 |
+| `local_ffi_engine.dart` | 缩减比例从 0.6 放宽到 0.75，最低值从 512 提升到 2048 | 保留更多上下文 |
+| `dialogue_engine.dart` | 对话预算从 85% 提升到 90% | 给 system 消息和输出留更多空间 |
+| `README.md` | 追加 Session #51 会话记录 | 按要求记录会话总结 |
+
+**优化前后对比（4-6GB 安卓设备）**：
+| 指标 | 优化前 | 优化后 | 提升 |
+|------|--------|--------|------|
+| 默认 contextSize | 2048 | 4096 | +100% |
+| 内存预检后 | 1228 (×0.6) | 3072 (×0.75) | +150% |
+| 对话预算 | 1044 (×0.85) | 2765 (×0.90) | +165% |
+
+### Session #52 — Android 内存检测修复 + 模型加载前内存优化 (2026-06-02)
+
+**会话背景**：用户反馈 16GB 内存的安卓设备被识别为 4GB，导致上下文配置过低。同时希望在加载本地模型前自动优化系统内存，减轻内存占用。
+
+**会话主要目的**：
+1. 修复 Android 设备内存检测不准确的问题
+2. 在本地模型加载前自动执行内存优化
+
+**完成的主要任务**：
+1. **修复 Android 内存检测**：改用 `/proc/meminfo` 读取内存信息，比 `ActivityManager` 更可靠
+2. **添加模型加载前内存优化**：清理引擎缓存、触发 GC、释放临时内存
+
+**主要使用的技术栈**：Kotlin (Android), Flutter/Dart, /proc/meminfo
+
+**关键决策和解决方案**：
+- **使用 /proc/meminfo**：这是 Linux 标准接口，所有 Android 设备都支持，比 ActivityManager 更准确
+- **内存优化策略**：通过分配临时大对象制造内存压力，间接触发 Dart GC
+
+**主要使用的工具**：SearchCodebase, SearchReplace, GetDiagnostics, TodoWrite
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `HardwareCheckerPlugin.kt` | 新增 `readProcMemInfo()` 方法，从 `/proc/meminfo` 读取内存 | ActivityManager 在某些设备上返回不准确 |
+| `HardwareCheckerPlugin.kt` | `getMemoryInfo()` 优先使用 `/proc/meminfo`，失败时降级到 ActivityManager | 双重保障 |
+| `HardwareCheckerPlugin.kt` | 修复 Long 类型除法，使用 `1024L` 避免整数溢出 | 16GB 设备的字节数超过 Int 范围 |
+| `local_ffi_engine.dart` | 新增 `_optimizeSystemMemory()` 方法 | 模型加载前自动优化内存 |
+| `local_ffi_engine.dart` | `loadModel()` 开头调用内存优化 | 确保加载前释放可用内存 |
+| `README.md` | 追加 Session #52 会话记录 | 按要求记录会话总结 |
+
+### Session #53 — 移动端上下文压缩优化 (2026-06-02)
+
+**会话背景**：用户反馈移动端上下文太短，2-3 轮对话就满了。同时压缩上下文后仍显示 100% 不变。
+
+**会话主要目的**：
+1. 解决移动端上下文太短的问题
+2. 修复压缩后使用率不更新的问题
+3. 优化压缩策略，更激进地释放空间
+
+**完成的主要任务**：
+1. **降低压缩阈值**：从 10 条消息降低到 4 条（2 轮对话）
+2. **移动端更激进压缩**：上下文 < 8192 时，压缩后只保留 6 条消息
+3. **修复使用率更新**：压缩后异步等待再更新 UI
+4. **精简压缩说明消息**：从 3 行缩减到 1 行，节省空间
+5. **归档到记忆宫殿**：压缩前自动将历史消息存入记忆宫殿
+
+**主要使用的技术栈**：Flutter/Dart, 记忆宫殿系统
+
+**关键决策和解决方案**：
+- **动态压缩策略**：根据上下文大小（ctxSize < 8192）判断是否为移动端，采取不同压缩策略
+- **异步更新 UI**：压缩后等待 200-300ms 再更新使用率，确保数据库操作完成
+- **裁剪压缩结果**：`_trimCompressedMessages()` 方法保留摘要和最近消息
+
+**主要使用的工具**：SearchCodebase, SearchReplace, GetDiagnostics, TodoWrite
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `dialogue_engine.dart` | 压缩阈值从 10 条降到 4 条 | 移动端 2-3 轮就满了 |
+| `dialogue_engine.dart` | 新增 `_trimCompressedMessages()` 方法 | 移动端更激进裁剪 |
+| `dialogue_engine.dart` | 压缩说明消息精简为 1 行 | 节省空间 |
+| `dialogue_engine.dart` | 导入 `dart:math` 的 `max` 函数 | 裁剪方法需要 |
+| `session_detail_page.dart` | 压缩后异步等待 200-300ms 再更新 UI | 确保数据库操作完成 |
+| `session_detail_page.dart` | 新增 `_updateContextUsageAsync()` 方法 | 异步更新使用率 |
+| `README.md` | 追加 Session #53 会话记录 | 按要求记录会话总结 |
+
+---
+
+### Session #54 — 实时语音对话功能实现 (2026-06-02)
+
+**会话背景**：用户需要在会话功能中实现实时语音对话能力，支持持续对话和打断功能。
+
+**主要目的**：在会话界面的"+"号按钮弹窗中新增"实时语音"选项，点击后进入专用语音沟通界面，实现完整的 ASR→LLM→TTS 链路，支持用户打断系统语音播放。
+
+**完成的主要任务**：
+1. 创建 `realtime_voice_page.dart` 实时语音对话页面
+2. 在 `session_detail_page.dart` 中添加"实时语音"菜单项
+3. 实现完整的语音对话状态机（idle → listening → recognizing → thinking → speaking）
+4. 实现用户打断功能（用户说话时停止 TTS 播放，重新进入聆听）
+5. 实现连续对话模式
+
+**主要技术栈**：
+- **ASR**：Sherpa-ONNX 本地离线识别 / 系统语音识别
+- **TTS**：OpenAI TTS / MiMo TTS / Sherpa-ONNX / 系统 TTS
+- **音频处理**：AudioRecorder (record 包)、just_audio
+- **状态管理**：Riverpod、ConsumerStatefulWidget
+- **导航**：MaterialPageRoute
+
+**关键决策和解决方案**：
+- **状态机设计**：采用六状态模型（idle/listening/recognizing/thinking/speaking/interrupted/error）
+- **打断机制**：检测到用户录音时立即停止 TTS 播放，触发触觉反馈，重新进入聆听状态
+- **连续对话**：通过 `_isContinuousMode` 开关控制是否自动进入下一轮对话
+- **服务集成**：使用应用中已配置的 TTS 服务（通过 `ttsConfigProvider` 获取配置）
+
+**主要使用的工具**：SearchCodebase, Edit, Read, Grep, TodoWrite
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 创建新文件，实现完整语音对话页面 | 实现实时语音对话核心功能 |
+| `session_detail_page.dart` | 添加 `import 'realtime_voice_page.dart';` | 导入语音页面组件 |
+| `session_detail_page.dart` | 在 `_showToolMenu` 中添加"实时语音"菜单项 | 提供入口 |
+| `session_detail_page.dart` | 添加 `_openRealtimeVoicePage()` 方法 | 导航到语音页面 |
+| `README.md` | 追加 Session #54 会话记录 | 按要求记录会话总结 |
+
+
+
+---
+
+### Session #55 — 实时语音页面初始化链路修复 (2026-06-02)
+
+**会话背景**：进入实时语音页面时出现 `UnimplementedError: Must be overridden in main.dart`。
+
+**主要目的**：修复 `RealtimeVoicePage` 初始化链路，避免依赖未 override 的 Riverpod provider。
+
+**完成的主要任务**：
+1. 移除对 `session_voice_service.dart` 的依赖
+2. 改为读取 `SettingsService` + `SharedPreferences`
+3. 增加 ASR/TTS 提供商映射与回退
+4. 保留移动端本地模型的 TTS 降级策略
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 重写 import 与 `_initServices()` | 修复初始化失败 |
+| `README.md` | 追加 Session #55 会话记录 | 按要求记录 |
+
+---
+
+### Session #56 — 实时语音与会话页面诊断修复 (2026-06-02)
+
+**会话背景**：在修复初始化失败后继续做静态分析与一致性检查，发现仍有编译/告警问题。
+
+**主要目的**：清理影响编译与告警的问题，确保实时语音入口页面状态稳定。
+
+**完成的主要任务**：
+1. 修复 `ASRProvider.whisper` 编译错误
+2. 补齐 `VoiceCloneService` 导入
+3. 移除未使用字段并修正状态文本使用方式
+4. 修正 `session_detail_page` 中无效 null-aware 操作
+5. 修正 `FloatingActionButton` 参数顺序
+6. 移除未使用的 `_ActionButton.isActive` 参数
+7. 将 `withOpacity` 替换为 `withValues(alpha: ...)`
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 修正 ASRProvider 映射与未使用字段 | 消除编译错误与告警 |
+| `session_detail_page.dart` | 修正 AppBar/按钮参数顺序与未使用参数 | 消除静态分析告警 |
+| `session_detail_page.dart` | `withOpacity` 替换为 `withValues` | 避免已弃用 API 告警 |
+| `README.md` | 追加 Session #56 会话记录 | 按要求记录 |
+
+
+---
+
+### Session #57 — 实时语音页面底部溢出修复 (2026-06-02)
+
+**会话背景**：用户在实时语音页面遇到运行时日志 `A RenderFlex overflowed by 47 pixels on the bottom`。
+
+**主要目的**：修复实时语音页面底部控制栏布局溢出问题。
+
+**完成的主要任务**：
+1. 定位到 `_buildBottomControls()` 中固定 `bottom: 32` 的 padding 导致溢出
+2. 改为 `SafeArea(top: false)` 包裹并使用较小 padding
+3. 重新运行静态分析确认无新增问题
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 修改底部控制栏布局与 padding | 修复 47px 溢出 |
+| `README.md` | 追加 Session #57 会话记录 | 按要求记录 |
+
+
+---
+
+### Session #58 — 模型入口重复日志治理 (2026-06-02)
+
+**会话背景**：运行时持续刷屏 `[ModelInferenceEngine] _getModelEntry: 找到模型 mimo, API key长度=51`。
+
+**主要目的**：消除 `ModelInferenceEngine._getModelEntry()` 的重复调试日志。
+
+**完成的主要任务**：
+1. 定位重复日志来源：该方法被多个路径高频调用（`generateChat/generateChatStream/getChatOptions/supportsMultimodal/getContextSize`）
+2. 为模型列表解析结果增加缓存，减少重复解析
+3. 移除命中模型时的每次打印
+4. API Key 为空的警告仅首次记录
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `model_inference_engine.dart` | 优化 `_getModelEntry` 逻辑与日志 | 消除刷屏日志 |
+| `README.md` | 追加 Session #58 会话记录 | 按要求记录 |
+
+
+---
+
+### Session #59 — 工具菜单溢出修复 & 实时语音录音格式修复 (2026-06-02)
+
+**会话背景**：
+1. 会话界面点击+号弹出的工具菜单底部溢出 47px
+2. 实时语音页面在 Android 上使用 Sherpa ASR 识别失败：`不是有效的 WAV 文件`
+
+**主要目的**：修复两个运行时 UI/功能问题。
+
+**完成的主要任务**：
+1. 工具菜单 `showModalBottomSheet` 增加 `SafeArea(top: false)` 包裹，移除手动 `SizedBox(MediaQuery.paddingOf)`，设置 `isScrollControlled: true`
+2. 实时语音录音统一使用 `AudioEncoder.wav`（record 包 v6+ 在 Android 上已支持 WAV）
+3. 在 `_recognizeAudio()` 中增加格式转换兜底：非 WAV 文件 + Sherpa 提供商时自动调用 `convertAudioFormat()`
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `session_detail_page.dart` | `_showToolMenu` 增加 SafeArea、isScrollControlled | 修复底部溢出 |
+| `realtime_voice_page.dart` | 录音统一使用 WAV encoder | Sherpa 需要 WAV 格式 |
+| `realtime_voice_page.dart` | `_recognizeAudio` 增加格式转换兜底 | 防止非 WAV 文件传入 Sherpa |
+| `README.md` | 追加 Session #59 会话记录 | 按要求记录 |
+
+
+---
+
+### Session #60 — TTS 系统 TTS 引擎绑定竞态条件修复 (2026-06-02)
+
+**会话背景**：语音播报（MiMo TTS）失败后降级到系统 TTS 时，出现 `W/TextToSpeech: speak failed: not bound to TTS engine`，导致语音完全失效。
+
+**主要目的**：修复 Android 系统 TTS 引擎绑定竞态条件，确保降级/直接使用系统 TTS 时引擎已绑定。
+
+**根因分析**：
+1. `_initSystemTts()` 轮询绑定最多 10 次、间隔 500ms、回调超时 3s，在某些慢速设备上不够
+2. `warmUpSystemTts()` 是 `await` 的，但 `_speakWithSystem()` 没有检查绑定状态就直接 `speak()`
+3. MiMo TTS 合成成功但播放失败时降级到系统 TTS，此时系统 TTS 引擎可能尚未绑定
+
+**完成的主要任务**：
+1. `_initSystemTts()`：轮询次数 10→15、间隔 500ms→600ms、回调超时 3s→5s
+2. `_speakWithSystem()`：增加绑定状态检查，未绑定时先 `speak(' ')` 触发绑定
+3. 清理冗余注释
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `tts_service.dart` | `_initSystemTts` 增加轮询次数和超时 | 慢速设备绑定需要更多时间 |
+| `tts_service.dart` | `_speakWithSystem` 增加绑定状态检查 | 防止未绑定就调用 speak |
+| `README.md` | 追加 Session #60 会话记录 | 按要求记录 |
+
+---
+
+### Session #61 — 实时语音对话UI重写：豆包风格+会话集成+ASR自动发送 (2026-06-02)
+
+**会话背景**：用户要求优化实时语音对话的UI风格为类似豆包app的实时语音交互界面，同时确保音色使用语音设置中配置的音色，实时语音依赖当前会话（模型及上下文传入），会话界面语音按钮ASR转文字后自动发送到聊天。
+
+**主要目的**：
+1. 确保实时语音对话使用语音设置中配置的音色
+2. 优化实时语音页面UI为类豆包app风格
+3. 实时语音对话依赖当前会话（模型及上下文传入）
+4. 会话界面语音按钮ASR转文字后自动发送到聊天
+
+**完成的主要任务**：
+1. 重写 `realtime_voice_page.dart`，实现类豆包app风格的实时语音交互界面（深色全屏布局、中央消息气泡列表、底部大麦克风按钮+脉冲波纹动画）
+2. 实时语音页面通过 `SettingsService` + `SharedPreferences` 直接读取语音设置中的TTS配置（Provider、MiMo音色、克隆音色等）
+3. 实时语音页面通过 `widget.sessionId` 绑定当前会话，使用 `DialogueEngine.streamResponse(sessionId, text)` 传入模型和上下文
+4. 修改 `session_detail_page.dart` 中 `_voiceResultSub` 处理逻辑，从弹出层手动确认改为自动调用 `_sendMessage(l10n)` 发送
+
+**主要技术栈**：Flutter/Dart, Riverpod, ASR/TTS 多引擎, DialogueEngine, AudioRecorder, just_audio
+
+**关键决策和解决方案**：
+- **音色配置读取**：通过 `SettingsService` + `SharedPreferences` 直接读取TTS配置，避免依赖未实现的 `ttsConfigProvider`
+- **UI风格**：采用深色全屏布局，中央消息气泡列表 + 底部大麦克风按钮 + 脉冲波纹动画反馈
+- **会话集成**：`RealtimeVoicePage` 接收 `sessionId`，通过 `DialogueEngine.streamResponse` 使用当前会话的模型和上下文
+- **ASR自动发送**：将 `_voiceResultSub` 中的弹出层逻辑替换为直接调用 `_sendMessage(l10n)`
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 完全重写UI和业务逻辑，实现豆包风格界面、会话集成、音色配置读取 | 用户要求优化UI风格并集成当前会话 |
+| `session_detail_page.dart` | 修改 `_voiceResultSub` 处理逻辑，ASR结果直接发送而非弹出层确认 | 用户要求语音按钮识别后自动发送到聊天 |
+| `README.md` | 追加 Session #61 会话记录 | 按要求记录 |
+
+---
+
+### Session #62 — 实时语音对话改为按住说话模式 (2026-06-02)
+
+**会话背景**：用户要求将实时语音对话的交互模式从"点击开始自动对话"改为"按住说话"模式（类似微信语音输入），按住录入语音，松手后ASR转文字直接发送给LLM处理，TTS输出结果。同时要求TTS必须使用语音设置中确认的音色。
+
+**主要目的**：
+1. 修改实时语音页面为"按住说话"交互模式
+2. 确保TTS使用语音设置中确认的音色
+
+**完成的主要任务**：
+1. 重写 `realtime_voice_page.dart` 的交互模式：
+   - 移除自动连续对话模式（`_isContinuousMode`）
+   - 移除独立的"打断"和"结束"按钮
+   - 实现按住说话（`onPanStart` → 开始录音，`onPanEnd` → 停止录音并处理）
+   - 状态机简化为：idle → recording → recognizing → thinking → speaking → idle
+   - TTS播放中按住按钮可自动打断
+2. 确认TTS音色配置逻辑正确：
+   - 通过 `SettingsService.getTtsProvider()` 获取用户选择的TTS提供商
+   - 通过 `SharedPreferences` 读取 `tts_voice_id`、`selected_tts_model_id`、`system_tts_speed` 等配置
+   - MiMo TTS 读取克隆音色引用音频路径
+   - 添加初始化日志输出TTS配置详情
+
+**主要技术栈**：Flutter/Dart, GestureDetector (onPanStart/onPanEnd), HapticFeedback, ASR/TTS 多引擎
+
+**关键决策和解决方案**：
+- **按住说话交互**：使用 `GestureDetector` 的 `onPanStart/onPanEnd/onPanCancel` 实现按住录音、松手停止并处理
+- **打断机制**：TTS播放中按住按钮时自动调用 `_interruptTTS()` 停止播放，然后开始新录音
+- **状态提示**：底部显示"按住说话"/"松手结束"文字提示，按住时有触觉反馈
+- **TTS音色保障**：初始化时添加日志 `debugPrint('[RealtimeVoicePage] TTS配置: provider=$resolvedTtsProvider, mimoVoice=...')` 确认配置
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 完全重写交互模式为按住说话，移除连续对话模式，简化状态机 | 用户要求按住说话交互 |
+| `realtime_voice_page.dart` | 添加TTS配置日志输出 | 确认使用语音设置中的音色 |
+| `README.md` | 追加 Session #62 会话记录 | 按要求记录 |
+
+---
+
+### Session #63 — 实时语音克隆音色不生效修复 (2026-06-02)
+
+**会话背景**：用户设置了克隆音色，但实时语音对话中 TTS 请求仍然使用 `voice=Chloe`（默认音色），克隆音色未生效。
+
+**主要目的**：修复实时语音页面克隆音色配置未正确传递到 TTS 服务的问题。
+
+**根因分析**：
+- `voice_settings_page.dart` 中用户选择音色后保存到 SharedPreferences 的 `tts_voice_id` key
+- `realtime_voice_page.dart` 使用 `settingsService.getMimoVoice()` 读取的是 `mimo_voice` key（不同的 key！）
+- `session_detail_page.dart` 正确使用 `prefs.getString('tts_voice_id')` 读取
+- 由于 key 不一致，实时语音页面始终读取到默认值，导致克隆音色配置丢失
+
+**完成的主要任务**：
+1. 将 `settingsService.getMimoVoice()` 替换为 `prefs.getString('tts_voice_id')`，与会话页面保持一致
+2. 增加详细的调试日志：克隆音色原始值、查找过程、加载结果
+
+**主要技术栈**：Flutter/Dart, SharedPreferences, VoiceCloneService
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | `settingsService.getMimoVoice()` → `prefs.getString('tts_voice_id')` | 修复 key 不一致导致克隆音色读取失败 |
+| `realtime_voice_page.dart` | 增加克隆音色加载过程的详细日志 | 方便调试排查 |
+| `README.md` | 追加 Session #63 会话记录 | 按要求记录 |
+
+---
+
+### Session #64 — 会话界面 TTS 克隆音色不生效 + 系统 TTS 绑定失败修复 (2026-06-02)
+
+**会话背景**：用户在会话界面使用语音 TTS 功能时，克隆音色未生效（显示为 Chloe），同时系统 TTS 绑定失败 `speak failed: not bound to TTS engine`。
+
+**主要目的**：
+1. 修复会话界面 TTS 克隆音色不生效问题
+2. 修复系统 TTS 绑定失败导致的阻塞问题
+
+**根因分析**：
+- **克隆音色问题**：日志显示 `cloneId=clone_1780378410390`，`audioPath` 已正确找到，`cloneRefAudioPath` 已正确传递给 TTSService。克隆音色配置本身是正确的。
+- **系统 TTS 阻塞问题**：使用 MiMo TTS 时，`warmUpSystemTts()` 也会被调用，导致系统 TTS 初始化失败（`speak failed: not bound to TTS engine`）并阻塞约 14 秒（15次重试×600ms + 5秒超时）。这个阻塞可能导致 MiMo TTS 合成流程被延迟或中断。
+
+**完成的主要任务**：
+1. 修改 `session_detail_page.dart`：仅在 `ttsProvider == 'system'` 时调用 `warmUpSystemTts()`，MiMo/OpenAI/Sherpa 等云端 TTS 引擎跳过系统 TTS 预热
+2. 这消除了约 14 秒的阻塞和 `speak failed: not bound to TTS engine` 错误日志
+
+**主要技术栈**：Flutter/Dart, TTSService, MiMo TTS
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `session_detail_page.dart` | `warmUpSystemTts()` 仅在 `ttsProvider == 'system'` 时调用 | 避免非 system TTS 时系统 TTS 初始化失败阻塞 |
+| `README.md` | 追加 Session #64 会话记录 | 按要求记录 |
+
+---
+
+### Session #65 — MiMo TTS 重复朗读修复 (2026-06-02)
+
+**会话背景**：用户反馈 MiMo TTS 会使用不同的语调读取 2 遍同一段文字，期望每段文字只读一遍。
+
+**主要目的**：修复 MiMo TTS 重复朗读问题。
+
+**根因分析**：
+- MiMo TTS API 使用 chat completions 格式（`/v1/chat/completions`）
+- 请求中未指定 `n` 参数，API 可能默认返回多次朗读的音频
+- 两次朗读使用不同语调，说明 API 生成了多个变体
+
+**完成的主要任务**：
+1. 在 `buildMiMoRequest` 和 `buildMiMoCloneRequest` 中添加 `'n': 1` 参数，限制 API 只生成一次朗读
+
+**主要技术栈**：Flutter/Dart, MiMo TTS API
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `tts_style_parser.dart` | `buildMiMoRequest` 添加 `'n': 1` | 限制标准模式只生成一次朗读 |
+| `tts_style_parser.dart` | `buildMiMoCloneRequest` 添加 `'n': 1` | 限制克隆模式只生成一次朗读 |
+| `README.md` | 追加 Session #65 会话记录 | 按要求记录 |
+
+---
+
+### Session #66 — 实时语音录音上滑取消功能 (2026-06-02)
+
+**会话背景**：用户要求在实时语音界面中实现类似微信录音的上滑取消效果：按住录音按钮后，手指往上滑动超过阈值会提示"取消"，松手后直接取消录音；手指往下滑回则恢复正常录音状态。
+
+**主要目的**：实现按住上滑取消录音的交互效果。
+
+**完成的主要任务**：
+1. 添加状态变量：`_isCancelled`（是否处于取消状态）、`_dragOffsetY`（拖拽偏移量）、`_cancelThreshold`（取消阈值 -80px）
+2. 在 `GestureDetector` 中添加 `onPanUpdate` 回调，实时跟踪手指拖拽位置
+3. 当手指上滑超过阈值时：按钮变灰色 + 显示删除图标 + 震动反馈 + 状态文字变为"松手取消"
+4. 松手时根据是否处于取消状态决定：取消录音 或 正常发送识别
+5. 取消录音后1秒自动恢复"按住说话"状态
+6. 底部提示文字动态变化：按住说话 → 上滑取消·松手发送 → 松手取消
+
+**主要技术栈**：Flutter/Dart, GestureDetector (onPanStart/onPanUpdate/onPanEnd), HapticFeedback
+
+**关键交互设计**：
+- 按住录音按钮 → 开始录音，显示"正在聆听...（上滑取消）"
+- 手指上滑超过 -80px → 按钮变灰+删除图标，显示"松手取消"，震动反馈
+- 手指滑回 → 恢复红色录音状态，显示"正在聆听...（上滑取消）"
+- 松手（未上滑）→ 停止录音，ASR识别 → LLM → TTS
+- 松手（已上滑）→ 取消录音，不发送，1秒后恢复
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 添加 `_isCancelled`、`_dragOffsetY`、`_cancelThreshold` 状态变量 | 支持取消状态跟踪 |
+| `realtime_voice_page.dart` | 添加 `_onPanUpdate` 方法 | 实时跟踪手指拖拽位置 |
+| `realtime_voice_page.dart` | 修改 `_onPressEnd` 支持取消/发送两种路径 | 根据取消状态决定行为 |
+| `realtime_voice_page.dart` | 添加 `_cancelRecording` 方法 | 取消录音并清理资源 |
+| `realtime_voice_page.dart` | 按钮 UI 支持取消状态（灰色+删除图标） | 视觉反馈取消状态 |
+| `realtime_voice_page.dart` | 底部提示文字动态变化 | 引导用户操作 |
+| `README.md` | 追加 Session #66 会话记录 | 按要求记录 |
+
+---
+
+### Session #67 — MiMo TTS 429 限流优化 (2026-06-02)
+
+**会话背景**：用户反馈 MiMo TTS 非常慢，日志显示连续 429 限流错误，每个段落重试 3 次（1s+2s+4s=7秒），2个段落共等待 14 秒后全部失败，降级到系统 TTS 也失败。
+
+**主要目的**：优化 MiMo TTS 限流策略，减少等待时间，提高成功率。
+
+**根因分析**：
+- 没有全局 API 调用限流：段落间无延迟，连续快速调用触发 429
+- 重试次数过多（3次），每次等待时间长（1s+2s+4s=7秒）
+- 文本分段导致多次 API 调用，加剧限流
+
+**完成的主要任务**：
+1. 添加全局 MiMo API 调用限流器（`_lastMiMoCallTime` + `_waitForRateLimit()`），确保两次调用之间至少间隔 3 秒
+2. 在所有 MiMo API 调用前添加限流等待（标准合成、克隆合成、分段合成）
+3. 减少重试次数：3→2 次，减少等待时间
+4. 增加重试间隔：1s/2s/4s → 2s/4s，更尊重 API 限流
+
+**主要技术栈**：Flutter/Dart, Dio HTTP, MiMo TTS API
+
+**优化效果**：
+- 之前：2段落 × 3次重试 × 1s/2s/4s = 最多等待 14 秒后失败
+- 之后：2段落 × 2次重试 × 2s/4s + 3秒间隔 = 最多等待 12 秒，且限流等待减少触发概率
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `tts_service.dart` | 添加 `_lastMiMoCallTime`、`_minCallInterval`、`_waitForRateLimit()` | 全局 API 调用限流 |
+| `tts_service.dart` | 标准 MiMo 合成前添加 `await _waitForRateLimit()` | 防止连续调用触发 429 |
+| `tts_service.dart` | 分段合成每段前添加 `await _waitForRateLimit()` | 段落间延迟 |
+| `tts_service.dart` | 克隆合成重试 3→2 次，间隔 1s→2s | 减少等待时间 |
+| `tts_service.dart` | 克隆分段合成重试 3→2 次，添加限流等待 | 与标准模式一致 |
+| `README.md` | 追加 Session #67 会话记录 | 按要求记录 |
+
+---
+
+### Session #68 — MiMo TTS globalAnchor 导致重复朗读修复 (2026-06-02)
+
+**会话背景**：用户反馈实时语音交互中，MiMo TTS 输出的 AI 语音将同一段文字读了 2 遍。日志显示请求 `messages` 中包含两条消息：`role: user`（全局角色锚定）和 `role: assistant`（实际朗读文本），MiMo TTS API 会把 messages 中的所有消息都当作待朗读文本合成，导致重复朗读。
+
+**主要目的**：修复 globalAnchor 作为 user 消息注入 API 请求导致文本被读两遍的问题。
+
+**根因分析**：
+- `_synthesizeMultipleSegments` 和 `_synthesizeMultipleCloneSegments` 中，通过 `TTSStyleParser.extractGlobalAnchor(segments)` 提取全局角色锚定
+- 然后通过 `buildMiMoRequest(globalAnchor: globalAnchor)` 将其作为 `role: user` 消息注入到 API 请求中
+- MiMo TTS API 基于 chat completions 格式，会把 messages 中所有消息的内容都作为待朗读文本进行语音合成
+- 导致 user 消息（全局锚定描述）和 assistant 消息（实际文本）都被朗读，产生重复
+
+**完成的主要任务**：
+1. 移除 `_synthesizeMultipleSegments` 中 `buildMiMoRequest` 调用的 `globalAnchor` 参数
+2. 移除 `_synthesizeMultipleCloneSegments` 中 `buildMiMoCloneRequest` 调用的 `globalAnchor` 参数
+3. 清理两个方法中不再使用的 `globalAnchor` 变量提取和日志
+4. 每段文本自身已包含风格标签（如 `(温柔亲切带笑意)`），足够控制语调，无需额外 user 消息
+
+**主要技术栈**：Flutter/Dart, MiMo TTS API (chat completions format)
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `tts_service.dart` | `_synthesizeMultipleSegments` 移除 `globalAnchor` 参数传递 | 防止 user 消息被 API 朗读 |
+| `tts_service.dart` | `_synthesizeMultipleCloneSegments` 移除 `globalAnchor` 参数传递 | 克隆模式同理 |
+| `tts_service.dart` | 清理两个方法中无用的 `globalAnchor` 变量和日志 | 消除死代码 |
+| `README.md` | 追加 Session #68 会话记录 | 按要求记录 |

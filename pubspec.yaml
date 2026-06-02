@@ -2,7 +2,7 @@ name: mj_nexus
 description: "MJ Nexus - Multi-Model AI Assistant with local/remote model support, voice dialogue, RAG knowledge base, and memory engine"
 publish_to: 'none'
 
-version: 0.31.0
+version: 0.30.5
 
 environment:
   sdk: ^3.10.7

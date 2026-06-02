@@ -267,24 +267,38 @@ class ModelInferenceEngine implements IModelManager {
   Stream<ModelLoadingState> get loadingStateStream =>
       _loadingStateController.stream;
 
-  /// 从 SharedPreferences 读取 ModelEntry
-  Future<ModelEntry?> _getModelEntry(String modelId) async {
+  static String? _modelEntriesRaw;
+  static List<ModelEntry>? _modelEntriesParsed;
+  static final Set<String> _loggedZeroKeyModelIds = {};
+
+  Future<List<ModelEntry>> _ensureModelEntries() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kModelsKey);
-    if (raw == null) {
+    if (_modelEntriesRaw != raw) {
+      _modelEntriesRaw = raw;
+      _modelEntriesParsed = raw == null
+          ? []
+          : (jsonDecode(raw) as List<dynamic>)
+              .map((e) => ModelEntry.fromJson(e as Map<String, dynamic>))
+              .toList();
+      _loggedZeroKeyModelIds.clear();
+    }
+    return _modelEntriesParsed ?? [];
+  }
+
+  /// 从 SharedPreferences 读取 ModelEntry
+  Future<ModelEntry?> _getModelEntry(String modelId) async {
+    final entries = await _ensureModelEntries();
+    if (_modelEntriesRaw == null) {
       debugPrint('[ModelInferenceEngine] _getModelEntry: 模型列表为空，key=$_kModelsKey');
       return null;
     }
 
-    final list = jsonDecode(raw) as List<dynamic>;
-    for (final e in list) {
-      final entry = ModelEntry.fromJson(e as Map<String, dynamic>);
+    for (final entry in entries) {
       if (entry.id == modelId) {
-        // 调试：检查 API key 状态
         if (entry.remoteConfig != null) {
           final apiKeyLen = entry.remoteConfig!.apiKey.length;
-          debugPrint('[ModelInferenceEngine] _getModelEntry: 找到模型 ${entry.displayName}, API key长度=$apiKeyLen');
-          if (apiKeyLen == 0) {
+          if (apiKeyLen == 0 && _loggedZeroKeyModelIds.add(modelId)) {
             debugPrint('[ModelInferenceEngine] ⚠️ 警告: 模型 ${entry.displayName} 的 API key 为空!');
           }
         }
@@ -739,8 +753,9 @@ class ModelInferenceEngine implements IModelManager {
   }
 
   /// 基于实际消息列表更新上下文使用率（从数据库加载的历史消息）
-  void updateContextUsageFromMessages(List<dynamic> messages) {
-    LocalFFIEngine.instance.updateContextUsageFromMessages(messages);
+  /// [extraTokens] 额外注入的 token（如 system prompt、TTS 提示词等）
+  void updateContextUsageFromMessages(List<dynamic> messages, {int extraTokens = 0}) {
+    LocalFFIEngine.instance.updateContextUsageFromMessages(messages, extraTokens: extraTokens);
   }
 
   // ──────── 兼容旧接口（纯文本 prompt，内部转为单条 user message） ────────
