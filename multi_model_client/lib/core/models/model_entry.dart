@@ -19,9 +19,11 @@ class LocalModelParams {
   final double temperature;
   final bool limitResponseLength;
   final int? maxTokens;
+  final int contextSize; // 上下文窗口大小
   final String contextOverflow; // 'truncate_middle' | 'truncate_start' | 'truncate_end'
   final String? stopString;
   final int cpuThreads;
+  final int gpuLayers; // GPU 加速层数（99 = 全部卸载到 GPU）
   final int topK;
   final bool repeatPenaltyEnabled;
   final double repeatPenalty;
@@ -33,14 +35,17 @@ class LocalModelParams {
   final bool structuredOutput;
   final bool speculativeDecoding;
   final String? systemPrompt; // 系统提示词（人设）
+  final bool enableReasoning; // 快速模式：关闭思考链，禁用 reasoning
 
   const LocalModelParams({
     this.temperature = 0.8,
     this.limitResponseLength = false,
     this.maxTokens,
+    this.contextSize = 32768, // 默认 32K 上下文
     this.contextOverflow = 'truncate_middle',
     this.stopString,
     this.cpuThreads = 4,
+    this.gpuLayers = 99, // 默认全部 GPU 加速
     this.topK = 40,
     this.repeatPenaltyEnabled = true,
     this.repeatPenalty = 1.1,
@@ -52,15 +57,18 @@ class LocalModelParams {
     this.structuredOutput = false,
     this.speculativeDecoding = false,
     this.systemPrompt,
+    this.enableReasoning = false, // 默认关闭思考模式（快速模式）
   });
 
   LocalModelParams copyWith({
     double? temperature,
     bool? limitResponseLength,
     int? maxTokens,
+    int? contextSize,
     String? contextOverflow,
     String? stopString,
     int? cpuThreads,
+    int? gpuLayers,
     int? topK,
     bool? repeatPenaltyEnabled,
     double? repeatPenalty,
@@ -72,14 +80,17 @@ class LocalModelParams {
     bool? structuredOutput,
     bool? speculativeDecoding,
     String? systemPrompt,
+    bool? enableReasoning,
   }) {
     return LocalModelParams(
       temperature: temperature ?? this.temperature,
       limitResponseLength: limitResponseLength ?? this.limitResponseLength,
       maxTokens: maxTokens ?? this.maxTokens,
+      contextSize: contextSize ?? this.contextSize,
       contextOverflow: contextOverflow ?? this.contextOverflow,
       stopString: stopString ?? this.stopString,
       cpuThreads: cpuThreads ?? this.cpuThreads,
+      gpuLayers: gpuLayers ?? this.gpuLayers,
       topK: topK ?? this.topK,
       repeatPenaltyEnabled: repeatPenaltyEnabled ?? this.repeatPenaltyEnabled,
       repeatPenalty: repeatPenalty ?? this.repeatPenalty,
@@ -91,6 +102,7 @@ class LocalModelParams {
       structuredOutput: structuredOutput ?? this.structuredOutput,
       speculativeDecoding: speculativeDecoding ?? this.speculativeDecoding,
       systemPrompt: systemPrompt ?? this.systemPrompt,
+      enableReasoning: enableReasoning ?? this.enableReasoning,
     );
   }
 
@@ -98,9 +110,11 @@ class LocalModelParams {
     'temperature': temperature,
     'limitResponseLength': limitResponseLength,
     'maxTokens': maxTokens,
+    'contextSize': contextSize,
     'contextOverflow': contextOverflow,
     'stopString': stopString,
     'cpuThreads': cpuThreads,
+    'gpuLayers': gpuLayers,
     'topK': topK,
     'repeatPenaltyEnabled': repeatPenaltyEnabled,
     'repeatPenalty': repeatPenalty,
@@ -112,6 +126,7 @@ class LocalModelParams {
     'structuredOutput': structuredOutput,
     'speculativeDecoding': speculativeDecoding,
     'systemPrompt': systemPrompt,
+    'enableReasoning': enableReasoning,
   };
 
   factory LocalModelParams.fromJson(Map<String, dynamic> json) {
@@ -119,9 +134,11 @@ class LocalModelParams {
       temperature: (json['temperature'] as num?)?.toDouble() ?? 0.8,
       limitResponseLength: json['limitResponseLength'] as bool? ?? false,
       maxTokens: json['maxTokens'] as int?,
+      contextSize: json['contextSize'] as int? ?? 32768,
       contextOverflow: json['contextOverflow'] as String? ?? 'truncate_middle',
       stopString: json['stopString'] as String?,
       cpuThreads: json['cpuThreads'] as int? ?? 4,
+      gpuLayers: json['gpuLayers'] as int? ?? 99,
       topK: json['topK'] as int? ?? 40,
       repeatPenaltyEnabled: json['repeatPenaltyEnabled'] as bool? ?? true,
       repeatPenalty: (json['repeatPenalty'] as num?)?.toDouble() ?? 1.1,
@@ -133,6 +150,7 @@ class LocalModelParams {
       structuredOutput: json['structuredOutput'] as bool? ?? false,
       speculativeDecoding: json['speculativeDecoding'] as bool? ?? false,
       systemPrompt: json['systemPrompt'] as String?,
+      enableReasoning: json['enableReasoning'] as bool? ?? false,
     );
   }
 }
@@ -292,6 +310,13 @@ class ModelEntry {
   final String? description;
   /// 是否支持多模态（图片/视频理解）
   final bool? isMultimodal;
+  /// mmproj 投影仪文件路径（本地多模态模型需要）
+  final String? mmprojFileName;
+  /// ★★★ 顶级 Reasoning 开关（本地/远程模型通用）★★★
+  ///
+  /// 优先级：此字段 > localParams.enableReasoning
+  /// 远程模型没有 localParams，直接读此字段
+  final bool? enableReasoning;
 
   const ModelEntry({
     required this.id,
@@ -305,25 +330,44 @@ class ModelEntry {
     this.quantLevel,
     this.description,
     this.isMultimodal,
+    this.mmprojFileName,
+    this.enableReasoning,
   });
+
+  /// 获取有效的 reasoning 开关值
+  /// 优先读顶级字段，回退到 localParams
+  bool get effectiveEnableReasoning =>
+      enableReasoning ?? localParams?.enableReasoning ?? false;
 
   bool get isLocal => type == ModelType.local;
 
-  /// 自动判断是否多模态（基于模型名称）
+  /// 自动判断是否支持多模态（图片输入）
+  ///
+  /// 策略：
+  /// - 若用户手动设置了 isMultimodal，以该值为准
+  /// - 远程模型（remote/ollama）默认允许多模态：主流 API（OpenAI/Anthropic/Gemini/等）
+  ///   均支持图片，阻止发送比发送后报错用户体验更差
+  /// - 本地模型（local）需要名称显式包含视觉关键词才允许
   bool get supportsMultimodal {
     if (isMultimodal != null) return isMultimodal!;
+
+    // ✅ 远程/Ollama 模型：默认支持多模态
+    // OpenAI gpt-4o/gpt-4-turbo/o1/o3、Anthropic claude-*、Google gemini-* 等都支持图片
+    // 若将来需要明确排除某个模型，通过 isMultimodal=false 手动覆盖
+    if (type == ModelType.remote || type == ModelType.ollama) return true;
+
+    // 本地模型：通过名称关键词判断是否是多模态模型
     final lowerId = id.toLowerCase();
     final lowerName = displayName.toLowerCase();
-    // 常见多模态模型名称模式
-    final patterns = [
-      'vision', 'vl', 'qwen2.5vl', 'qwen-vl', 'qwen2-vl',
-      'llava', 'llama-vision', 'llama3.2-vision', 'phi4-vision',
-      'gemini', 'claude', 'gpt-4o', 'gpt-4v', 'claude-3',
-      'moondream', 'bakllava', 'mistral-vision', 'pixtral',
+    final localVisionPatterns = [
+      'vision', 'vl', 'llava', 'moondream', 'bakllava',
+      'llama-vision', 'llama3.2-vision', 'phi4-vision',
+      'qwen2.5vl', 'qwen-vl', 'qwen2-vl', 'qwen3-vl', 'qwen3',
       'yi-vision', 'yi-vl', 'deepseek-vl', 'internvl',
-      'minimax', 'video', 'multimodal',
+      'mistral-vision', 'pixtral',
+      'video', 'multimodal', 'img2txt', 'image',
     ];
-    for (final p in patterns) {
+    for (final p in localVisionPatterns) {
       if (lowerId.contains(p) || lowerName.contains(p)) return true;
     }
     return false;
@@ -332,16 +376,19 @@ class ModelEntry {
 
   ModelEntry copyWith({
     String? displayName,
+    String? filePath,
     bool? isLoaded,
     LocalModelParams? localParams,
     RemoteModelConfig? remoteConfig,
     bool? isMultimodal,
+    String? mmprojFileName,
+    bool? enableReasoning,
   }) {
     return ModelEntry(
       id: id,
       displayName: displayName ?? this.displayName,
       type: type,
-      filePath: filePath,
+      filePath: filePath ?? this.filePath,
       localParams: localParams ?? this.localParams,
       remoteConfig: remoteConfig ?? this.remoteConfig,
       isLoaded: isLoaded ?? this.isLoaded,
@@ -349,6 +396,8 @@ class ModelEntry {
       quantLevel: quantLevel,
       description: description,
       isMultimodal: isMultimodal ?? this.isMultimodal,
+      mmprojFileName: mmprojFileName ?? this.mmprojFileName,
+      enableReasoning: enableReasoning ?? this.enableReasoning,
     );
   }
 
@@ -364,6 +413,8 @@ class ModelEntry {
     'quantLevel': quantLevel,
     'description': description,
     'isMultimodal': isMultimodal,
+    'mmprojFileName': mmprojFileName,
+    'enableReasoning': enableReasoning,
   };
 
   factory ModelEntry.fromJson(Map<String, dynamic> json) {
@@ -386,6 +437,8 @@ class ModelEntry {
       quantLevel: json['quantLevel'] as String?,
       description: json['description'] as String?,
       isMultimodal: json['isMultimodal'] as bool?,
+      mmprojFileName: json['mmprojFileName'] as String?,
+      enableReasoning: json['enableReasoning'] as bool?,
     );
   }
 }

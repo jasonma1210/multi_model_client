@@ -1,5 +1,3 @@
-import '../storage/database.dart' show KnowledgeBase;
-
 abstract class IRAGEngine {
   Future<void> createKnowledgeBase(String name, {String? sessionId});
   Future<void> deleteKnowledgeBase(String kbId);

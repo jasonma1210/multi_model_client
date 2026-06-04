@@ -59,7 +59,7 @@ class QuantLevelMatcher {
       // 上下文窗口变化会影响内存需求
       // 估算：每1024 tokens约需要100-200 MB
       final contextDelta = customContextWindow - model.recommendCtx;
-      final contextMemoryDelta = (contextDelta.abs() / 1024 * 150).toInt();
+      final _ = (contextDelta.abs() / 1024 * 150).toInt();
 
       if (contextDelta > 0) {
         // 增大上下文窗口，需要更多内存

@@ -28,15 +28,64 @@ class KnowledgeBaseService {
 
   KnowledgeBaseService(this._db);
 
-  /// 获取所有知识库
+  /// 获取所有知识库（实时计算文档数量）
   Future<List<KnowledgeBase>> getAllKnowledgeBases() async {
-    return await _db.select(_db.knowledgeBases).get();
+    final kbs = await _db.select(_db.knowledgeBases).get();
+    
+    // 实时计算每个知识库的文档数量
+    final updatedKbs = <KnowledgeBase>[];
+    for (final kb in kbs) {
+      final docCount = await (_db.select(_db.documents)
+        ..where((t) => t.knowledgeBaseId.equals(kb.id))).get();
+      
+      if (docCount.length != kb.documentCount) {
+        // 更新文档数量
+        await (_db.update(_db.knowledgeBases)
+          ..where((t) => t.id.equals(kb.id))).write(
+          KnowledgeBasesCompanion(
+            documentCount: Value(docCount.length),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+        
+        // 重新获取更新后的数据
+        final updated = await (_db.select(_db.knowledgeBases)
+          ..where((t) => t.id.equals(kb.id))).getSingleOrNull();
+        if (updated != null) {
+          updatedKbs.add(updated);
+          continue;
+        }
+      }
+      updatedKbs.add(kb);
+    }
+    
+    return updatedKbs;
   }
 
-  /// 获取知识库详情
+  /// 获取知识库详情（实时计算文档数量）
   Future<KnowledgeBase?> getKnowledgeBase(String id) async {
-    final query = _db.select(_db.knowledgeBases)..where((t) => t.id.equals(id));
-    return await query.getSingleOrNull();
+    final kb = await (_db.select(_db.knowledgeBases)..where((t) => t.id.equals(id))).getSingleOrNull();
+    if (kb == null) return null;
+    
+    // 实时计算文档数量
+    final docCount = await (_db.select(_db.documents)
+      ..where((t) => t.knowledgeBaseId.equals(id))).get();
+    
+    if (docCount.length != kb.documentCount) {
+      // 更新文档数量
+      await (_db.update(_db.knowledgeBases)
+        ..where((t) => t.id.equals(id))).write(
+        KnowledgeBasesCompanion(
+          documentCount: Value(docCount.length),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+      
+      // 重新获取更新后的数据
+      return await (_db.select(_db.knowledgeBases)..where((t) => t.id.equals(id))).getSingleOrNull();
+    }
+    
+    return kb;
   }
 
   /// 创建知识库
@@ -288,8 +337,8 @@ class KnowledgeBaseService {
     // 确保 FTS 表存在
     await _ensureFtsTableExists(knowledgeBaseId);
 
-    // 使用中文分词预处理查询词
-    final searchTerms = _preprocessQuery(query);
+    // 使用中文分词预处理查询词（先等待 jieba 初始化）
+    final searchTerms = await _preprocessQuery(query);
     debugPrint('[KnowledgeBaseService] 分词结果: $searchTerms');
     
     // 如果分词结果为空，直接使用 BM25 搜索
@@ -427,7 +476,9 @@ class KnowledgeBaseService {
   }
 
   /// 预处理查询词（使用中文分词）
-  List<String> _preprocessQuery(String query) {
+  Future<List<String>> _preprocessQuery(String query) async {
+    // 等待 jieba 初始化完成
+    await ChineseSegmenterService.waitForInit();
     // 使用中文分词器提取关键词
     return ChineseSegmenterService.extractKeywords(query, minLength: 2);
   }

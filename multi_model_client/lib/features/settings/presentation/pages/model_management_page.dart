@@ -1,12 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:file_picker/file_picker.dart';
 
 import '../../../../core/models/model_entry.dart';
 import '../../../../core/providers/model_provider.dart';
 import '../../../../core/providers/settings_provider.dart';
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/services/security_bookmark_service.dart';
+import '../../../../core/widgets/model_avatar.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 //  模型管理页（重构版）
@@ -21,7 +23,8 @@ class ModelManagementPage extends ConsumerStatefulWidget {
   const ModelManagementPage({super.key});
 
   @override
-  ConsumerState<ModelManagementPage> createState() => _ModelManagementPageState();
+  ConsumerState<ModelManagementPage> createState() =>
+      _ModelManagementPageState();
 }
 
 class _ModelManagementPageState extends ConsumerState<ModelManagementPage>
@@ -48,38 +51,44 @@ class _ModelManagementPageState extends ConsumerState<ModelManagementPage>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go('/settings'),
-        ),
-        title: const Text('模型管理'),
-        centerTitle: false,
-        actions: [
-          // 进入模型市场
-          TextButton.icon(
-            onPressed: () => context.go('/model-market'),
-            icon: const Icon(Icons.storefront_outlined, size: 18),
-            label: const Text('模型市场'),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        backgroundColor: theme.colorScheme.surface,
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.go('/settings'),
           ),
-          const SizedBox(width: 8),
-        ],
-        bottom: TabBar(
+          title: const Text('模型管理'),
+          centerTitle: false,
+          actions: [
+            // 进入模型市场
+            TextButton.icon(
+              onPressed: () => context.go('/model-market'),
+              icon: const Icon(Icons.storefront_outlined, size: 18),
+              label: const Text('模型市场'),
+            ),
+            const SizedBox(width: 8),
+          ],
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(icon: Icon(Icons.storage_outlined, size: 18), text: '本地模型'),
+              Tab(icon: Icon(Icons.cloud_outlined, size: 18), text: '远程 API'),
+            ],
+          ),
+        ),
+        body: TabBarView(
           controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.storage_outlined, size: 18), text: '本地模型'),
-            Tab(icon: Icon(Icons.cloud_outlined, size: 18), text: '远程 API'),
+          children: [
+            _LocalModelsTab(onOpenMarket: () => context.go('/model-market')),
+            const _RemoteModelsTab(),
           ],
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _LocalModelsTab(onOpenMarket: () => context.go('/model-market')),
-          const _RemoteModelsTab(),
-        ],
       ),
     );
   }
@@ -98,11 +107,12 @@ class _LocalModelsTab extends ConsumerWidget {
     final theme = Theme.of(context);
     final state = ref.watch(modelProvider);
     final locals = state.localModels;
+    final mmprojs = state.mmprojModels;
 
     return Stack(
       children: [
-        if (locals.isEmpty)
-          _buildEmpty(context, theme)
+        if (locals.isEmpty && mmprojs.isEmpty)
+          _buildEmpty(context, theme, ref)
         else
           ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
@@ -113,15 +123,26 @@ class _LocalModelsTab extends ConsumerWidget {
                 const SizedBox(height: 12),
               ],
               // 模型列表
-              ...locals.map((m) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _LocalModelCard(model: m),
-              )),
+              if (locals.isNotEmpty) ...[
+                ...locals.map(
+                  (m) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _LocalModelCard(model: m),
+                  ),
+                ),
+              ],
+              // mmproj 投影仪列表（如果有）
+              if (mmprojs.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _MmprojSection(models: mmprojs),
+              ],
             ],
           ),
         // 底部按钮
         Positioned(
-          left: 16, right: 16, bottom: 24,
+          left: 16,
+          right: 16,
+          bottom: 24,
           child: Row(
             children: [
               // 导入本地文件
@@ -129,10 +150,12 @@ class _LocalModelsTab extends ConsumerWidget {
                 child: OutlinedButton.icon(
                   onPressed: () => _importLocalFile(context, ref),
                   icon: const Icon(Icons.folder_open_outlined),
-                  label: const Text('导入本地文件'),
+                  label: const Text('导入模型'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                 ),
               ),
@@ -142,10 +165,12 @@ class _LocalModelsTab extends ConsumerWidget {
                 child: FilledButton.icon(
                   onPressed: onOpenMarket,
                   icon: const Icon(Icons.download_rounded),
-                  label: const Text('去下载模型'),
+                  label: const Text('下载模型'),
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                 ),
               ),
@@ -156,62 +181,112 @@ class _LocalModelsTab extends ConsumerWidget {
     );
   }
 
-  Widget _buildEmpty(BuildContext context, ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 88, height: 88,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Icon(Icons.storage_outlined, size: 44, color: theme.colorScheme.primary),
-            ),
-            const SizedBox(height: 20),
-            Text('还没有本地模型', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Text(
-              '您可以从模型市场下载 GGUF 量化模型，\n或者导入已有的本地 .gguf 文件。',
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.6),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  /// 导入本地 GGUF 模型文件
   Future<void> _importLocalFile(BuildContext context, WidgetRef ref) async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['gguf'],
-      dialogTitle: '选择 GGUF 模型文件',
-    );
+    // 使用 FilePicker 选取文件夹
+    // macOS 使用 NSOpenPanel（一步创建 Bookmark），其他平台使用 FilePicker
+    final result = await SecurityBookmarkService.instance
+        .pickDirectoryWithBookmark(dialogTitle: '选择模型文件夹');
 
-    if (result == null || result.files.isEmpty) return;
+    if (result == null) return;
 
-    final file = result.files.first;
-    if (file.path == null) return;
+    // macOS 沙盒：确保访问权限已激活
+    await SecurityBookmarkService.instance.startAccessing(result);
 
-    final fileName = file.name.replaceAll('.gguf', '').replaceAll('_', ' ');
+    // 查找文件夹中的 .gguf 文件
+    final dir = Directory(result);
+    if (!await dir.exists()) return;
 
-    await ref.read(modelProvider.notifier).addLocalModel(
-      displayName: fileName,
-      filePath: file.path!,
-    );
+    List<FileSystemEntity> ggufFiles = [];
+    await for (final entity in dir.list(recursive: true)) {
+      if (entity is File && entity.path.toLowerCase().endsWith('.gguf')) {
+        ggufFiles.add(entity);
+      }
+    }
+
+    if (ggufFiles.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('未找到 GGUF 模型文件'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    // 逐个导入找到的模型
+    for (final file in ggufFiles) {
+      final fileName = file.path
+          .split('/')
+          .last
+          .replaceAll('.gguf', '')
+          .replaceAll('_', ' ');
+      try {
+        await ref
+            .read(modelProvider.notifier)
+            .addLocalModel(displayName: fileName, filePath: file.path);
+      } catch (e) {
+        debugPrint('导入模型失败: $e');
+      }
+    }
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已导入：$fileName'),
+          content: Text('已导入 ${ggufFiles.length} 个模型'),
           behavior: SnackBarBehavior.floating,
         ),
       );
     }
+  }
+
+  Widget _buildEmpty(BuildContext context, ThemeData theme, WidgetRef ref) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 图标容器
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer.withValues(
+                  alpha: 0.3,
+                ),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Icon(
+                Icons.smart_toy_outlined,
+                size: 48,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '还没有本地模型',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '您可以从模型市场下载 GGUF 量化模型，\n或者导入已有的本地 .gguf 文件。',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.6,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -230,153 +305,111 @@ class _LocalModelCard extends ConsumerWidget {
     return Material(
       color: theme.colorScheme.surfaceContainerHigh,
       borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => context.go('/model/${model.id}/load'),
-        child: Padding(
+      elevation: 0,
+      child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  // 图标 + 加载状态
-                  Stack(
-                    children: [
-                      Container(
-                        width: 48, height: 48,
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF6366F1), Color(0xFF818CF8)],
-                          ),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: const Icon(Icons.memory_rounded, color: Colors.white, size: 24),
-                      ),
-                      if (model.isLoaded)
-                        Positioned(
-                          right: 0, bottom: 0,
-                          child: Container(
-                            width: 14, height: 14,
-                            decoration: BoxDecoration(
-                              color: Colors.green.shade500,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: theme.colorScheme.surface, width: 1.5),
-                            ),
-                          ),
-                        ),
-                    ],
+                  // 模型头像：随机背景色 + 首字母
+                  ModelAvatar(
+                    modelName: model.displayName,
+                    size: 52,
+                    isLoaded: model.isLoaded,
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           model.displayName,
-                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 2),
-                        Row(
+                        const SizedBox(height: 6),
+                        // 标签行
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
                           children: [
-                            if (model.parameterSize != null) ...[
-                              _SmallTag('${model.parameterSize}B', Colors.indigo.shade400),
-                              const SizedBox(width: 4),
-                            ],
-                            if (model.quantLevel != null) ...[
-                              _SmallTag(model.quantLevel!, Colors.blue.shade400),
-                              const SizedBox(width: 4),
-                            ],
+                            // 多模态图标（支持图片/视频理解）
+                            if (model.supportsMultimodal)
+                              _ModelTag(
+                                icon: Icons.image_outlined,
+                                label: 'Vision',
+                                color: Colors.purple,
+                              ),
+                            if (model.parameterSize != null)
+                              _ModelTag(
+                                label: '${model.parameterSize}B',
+                                color: Colors.indigo,
+                              ),
+                            if (model.quantLevel != null)
+                              _ModelTag(
+                                label: model.quantLevel!,
+                                color: Colors.blue,
+                              ),
                             if (model.isLoaded)
-                              _SmallTag('已加载', Colors.green.shade600),
+                              _ModelTag(
+                                icon: Icons.check_circle_outline,
+                                label: '已加载',
+                                color: Colors.green,
+                              ),
                           ],
                         ),
                       ],
                     ),
                   ),
-                  // 操作菜单
-                  PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert, color: theme.colorScheme.onSurfaceVariant),
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(
-                        value: 'load',
-                        child: ListTile(
-                          leading: Icon(Icons.rocket_launch_outlined),
-                          title: Text('加载/配置'),
-                          dense: true,
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: model.isLoaded ? 'unload' : 'load',
-                        child: ListTile(
-                          leading: Icon(model.isLoaded ? Icons.eject_outlined : Icons.play_circle_outline),
-                          title: Text(model.isLoaded ? '卸载' : '加载'),
-                          dense: true,
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: ListTile(
-                          leading: Icon(Icons.delete_outline, color: Colors.red),
-                          title: Text('删除', style: TextStyle(color: Colors.red)),
-                          dense: true,
-                        ),
-                      ),
-                    ],
-                    onSelected: (action) => _handleAction(context, ref, action),
-                  ),
+                  // 操作按钮
+                  _ModelCardActions(model: model),
                 ],
               ),
               if (model.filePath != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  model.filePath!.split('/').last,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontFamily: 'monospace',
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.5,
+                    ),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.folder_outlined,
+                        size: 14,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          model.filePath!.split('/').last,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontFamily: 'monospace',
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ],
           ),
         ),
-      ),
     );
-  }
-
-  Future<void> _handleAction(BuildContext context, WidgetRef ref, String action) async {
-    switch (action) {
-      case 'load':
-        context.go('/model/${model.id}/load');
-        break;
-      case 'unload':
-        ref.read(modelProvider.notifier).setModelLoaded(model.id, false);
-        break;
-      case 'delete':
-        final confirm = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('删除模型'),
-            content: Text('确认删除「${model.displayName}」？\n注意：这只会从列表中移除记录，不会删除磁盘上的文件。'),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                child: const Text('删除'),
-              ),
-            ],
-          ),
-        );
-        if (confirm == true) {
-          ref.read(modelProvider.notifier).deleteModel(model.id);
-        }
-        break;
-    }
   }
 }
 
@@ -390,24 +423,56 @@ class _LoadedModelBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.green.shade50,
+        gradient: LinearGradient(
+          colors: [
+            Colors.green.shade50,
+            Colors.green.shade100.withValues(alpha: 0.5),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.green.shade200),
       ),
       child: Row(
         children: [
-          Icon(Icons.check_circle_rounded, color: Colors.green.shade600, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '${model.displayName} 已加载并就绪',
-              style: TextStyle(color: Colors.green.shade800, fontSize: 13, fontWeight: FontWeight.w500),
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: Colors.green.shade500,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.check_rounded,
+              color: Colors.white,
+              size: 18,
             ),
           ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  model.displayName,
+                  style: TextStyle(
+                    color: Colors.green.shade800,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  '已加载并就绪',
+                  style: TextStyle(color: Colors.green.shade600, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, color: Colors.green.shade400),
         ],
       ),
     );
@@ -434,7 +499,9 @@ class _RemoteModelsTab extends ConsumerWidget {
             // 协议快速添加
             Text(
               '选择协议类型',
-              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 10),
             Row(
@@ -445,7 +512,11 @@ class _RemoteModelsTab extends ConsumerWidget {
                     subtitle: 'GPT-4o, GPT-3.5\n及所有兼容 API',
                     icon: '🤖',
                     color: const Color(0xFF10A37F),
-                    onTap: () => _showAddRemoteDialog(context, ref, RemoteProtocol.openai),
+                    onTap: () => _showAddRemoteDialog(
+                      context,
+                      ref,
+                      RemoteProtocol.openai,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -455,7 +526,11 @@ class _RemoteModelsTab extends ConsumerWidget {
                     subtitle: 'Claude 3.5 Sonnet\nClaude 3 Haiku',
                     icon: '🌟',
                     color: const Color(0xFFD4741A),
-                    onTap: () => _showAddRemoteDialog(context, ref, RemoteProtocol.anthropic),
+                    onTap: () => _showAddRemoteDialog(
+                      context,
+                      ref,
+                      RemoteProtocol.anthropic,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -465,7 +540,11 @@ class _RemoteModelsTab extends ConsumerWidget {
                     subtitle: '本地 Ollama\n服务集成',
                     icon: '🦙',
                     color: const Color(0xFF7C3AED),
-                    onTap: () => _showAddRemoteDialog(context, ref, RemoteProtocol.ollama),
+                    onTap: () => _showAddRemoteDialog(
+                      context,
+                      ref,
+                      RemoteProtocol.ollama,
+                    ),
                   ),
                 ),
               ],
@@ -474,13 +553,17 @@ class _RemoteModelsTab extends ConsumerWidget {
               const SizedBox(height: 20),
               Text(
                 '已配置的远程模型',
-                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 10),
-              ...remotes.map((m) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _RemoteModelCard(model: m),
-              )),
+              ...remotes.map(
+                (m) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _RemoteModelCard(model: m),
+                ),
+              ),
             ] else ...[
               const SizedBox(height: 32),
               Center(
@@ -501,7 +584,10 @@ class _RemoteModelsTab extends ConsumerWidget {
   }
 
   Future<void> _showAddRemoteDialog(
-      BuildContext context, WidgetRef ref, RemoteProtocol protocol) async {
+    BuildContext context,
+    WidgetRef ref,
+    RemoteProtocol protocol,
+  ) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -571,7 +657,11 @@ class _ProtocolCard extends StatelessWidget {
                   const SizedBox(width: 2),
                   Text(
                     '添加',
-                    style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: color,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -608,9 +698,12 @@ class _RemoteModelCard extends ConsumerWidget {
             children: [
               // 协议图标
               Container(
-                width: 44, height: 44,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  color: _protocolColor(config.protocol).withValues(alpha: 0.12),
+                  color: _protocolColor(
+                    config.protocol,
+                  ).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
@@ -627,14 +720,19 @@ class _RemoteModelCard extends ConsumerWidget {
                   children: [
                     Text(
                       model.displayName,
-                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        _SmallTag(_protocolLabel(config.protocol), _protocolColor(config.protocol)),
+                        _ModelTag(
+                          label: _protocolLabel(config.protocol),
+                          color: _protocolColor(config.protocol),
+                        ),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
@@ -651,7 +749,9 @@ class _RemoteModelCard extends ConsumerWidget {
                     Text(
                       config.baseUrl,
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                        color: theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.6,
+                        ),
                         fontFamily: 'monospace',
                       ),
                       maxLines: 1,
@@ -661,7 +761,10 @@ class _RemoteModelCard extends ConsumerWidget {
                 ),
               ),
               PopupMenuButton<String>(
-                icon: Icon(Icons.more_vert, color: theme.colorScheme.onSurfaceVariant),
+                icon: Icon(
+                  Icons.more_vert,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
                 itemBuilder: (_) => [
                   const PopupMenuItem(
                     value: 'edit',
@@ -682,7 +785,9 @@ class _RemoteModelCard extends ConsumerWidget {
                 ],
                 onSelected: (action) {
                   if (action == 'edit') _showEditDialog(context, ref);
-                  if (action == 'delete') ref.read(modelProvider.notifier).deleteModel(model.id);
+                  if (action == 'delete') {
+                    _confirmDeleteRemoteModel(context, ref);
+                  }
                 },
               ),
             ],
@@ -709,25 +814,71 @@ class _RemoteModelCard extends ConsumerWidget {
 
   String _protocolIcon(RemoteProtocol p) {
     switch (p) {
-      case RemoteProtocol.openai: return '🤖';
-      case RemoteProtocol.anthropic: return '🌟';
-      case RemoteProtocol.ollama: return '🦙';
+      case RemoteProtocol.openai:
+        return '🤖';
+      case RemoteProtocol.anthropic:
+        return '🌟';
+      case RemoteProtocol.ollama:
+        return '🦙';
     }
   }
 
   String _protocolLabel(RemoteProtocol p) {
     switch (p) {
-      case RemoteProtocol.openai: return 'OpenAI';
-      case RemoteProtocol.anthropic: return 'Anthropic';
-      case RemoteProtocol.ollama: return 'Ollama';
+      case RemoteProtocol.openai:
+        return 'OpenAI';
+      case RemoteProtocol.anthropic:
+        return 'Anthropic';
+      case RemoteProtocol.ollama:
+        return 'Ollama';
     }
   }
 
   Color _protocolColor(RemoteProtocol p) {
     switch (p) {
-      case RemoteProtocol.openai: return const Color(0xFF10A37F);
-      case RemoteProtocol.anthropic: return const Color(0xFFD4741A);
-      case RemoteProtocol.ollama: return const Color(0xFF7C3AED);
+      case RemoteProtocol.openai:
+        return const Color(0xFF10A37F);
+      case RemoteProtocol.anthropic:
+        return const Color(0xFFD4741A);
+      case RemoteProtocol.ollama:
+        return const Color(0xFF7C3AED);
+    }
+  }
+
+  /// 确认删除远程模型（仅删除关联会话，不删除模型文件）
+  Future<void> _confirmDeleteRemoteModel(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除模型'),
+        content: Text(
+          '确认删除「${model.displayName}」？\n\n'
+          '注意：所有基于该模型的会话及聊天记录将被删除，此操作不可恢复！',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      // 模型列表中删除：先删除关联会话，再删除模型记录
+      await ref.read(modelProvider.notifier).deleteModel(model.id);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已删除模型及关联会话'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     }
   }
 }
@@ -743,7 +894,8 @@ class _AddRemoteModelSheet extends ConsumerStatefulWidget {
   const _AddRemoteModelSheet({required this.protocol, this.existingModel});
 
   @override
-  ConsumerState<_AddRemoteModelSheet> createState() => _AddRemoteModelSheetState();
+  ConsumerState<_AddRemoteModelSheet> createState() =>
+      _AddRemoteModelSheetState();
 }
 
 class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
@@ -755,22 +907,35 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
   late double _temperature;
   late double _topP;
   late int _maxTokens;
+  late bool _supportsMultimodal;
   bool _showApiKey = false;
   bool _isSaving = false;
 
   // 预设模型列表
   Map<RemoteProtocol, List<String>> get _presetModels => {
     RemoteProtocol.openai: [
-      'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo',
-      'o1', 'o1-mini', 'o3-mini',
+      'gpt-4o',
+      'gpt-4o-mini',
+      'gpt-4-turbo',
+      'gpt-3.5-turbo',
+      'o1',
+      'o1-mini',
+      'o3-mini',
     ],
     RemoteProtocol.anthropic: [
-      'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022',
-      'claude-3-opus-20240229', 'claude-3-sonnet-20240229',
+      'claude-3-5-sonnet-20241022',
+      'claude-3-5-haiku-20241022',
+      'claude-3-opus-20240229',
+      'claude-3-sonnet-20240229',
     ],
     RemoteProtocol.ollama: [
-      'llama3.2', 'llama3.1:8b', 'qwen2.5:7b', 'mistral:7b',
-      'gemma2:9b', 'phi3.5', 'deepseek-r1:8b',
+      'llama3.2',
+      'llama3.1:8b',
+      'qwen2.5:7b',
+      'mistral:7b',
+      'gemma2:9b',
+      'phi3.5',
+      'deepseek-r1:8b',
     ],
   };
 
@@ -783,16 +948,24 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
     _nameController = TextEditingController(
       text: widget.existingModel?.displayName ?? _defaultName(widget.protocol),
     );
-    _baseUrlController = TextEditingController(text: existing?.baseUrl ?? preset.baseUrl);
+    _baseUrlController = TextEditingController(
+      text: existing?.baseUrl ?? preset.baseUrl,
+    );
     // Ollama 默认 API Key 为 "ollama"，其他协议使用空或已有值
     _apiKeyController = TextEditingController(
-      text: existing?.apiKey ?? (widget.protocol == RemoteProtocol.ollama ? 'ollama' : ''),
+      text:
+          existing?.apiKey ??
+          (widget.protocol == RemoteProtocol.ollama ? 'ollama' : ''),
     );
-    _modelIdController = TextEditingController(text: existing?.modelId ?? preset.modelId);
+    _modelIdController = TextEditingController(
+      text: existing?.modelId ?? preset.modelId,
+    );
     _temperature = existing?.temperature ?? preset.temperature;
     _topP = existing?.topP ?? preset.topP;
     _maxTokens = existing?.maxTokens ?? preset.maxTokens;
     _maxTokensController = TextEditingController(text: '$_maxTokens');
+    _supportsMultimodal =
+        widget.existingModel?.isMultimodal ?? true; // 远程模型默认支持多模态
   }
 
   RemoteModelConfig _defaultConfig(RemoteProtocol p) {
@@ -808,16 +981,21 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
         return RemoteModelConfig.ollamaPreset(
           baseUrl: settingsService.getOllamaBaseUrl(),
           modelId: settingsService.getOllamaDefaultModel(),
-          apiKey: apiKey.isNotEmpty ? apiKey : 'ollama', // 默认使用 ollama 作为 API Key
+          apiKey: apiKey.isNotEmpty
+              ? apiKey
+              : 'ollama', // 默认使用 ollama 作为 API Key
         );
     }
   }
 
   String _defaultName(RemoteProtocol p) {
     switch (p) {
-      case RemoteProtocol.openai: return 'GPT-4o';
-      case RemoteProtocol.anthropic: return 'Claude 3.5 Sonnet';
-      case RemoteProtocol.ollama: return 'Ollama - llama3.2';
+      case RemoteProtocol.openai:
+        return 'GPT-4o';
+      case RemoteProtocol.anthropic:
+        return 'Claude 3.5 Sonnet';
+      case RemoteProtocol.ollama:
+        return 'Ollama - llama3.2';
     }
   }
 
@@ -838,7 +1016,9 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
 
     return Padding(
       padding: EdgeInsets.only(
-        left: 24, right: 24, top: 16,
+        left: 24,
+        right: 24,
+        top: 16,
         bottom: MediaQuery.viewInsetsOf(context).bottom + 24,
       ),
       child: SingleChildScrollView(
@@ -849,7 +1029,8 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
             // 拖动把手
             Center(
               child: Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
                   color: theme.colorScheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
@@ -867,19 +1048,28 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
                     color: color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(_protocolIcon(widget.protocol), style: const TextStyle(fontSize: 20)),
+                  child: Text(
+                    _protocolIcon(widget.protocol),
+                    style: const TextStyle(fontSize: 20),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      widget.existingModel != null ? '编辑模型' : '添加 ${_protocolLabel(widget.protocol)} 模型',
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                      widget.existingModel != null
+                          ? '编辑模型'
+                          : '添加 ${_protocolLabel(widget.protocol)} 模型',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     Text(
                       _protocolDesc(widget.protocol),
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -909,14 +1099,18 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
                 hintText: widget.protocol == RemoteProtocol.anthropic
                     ? 'sk-ant-...'
                     : widget.protocol == RemoteProtocol.ollama
-                        ? 'ollama'
-                        : 'sk-...',
+                    ? 'ollama'
+                    : 'sk-...',
                 prefixIcon: const Icon(Icons.key_outlined),
                 suffixIcon: IconButton(
-                  icon: Icon(_showApiKey ? Icons.visibility_off : Icons.visibility),
+                  icon: Icon(
+                    _showApiKey ? Icons.visibility_off : Icons.visibility,
+                  ),
                   onPressed: () => setState(() => _showApiKey = !_showApiKey),
                 ),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -925,20 +1119,32 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildTextField('模型 ID', _modelIdController, Icons.smart_toy_outlined),
+                _buildTextField(
+                  '模型 ID',
+                  _modelIdController,
+                  Icons.smart_toy_outlined,
+                ),
                 const SizedBox(height: 6),
                 // 预设模型快选
                 Wrap(
-                  spacing: 6, runSpacing: 6,
+                  spacing: 6,
+                  runSpacing: 6,
                   children: (_presetModels[widget.protocol] ?? []).map((m) {
                     final isSelected = _modelIdController.text == m;
                     return ActionChip(
-                      label: Text(m, style: TextStyle(fontSize: 11, color: isSelected ? Colors.white : null)),
+                      label: Text(
+                        m,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isSelected ? Colors.white : null,
+                        ),
+                      ),
                       backgroundColor: isSelected ? color : null,
                       onPressed: () {
                         _modelIdController.text = m;
                         // 同步更新名称
-                        if (_nameController.text == _defaultName(widget.protocol)) {
+                        if (_nameController.text ==
+                            _defaultName(widget.protocol)) {
                           _nameController.text = m;
                         }
                         setState(() {});
@@ -953,15 +1159,35 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
 
             // 推理参数（可折叠）
             ExpansionTile(
-              title: const Text('推理参数（高级）', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              title: const Text(
+                '推理参数（高级）',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              ),
               tilePadding: EdgeInsets.zero,
               children: [
                 const SizedBox(height: 8),
-                _buildSlider('Temperature', _temperature, 0.0, 2.0, (v) => setState(() => _temperature = v)),
-                _buildSlider('Top P', _topP, 0.0, 1.0, (v) => setState(() => _topP = v)),
+                _buildSlider(
+                  'Temperature',
+                  _temperature,
+                  0.0,
+                  2.0,
+                  (v) => setState(() => _temperature = v),
+                ),
+                _buildSlider(
+                  'Top P',
+                  _topP,
+                  0.0,
+                  1.0,
+                  (v) => setState(() => _topP = v),
+                ),
                 Row(
                   children: [
-                    Expanded(child: Text('Max Tokens', style: theme.textTheme.bodyMedium)),
+                    Expanded(
+                      child: Text(
+                        'Max Tokens',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
                     SizedBox(
                       width: 80,
                       child: TextField(
@@ -982,6 +1208,65 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
             ),
             const SizedBox(height: 16),
 
+            // 多模态开关
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.5,
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.image_outlined,
+                        color: theme.colorScheme.primary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '支持多模态',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Switch(
+                        value: _supportsMultimodal,
+                        onChanged: (v) =>
+                            setState(() => _supportsMultimodal = v),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _supportsMultimodal
+                        ? '✅ 已启用：可发送图片给模型进行分析（如截图、照片等）'
+                        : '❌ 已禁用：仅支持纯文本对话',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: _supportsMultimodal
+                          ? Colors.green
+                          : theme.colorScheme.error,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '💡 提示：多模态模型需要具备视觉理解能力。远程 API（OpenAI/Anthropic）默认支持；本地模型需使用 VL/Vision 版本（如 llava、Qwen2-VL 等）。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
             // 保存按钮
             SizedBox(
               width: double.infinity,
@@ -990,12 +1275,18 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
                 style: FilledButton.styleFrom(
                   backgroundColor: color,
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 child: _isSaving
                     ? const SizedBox(
-                        width: 20, height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : Text(
                         widget.existingModel != null ? '保存修改' : '添加模型',
@@ -1027,12 +1318,25 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
   }
 
   Widget _buildSlider(
-    String label, double value, double min, double max, ValueChanged<double> onChanged) {
+    String label,
+    double value,
+    double min,
+    double max,
+    ValueChanged<double> onChanged,
+  ) {
     return Row(
       children: [
-        SizedBox(width: 100, child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
+        SizedBox(
+          width: 100,
+          child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+        ),
         Expanded(
-          child: Slider(value: value.clamp(min, max), min: min, max: max, onChanged: onChanged),
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            onChanged: onChanged,
+          ),
         ),
         SizedBox(
           width: 36,
@@ -1063,11 +1367,22 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
     );
 
     if (widget.existingModel != null) {
-      await ref.read(modelProvider.notifier).updateRemoteConfig(
-            widget.existingModel!.id, config, displayName: name);
+      await ref
+          .read(modelProvider.notifier)
+          .updateRemoteConfig(
+            widget.existingModel!.id,
+            config,
+            displayName: name,
+            isMultimodal: _supportsMultimodal,
+          );
     } else {
-      await ref.read(modelProvider.notifier).addRemoteModel(
-            displayName: name, config: config);
+      await ref
+          .read(modelProvider.notifier)
+          .addRemoteModel(
+            displayName: name,
+            config: config,
+            isMultimodal: _supportsMultimodal,
+          );
     }
 
     setState(() => _isSaving = false);
@@ -1076,33 +1391,45 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
 
   String _protocolIcon(RemoteProtocol p) {
     switch (p) {
-      case RemoteProtocol.openai: return '🤖';
-      case RemoteProtocol.anthropic: return '🌟';
-      case RemoteProtocol.ollama: return '🦙';
+      case RemoteProtocol.openai:
+        return '🤖';
+      case RemoteProtocol.anthropic:
+        return '🌟';
+      case RemoteProtocol.ollama:
+        return '🦙';
     }
   }
 
   String _protocolLabel(RemoteProtocol p) {
     switch (p) {
-      case RemoteProtocol.openai: return 'OpenAI';
-      case RemoteProtocol.anthropic: return 'Anthropic';
-      case RemoteProtocol.ollama: return 'Ollama';
+      case RemoteProtocol.openai:
+        return 'OpenAI';
+      case RemoteProtocol.anthropic:
+        return 'Anthropic';
+      case RemoteProtocol.ollama:
+        return 'Ollama';
     }
   }
 
   String _protocolDesc(RemoteProtocol p) {
     switch (p) {
-      case RemoteProtocol.openai: return '兼容 OpenAI v1 标准 API';
-      case RemoteProtocol.anthropic: return '原生 Anthropic Messages API';
-      case RemoteProtocol.ollama: return '本地 Ollama 服务（默认 API Key: ollama）';
+      case RemoteProtocol.openai:
+        return '兼容 OpenAI v1 标准 API';
+      case RemoteProtocol.anthropic:
+        return '原生 Anthropic Messages API';
+      case RemoteProtocol.ollama:
+        return '本地 Ollama 服务（默认 API Key: ollama）';
     }
   }
 
   Color _protocolColor(RemoteProtocol p) {
     switch (p) {
-      case RemoteProtocol.openai: return const Color(0xFF10A37F);
-      case RemoteProtocol.anthropic: return const Color(0xFFD4741A);
-      case RemoteProtocol.ollama: return const Color(0xFF7C3AED);
+      case RemoteProtocol.openai:
+        return const Color(0xFF10A37F);
+      case RemoteProtocol.anthropic:
+        return const Color(0xFFD4741A);
+      case RemoteProtocol.ollama:
+        return const Color(0xFF7C3AED);
     }
   }
 }
@@ -1111,23 +1438,453 @@ class _AddRemoteModelSheetState extends ConsumerState<_AddRemoteModelSheet> {
 //  通用小工具
 // ════════════════════════════════════════════════════════════════════════════
 
-class _SmallTag extends StatelessWidget {
+/// 模型标签组件
+class _ModelTag extends StatelessWidget {
+  final IconData? icon;
   final String label;
   final Color color;
-  const _SmallTag(this.label, this.color);
+
+  const _ModelTag({this.icon, required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
+  }
+}
+
+/// 模型卡片操作按钮
+class _ModelCardActions extends ConsumerWidget {
+  final ModelEntry model;
+
+  const _ModelCardActions({required this.model});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return PopupMenuButton<String>(
+      icon: Icon(
+        Icons.more_vert,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+      itemBuilder: (_) => [
+        if (model.isLoaded)
+          const PopupMenuItem(
+            value: 'unload',
+            child: ListTile(
+              leading: Icon(Icons.eject_outlined),
+              title: Text('卸载'),
+              dense: true,
+            ),
+          ),
+        const PopupMenuItem(
+          value: 'edit',
+          child: ListTile(
+            leading: Icon(Icons.edit_outlined),
+            title: Text('编辑'),
+            dense: true,
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'delete',
+          child: ListTile(
+            leading: Icon(Icons.delete_outline, color: Colors.red),
+            title: Text('删除', style: TextStyle(color: Colors.red)),
+            dense: true,
+          ),
+        ),
+      ],
+      onSelected: (action) => _handleAction(context, ref, action),
+    );
+  }
+
+  Future<void> _handleAction(
+    BuildContext context,
+    WidgetRef ref,
+    String action,
+  ) async {
+    switch (action) {
+      case 'unload':
+        ref.read(modelProvider.notifier).setModelLoaded(model.id, false);
+        break;
+      case 'edit':
+        await _showEditLocalModelDialog(context, ref);
+        break;
+      case 'delete':
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('删除模型'),
+            content: Text(
+              '确认删除「${model.displayName}」？\n\n'
+              '注意：所有基于该模型的会话及聊天记录将被删除，此操作不可恢复！',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text('确认删除'),
+              ),
+            ],
+          ),
+        );
+        if (confirm == true) {
+          // 模型列表中删除：删除关联会话 + 模型记录（不删除模型文件）
+          final deletedCount = await ref.read(modelProvider.notifier).deleteModelSessionsOnly(model.id);
+          // 从模型列表中移除
+          await ref.read(modelProvider.notifier).removeModelFromList(model.id);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('已删除模型及 $deletedCount 个关联会话'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        }
+        break;
+    }
+  }
+
+  Future<void> _showEditLocalModelDialog(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final supportsMultimodal = await showDialog<bool>(
+      context: context,
+      builder: (ctx) =>
+          _EditLocalModelDialog(initialValue: model.supportsMultimodal),
+    );
+
+    if (supportsMultimodal != null) {
+      await ref
+          .read(modelProvider.notifier)
+          .updateLocalModelMultimodal(model.id, supportsMultimodal);
+    }
+  }
+}
+
+// 编辑本地模型多模态设置对话框
+
+class _EditLocalModelDialog extends StatefulWidget {
+  final bool initialValue;
+
+  const _EditLocalModelDialog({required this.initialValue});
+
+  @override
+  State<_EditLocalModelDialog> createState() => _EditLocalModelDialogState();
+}
+
+class _EditLocalModelDialogState extends State<_EditLocalModelDialog> {
+  late bool _supportsMultimodal;
+
+  @override
+  void initState() {
+    super.initState();
+    _supportsMultimodal = widget.initialValue;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.image_outlined),
+          SizedBox(width: 8),
+          Text('编辑本地模型'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 多模态开关
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest.withValues(
+                alpha: 0.5,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.image_outlined,
+                      color: theme.colorScheme.primary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '支持多模态',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Switch(
+                      value: _supportsMultimodal,
+                      onChanged: (v) => setState(() => _supportsMultimodal = v),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _supportsMultimodal ? '✅ 已启用：可发送图片给模型进行分析' : '❌ 已禁用：仅支持纯文本对话',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: _supportsMultimodal
+                        ? Colors.green
+                        : theme.colorScheme.error,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '💡 提示：本地模型需要是 VL/Vision 版本（如 llava、Qwen2-VL、llama3.2-vision 等）才能支持图片输入。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _supportsMultimodal),
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  mmproj 投影仪列表区域
+// ════════════════════════════════════════════════════════════════════════════
+
+class _MmprojSection extends ConsumerWidget {
+  final List<ModelEntry> models;
+  const _MmprojSection({required this.models});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 分隔标题
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.purple.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.purple.shade200),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.view_in_ar_rounded,
+                size: 18,
+                color: Colors.purple.shade600,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '多模态投影仪 (mmproj)',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: Colors.purple.shade700,
+                      ),
+                    ),
+                    Text(
+                      'mmproj 是多模态 image-to-text 的必要组件，不可单独加载',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: Colors.purple.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.purple.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${models.length}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.purple.shade700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        // mmproj 列表
+        ...models.map(
+          (m) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _MmprojCard(model: m),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  mmproj 投影仪卡片
+// ════════════════════════════════════════════════════════════════════════════
+
+class _MmprojCard extends ConsumerWidget {
+  final ModelEntry model;
+  const _MmprojCard({required this.model});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.purple.shade50,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            // 图标
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.purple.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.view_in_ar_rounded,
+                color: Colors.purple.shade600,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            // 名称和说明
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    model.displayName,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.purple.shade800,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '不可直接加载，需配合多模态模型使用',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: Colors.purple.shade600,
+                    ),
+                  ),
+                  if (model.filePath != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      model.filePath!.split('/').last,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.6,
+                        ),
+                        fontFamily: 'monospace',
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 删除按钮
+            IconButton(
+              icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
+              tooltip: '删除',
+              onPressed: () => _confirmDelete(context, ref),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除 mmproj'),
+        content: Text(
+          '确认删除「${model.displayName}」？\n\n此文件是多模态投影仪，删除后将无法支持图片/视频理解功能。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      ref.read(modelProvider.notifier).deleteModel(model.id);
+    }
   }
 }

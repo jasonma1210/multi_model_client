@@ -202,7 +202,12 @@ class ContextCompressorService {
         .where((m) => m.role != 'tool')
         .toList();
 
-    if (filteredMessages.length <= maxMessages) {
+    // 双重检查：消息数量 OR token 数超过阈值都需要压缩
+    final estimatedTokens = estimateTotalTokens(filteredMessages);
+    final needsByCount = filteredMessages.length > maxMessages;
+    final needsByTokens = estimatedTokens > _effectiveMaxTokens;
+
+    if (!needsByCount && !needsByTokens) {
       // 不需要压缩，直接转换但标记重要消息
       return _convertToCompressedMessages(filteredMessages, importantMessages);
     }
@@ -720,16 +725,54 @@ class ContextCompressorService {
     return '${time.month}/${time.day} ${time.hour}:${time.minute.toString().padLeft(2, '0')}';
   }
 
-  /// 估算 token 数（保守估算，含 20% 安全余量）
+  /// 预编译的中文字符正则
+  static final _chineseRegex = RegExp(r'[\u4e00-\u9fff]');
+  
+  /// 预编译的代码块正则
+  static final _codeBlockRegex = RegExp(r'```[\s\S]*?```');
+  
+  /// 预编译的英文单词正则
+  static final _englishWordRegex = RegExp(r'[a-zA-Z]+');
+  
+  /// 估算 token 数（优化版，分层估算）
   ///
-  /// 注意：实际 tokenizer 可能与估算有差异，保守估算避免超限崩溃
+  /// 针对不同内容类型使用不同的估算系数：
+  /// - 中文字符：~1.5 token/字
+  /// - 英文单词：~1.3 token/词
+  /// - 代码块：~0.4 token/字符
+  /// - 特殊符号：~0.5 token/字符
+  /// - 安全余量：15%
   static int estimateTokens(String text) {
-    // 中文字符约 1-2 token，英文约 4 字符 1 token
-    // 加 20% 安全余量避免实际 token 超出估算
-    final chineseChars = RegExp(r'[\u4e00-\u9fff]').allMatches(text).length;
-    final otherChars = text.length - chineseChars;
-    final estimated = (chineseChars * 1.5 + otherChars / 4);
-    return (estimated * 1.2).round(); // 20% 安全余量
+    if (text.isEmpty) return 0;
+    
+    int tokenCount = 0;
+    
+    // 1. 提取并计算代码块 token（代码块 token 密度较低）
+    final codeBlocks = _codeBlockRegex.allMatches(text);
+    int codeLength = 0;
+    for (final match in codeBlocks) {
+      codeLength += match.group(0)!.length;
+      tokenCount += (match.group(0)!.length * 0.4).ceil();
+    }
+    
+    // 2. 计算非代码部分
+    final nonCodeText = text.replaceAll(_codeBlockRegex, '');
+    
+    // 3. 中文字符 token
+    final chineseChars = _chineseRegex.allMatches(nonCodeText).length;
+    tokenCount += (chineseChars * 1.5).ceil();
+    
+    // 4. 英文单词 token
+    final englishWords = _englishWordRegex.allMatches(nonCodeText).length;
+    tokenCount += (englishWords * 1.3).ceil();
+    
+    // 5. 其他字符（数字、标点、空格等）
+    final otherChars = nonCodeText.length - chineseChars - 
+        _englishWordRegex.allMatches(nonCodeText).map((m) => m.group(0)!.length).fold(0, (a, b) => a + b);
+    tokenCount += (otherChars * 0.5).ceil();
+    
+    // 6. 添加 15% 安全余量
+    return (tokenCount * 1.15).ceil();
   }
 
   /// 估算消息列表的总 token 数
@@ -762,9 +805,11 @@ class ContextCompressorService {
     final systemTokens = estimateTotalTokens(systemMessages);
 
     if (systemTokens >= tokenBudget) {
-      // system 消息本身就超预算了，只保留 system 消息（无解）
-      debugPrint('[ContextCompressor] ❌ system 消息已超预算 (${systemTokens}tokens)');
-      return systemMessages;
+      // system 消息本身就超预算了，尝试截断 system 消息内容
+      debugPrint('[ContextCompressor] ❌ system 消息已超预算 (${systemTokens}tokens)，尝试截断...');
+      final truncatedSystem = _truncateSystemMessages(systemMessages, tokenBudget);
+      debugPrint('[ContextCompressor] 🔧 system 消息截断后: ${estimateTotalTokens(truncatedSystem)}tokens');
+      return truncatedSystem;
     }
 
     final remainingBudget = tokenBudget - systemTokens;
@@ -822,6 +867,67 @@ class ContextCompressorService {
     final result = [...systemMessages, ...keptMessages];
       debugPrint('[ContextCompressor] ✅ 截断完成: ${messages.length} → ${result.length} 条消息, '
         '${estimateTotalTokens(result)}tokens (预算$tokenBudget)');
+    return result;
+  }
+
+  /// 截断超预算的 system 消息
+  ///
+  /// 策略：
+  /// 1. 保留第一条 system 消息（通常是 systemPrompt，最重要）
+  /// 2. 对后续 system 消息按比例截断内容
+  /// 3. 如果仍超预算，逐步丢弃非关键 system 消息
+  static List<dynamic> _truncateSystemMessages(
+    List<dynamic> systemMessages,
+    int tokenBudget,
+  ) {
+    if (systemMessages.isEmpty) return [];
+
+    final result = <dynamic>[];
+    int usedTokens = 0;
+
+    for (int i = 0; i < systemMessages.length; i++) {
+      final msg = systemMessages[i];
+      final content = msg.content?.toString() ?? '';
+      final msgTokens = estimateTokens(content);
+
+      if (i == 0) {
+        // 第一条 system 消息（systemPrompt）优先保留
+        if (msgTokens <= tokenBudget) {
+          result.add(msg);
+          usedTokens += msgTokens;
+        } else {
+          // 即使第一条也超预算，截断内容
+          final maxChars = (tokenBudget / 1.5).round();
+          final truncated = content.length > maxChars
+              ? '${content.substring(0, maxChars)}...'
+              : content;
+          result.add(_TruncationNotice(role: 'system', content: truncated));
+          usedTokens += estimateTokens(truncated);
+        }
+        continue;
+      }
+
+      final remainingBudget = tokenBudget - usedTokens;
+      if (remainingBudget <= 50) break; // 预算不足，丢弃剩余 system 消息
+
+      if (msgTokens <= remainingBudget) {
+        result.add(msg);
+        usedTokens += msgTokens;
+      } else {
+        // 截断内容以适配剩余预算
+        final maxChars = (remainingBudget / 1.5).round();
+        if (maxChars > 50) {
+          final truncated = content.length > maxChars
+              ? '${content.substring(0, maxChars)}...'
+              : content;
+          result.add(_TruncationNotice(role: 'system', content: truncated));
+          debugPrint('[ContextCompressor] 🔧 截断 system 消息 #$i: ${msgTokens} → ${estimateTokens(truncated)} tokens');
+        }
+        // 不管截断与否，预算已耗尽，停止
+        break;
+      }
+    }
+
     return result;
   }
 

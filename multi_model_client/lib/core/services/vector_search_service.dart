@@ -10,7 +10,6 @@
 /// @version 1.0.0
 library;
 
-import 'dart:convert';
 import 'package:drift/drift.dart';
 import '../storage/database.dart';
 import '../storage/database_connection.dart';

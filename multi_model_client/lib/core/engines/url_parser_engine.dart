@@ -13,9 +13,11 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' show parse;
 
 import '../services/jina_reader_service.dart';
+import 'model_inference_engine.dart' show globalModelEngine, ChatMessage, ChatOptions;
 
 /// URL解析引擎
 /// 提取网页内容并生成智能总结
@@ -135,7 +137,7 @@ class URLParserEngine {
               }
             }
           } catch (e) {
-            // 忽略解析错误，继续尝试其他方式
+            debugPrint('[url_parser_engine] Error: $e');
           }
         }
       }
@@ -275,7 +277,7 @@ class URLParserEngine {
               }
             }
           } catch (e) {
-            // 忽略解析错误
+            debugPrint('[url_parser_engine] Error: $e');
           }
         }
       }
@@ -396,7 +398,7 @@ class URLParserEngine {
               }
             }
           } catch (e) {
-            // 忽略解析错误
+            debugPrint('[url_parser_engine] Error: $e');
           }
         }
       }
@@ -472,7 +474,7 @@ class URLParserEngine {
         return subtitles;
       }
     } catch (e) {
-      // 忽略字幕获取错误
+      debugPrint('[url_parser_engine] Error: $e');
     }
     return null;
   }
@@ -546,7 +548,7 @@ class URLParserEngine {
               }
             }
           } catch (e) {
-            // 忽略解析错误
+            debugPrint('[url_parser_engine] Error: $e');
           }
         }
       }
@@ -668,7 +670,7 @@ class URLParserEngine {
         );
       }
     } catch (e) {
-      // Jina 失败，继续尝试原生解析
+      debugPrint('[url_parser_engine] Error: $e');
     }
 
     // 方案2：原生 HTML 解析（后备）
@@ -751,56 +753,330 @@ class URLParserEngine {
 }
 
 /// 智能总结引擎
+/// 使用 LLM 生成内容摘要、要点提炼和思维导图
 class SummaryEngine {
   /// 生成极简摘要
-  Future<String> generateBriefSummary(String content) async {
-    // TODO: 使用LLM生成极简摘要
-    // 控制在100字以内
-    return '这是内容的极简摘要，提取最核心的信息。';
+  /// [content] - 要摘要的内容
+  /// [modelId] - 使用的模型 ID（可选，默认使用全局推理引擎）
+  /// 控制在 100 字以内
+  Future<String> generateBriefSummary(String content, {String? modelId}) async {
+    if (content.isEmpty) return '';
+
+    final prompt = '''
+请为以下内容生成一个极简摘要，要求：
+1. 不超过 100 个字符
+2. 提取最核心的信息
+3. 直接输出摘要，不要任何前缀说明
+
+内容：
+${content.length > 2000 ? '${content.substring(0, 2000)}...' : content}
+''';
+
+    try {
+      final result = await _callLLM(prompt, modelId, maxTokens: 200);
+      return result.trim();
+    } catch (e) {
+      debugPrint('[SummaryEngine] generateBriefSummary 失败: $e');
+      return _fallbackBriefSummary(content);
+    }
   }
 
   /// 生成详细总结
-  Future<String> generateDetailedSummary(String content) async {
-    // TODO: 使用LLM生成详细总结
-    // 包含主要观点和细节
-    return '''
-这是内容的详细总结：
+  /// [content] - 要总结的内容
+  /// [modelId] - 使用的模型 ID（可选）
+  Future<String> generateDetailedSummary(String content, {String? modelId}) async {
+    if (content.isEmpty) return '';
 
-1. 主要观点一
-   - 细节说明
+    final prompt = '''
+请为以下内容生成详细总结，要求：
+1. 包含主要观点和关键细节
+2. 使用结构化格式（标题、要点）
+3. 适当分段，便于阅读
+4. 直接输出总结，不要任何前缀说明
 
-2. 主要观点二
-   - 细节说明
-
-3. 主要观点三
-   - 细节说明
+内容：
+${content.length > 3000 ? '${content.substring(0, 3000)}...' : content}
 ''';
+
+    try {
+      final result = await _callLLM(prompt, modelId, maxTokens: 1000);
+      return result.trim();
+    } catch (e) {
+      debugPrint('[SummaryEngine] generateDetailedSummary 失败: $e');
+      return _fallbackDetailedSummary(content);
+    }
   }
 
   /// 生成要点提炼
-  Future<List<String>> generateKeyPoints(String content) async {
-    // TODO: 使用LLM提取要点
-    return [
-      '要点1：关键信息',
-      '要点2：关键信息',
-      '要点3：关键信息',
-    ];
+  /// [content] - 要提炼的内容
+  /// [modelId] - 使用的模型 ID（可选）
+  Future<List<String>> generateKeyPoints(String content, {String? modelId}) async {
+    if (content.isEmpty) return [];
+
+    final prompt = '''
+请为以下内容提炼关键要点，要求：
+1. 提取 3-8 个最重要的要点
+2. 每个要点简洁明了，不超过一句话
+3. 按重要性排序
+4. 直接输出要点列表，每行一个，不要编号，不要任何前缀说明
+
+内容：
+${content.length > 2500 ? '${content.substring(0, 2500)}...' : content}
+''';
+
+    try {
+      final result = await _callLLM(prompt, modelId, maxTokens: 500);
+      final points = result
+          .split('\n')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .where((s) => !s.startsWith('#') && !s.startsWith('-') && !s.startsWith('*'))
+          .map((s) => s.replaceFirst(RegExp(r'^[\d]+[.、:：]\s*'), ''))
+          .toList();
+      return points.take(8).toList();
+    } catch (e) {
+      debugPrint('[SummaryEngine] generateKeyPoints 失败: $e');
+      return _fallbackKeyPoints(content);
+    }
   }
 
   /// 生成思维导图
-  Future<String> generateMindMap(String content) async {
-    // TODO: 使用LLM生成思维导图结构
-    return '''
-# 中心主题
+  /// [content] - 要生成思维导图的内容
+  /// [modelId] - 使用的模型 ID（可选）
+  Future<String> generateMindMap(String content, {String? modelId}) async {
+    if (content.isEmpty) return '';
 
-## 分支1
-- 子节点1
-- 子节点2
+    final prompt = '''
+请为以下内容生成思维导图结构，要求：
+1. 使用 Markdown 格式
+2. 中心主题用 # 标题
+3. 主要分支用 ## 二级标题
+4. 子节点用 - 列表项
+5. 层次清晰，逻辑分明
+6. 直接输出思维导图，不要任何前缀说明
 
-## 分支2
-- 子节点1
-- 子节点2
+内容：
+${content.length > 2000 ? '${content.substring(0, 2000)}...' : content}
 ''';
+
+    try {
+      final result = await _callLLM(prompt, modelId, maxTokens: 1500);
+      return result.trim();
+    } catch (e) {
+      debugPrint('[SummaryEngine] generateMindMap 失败: $e');
+      return _fallbackMindMap(content);
+    }
+  }
+
+  /// 生成内容分类标签
+  /// [content] - 要分类的内容
+  /// [modelId] - 使用的模型 ID（可选）
+  Future<List<String>> generateTags(String content, {String? modelId}) async {
+    if (content.isEmpty) return [];
+
+    final prompt = '''
+请为以下内容生成 3-5 个分类标签，要求：
+1. 每个标签简洁，1-3 个中文词
+2. 反映内容的主题和类别
+3. 直接输出标签，每行一个，不要任何前缀说明
+
+内容：
+${content.length > 1500 ? '${content.substring(0, 1500)}...' : content}
+''';
+
+    try {
+      final result = await _callLLM(prompt, modelId, maxTokens: 200);
+      final tags = result
+          .split('\n')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .where((s) => !s.startsWith('#') && !s.startsWith('-') && !s.startsWith('*'))
+          .map((s) => s.replaceFirst(RegExp(r'^[\d]+[.、:：]\s*'), ''))
+          .map((s) => s.length > 10 ? s.substring(0, 10) : s)
+          .toList();
+      return tags.take(5).toList();
+    } catch (e) {
+      debugPrint('[SummaryEngine] generateTags 失败: $e');
+      return [];
+    }
+  }
+
+  /// 调用 LLM 生成内容
+  Future<String> _callLLM(String prompt, String? modelId, {int maxTokens = 500}) async {
+    // 获取推理引擎
+    final engine = globalModelEngine;
+
+    // 如果没有指定模型 ID，尝试获取已加载的模型
+    String? effectiveModelId = modelId;
+
+    if (effectiveModelId == null || effectiveModelId.isEmpty) {
+      // 尝试从已加载的模型中获取一个
+      effectiveModelId = _getFirstAvailableModelId();
+    }
+
+    if (effectiveModelId == null || effectiveModelId.isEmpty) {
+      throw StateError('没有可用的模型来生成摘要');
+    }
+
+    // 检查模型是否就绪
+    if (!engine.isModelReady(effectiveModelId)) {
+      debugPrint('[SummaryEngine] 模型 $effectiveModelId 未就绪，尝试加载...');
+      try {
+        await engine.loadModel(effectiveModelId);
+      } catch (e) {
+        debugPrint('[SummaryEngine] 模型加载失败: $e');
+        throw StateError('模型加载失败: $e');
+      }
+    }
+
+    // 构建消息
+    final messages = [
+      ChatMessage.system(
+        '你是一个专业的文本摘要助手。你的任务是快速准确地提取文本的核心信息。'
+        '请直接输出结果，不要有任何前缀或说明文字。',
+      ),
+      ChatMessage.user(prompt),
+    ];
+
+    // 调用推理引擎
+    final options = ChatOptions(
+      maxTokens: maxTokens,
+      temperature: 0.3, // 低温度保证稳定性
+    );
+
+    final result = await engine.generateChat(
+      effectiveModelId,
+      messages,
+      options: options,
+    );
+
+    return result;
+  }
+
+  /// 获取第一个可用的模型 ID
+  String? _getFirstAvailableModelId() {
+    // 优先选择远程模型（通常更稳定）
+    if (_remoteModelIds.isNotEmpty) {
+      return _remoteModelIds.first;
+    }
+    // 然后选择本地模型
+    if (_localModelIds.isNotEmpty) {
+      return _localModelIds.first;
+    }
+    return null;
+  }
+
+  /// 缓存已知的模型 ID 列表
+  static final List<String> _remoteModelIds = [];
+  static final List<String> _localModelIds = [];
+
+  /// 注册可用的模型（由外部调用）
+  static void registerModel(String modelId, {bool isLocal = false}) {
+    if (isLocal) {
+      if (!_localModelIds.contains(modelId)) {
+        _localModelIds.add(modelId);
+      }
+    } else {
+      if (!_remoteModelIds.contains(modelId)) {
+        _remoteModelIds.add(modelId);
+      }
+    }
+  }
+
+  /// 移除已卸载的模型
+  static void unregisterModel(String modelId) {
+    _remoteModelIds.remove(modelId);
+    _localModelIds.remove(modelId);
+  }
+
+  /// 后备摘要生成（当 LLM 不可用时）
+  String _fallbackBriefSummary(String content) {
+    // 简单的基于规则的后备摘要
+    final lines = content.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    if (lines.isEmpty) return '内容为空';
+
+    // 取第一行作为摘要
+    final firstLine = lines.first.trim();
+    if (firstLine.length <= 100) return firstLine;
+
+    // 截断到 100 字符
+    return '${firstLine.substring(0, 97)}...';
+  }
+
+  /// 后备详细摘要
+  String _fallbackDetailedSummary(String content) {
+    final lines = content.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    if (lines.isEmpty) return '内容为空';
+
+    final buffer = StringBuffer();
+    buffer.writeln('【内容概要】');
+    buffer.writeln();
+
+    // 取前 5 行作为摘要
+    final summaryLines = lines.take(5);
+    for (final line in summaryLines) {
+      buffer.writeln(line.trim());
+    }
+
+    if (lines.length > 5) {
+      buffer.writeln();
+      buffer.writeln('...（内容共 ${lines.length} 行）');
+    }
+
+    return buffer.toString().trim();
+  }
+
+  /// 后备要点提炼
+  List<String> _fallbackKeyPoints(String content) {
+    final lines = content.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    if (lines.isEmpty) return [];
+
+    // 简单策略：取每段的第一句
+    final keyPoints = <String>[];
+    for (final line in lines.take(5)) {
+      final trimmed = line.trim();
+      if (trimmed.length > 10) {
+        // 取第一个完整句子
+        final sentenceEnd = trimmed.indexOf(RegExp(r'[。！？.!?]'));
+        if (sentenceEnd > 0 && sentenceEnd < 100) {
+          keyPoints.add(trimmed.substring(0, sentenceEnd + 1));
+        } else if (trimmed.length <= 50) {
+          keyPoints.add(trimmed);
+        }
+      }
+    }
+
+    return keyPoints.take(5).toList();
+  }
+
+  /// 后备思维导图
+  String _fallbackMindMap(String content) {
+    final lines = content.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    if (lines.isEmpty) return '# 内容为空';
+
+    // 取第一行作为中心主题
+    final firstLine = lines.first.trim();
+    final centerTopic = firstLine.length > 50
+        ? '${firstLine.substring(0, 47)}...'
+        : firstLine;
+
+    final buffer = StringBuffer();
+    buffer.writeln('# $centerTopic');
+    buffer.writeln();
+
+    // 取后续行作为子节点
+    for (int i = 1; i < lines.length && i <= 6; i++) {
+      buffer.writeln('## 主题 $i');
+      final subLine = lines[i].trim();
+      if (subLine.length <= 30) {
+        buffer.writeln('- $subLine');
+      } else {
+        buffer.writeln('- ${subLine.substring(0, 27)}...');
+      }
+      buffer.writeln();
+    }
+
+    return buffer.toString().trim();
   }
 }
 

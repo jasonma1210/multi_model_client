@@ -10,15 +10,17 @@
 /// @version 2.0.0 (使用 jieba_flutter)
 library;
 
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:jieba_flutter/analysis/jieba_segmenter.dart';
-import 'package:jieba_flutter/analysis/seg_token.dart';
 
 /// 中文分词服务
 /// 使用 jieba 词典分词，支持中英文混合文本
 class ChineseSegmenterService {
   static bool _initialized = false;
   static bool _initStarted = false;
+  static Completer<void>? _initCompleter;
   
   /// jieba 分词器实例（延迟初始化）
   static JiebaSegmenter? _jieba;
@@ -35,7 +37,7 @@ class ChineseSegmenterService {
     '对', '对于', '关于', '通过', '根据', '按照', '为了', '因为',
     '所以', '如果', '虽然', '即使', '无论', '不管', '只要', '除非',
     '比', '比较', '更', '最', '非常', '特别', '相当', '太', '真',
-    '把', '被', '让', '给', '向', '往', '从', '到', '为', '以',
+    '把', '被', '让', '给', '向', '往', '从', '为',
     '并', '且', '只', '已', '已经', '正在',
     // 英文停用词
     'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
@@ -60,10 +62,15 @@ class ChineseSegmenterService {
     // 防止重复初始化
     if (_initialized || _initStarted) {
       debugPrint('[ChineseSegmenterService] 初始化跳过 (已初始化: $_initialized, 已开始: $_initStarted)');
+      // 如果正在初始化中，等待完成
+      if (_initCompleter != null) {
+        await _initCompleter!.future;
+      }
       return;
     }
     
     _initStarted = true;
+    _initCompleter = Completer<void>();
     debugPrint('[ChineseSegmenterService] 计划延迟初始化 jieba...');
     
     // 使用 postFrameCallback 确保 Flutter 完全初始化后再加载 jieba
@@ -72,12 +79,30 @@ class ChineseSegmenterService {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         debugPrint('[ChineseSegmenterService] Post frame callback 触发');
         await _doInit();
+        // 通知等待者初始化完成
+        if (!_initCompleter!.isCompleted) {
+          _initCompleter!.complete();
+        }
       });
       debugPrint('[ChineseSegmenterService] 已注册 postFrameCallback');
     } catch (e) {
       // 如果无法使用 postFrameCallback（如在测试中），直接初始化
       debugPrint('[ChineseSegmenterService] 无法使用 postFrameCallback，直接初始化: $e');
       await _doInit();
+      if (!_initCompleter!.isCompleted) {
+        _initCompleter!.complete();
+      }
+    }
+  }
+
+  /// 等待初始化完成（如果正在初始化则等待，否则立即返回）
+  static Future<void> waitForInit() async {
+    if (_initialized) return;
+    if (_initCompleter != null) {
+      await _initCompleter!.future;
+    } else {
+      // 从未触发过初始化，触发一次
+      await init();
     }
   }
   
@@ -295,9 +320,8 @@ class ChineseSegmenterService {
     return _stopWords.contains(word.toLowerCase());
   }
   
-  /// 调试输出
-  static void debugPrint(String message) {
-    // ignore: avoid_print
-    print(message);
+  /// 调试输出 - 使用 Flutter 的 debugPrint
+  static void log(String message) {
+    debugPrint(message);
   }
 }

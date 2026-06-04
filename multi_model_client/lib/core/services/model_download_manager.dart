@@ -30,6 +30,8 @@ class ModelInfo {
   final int minStorageGB; // 最小存储需求（GB）
   final bool isQuantized; // 是否量化
   final String? quantizationMethod; // 量化方法（GGUF, GPTQ等）
+  final String? mmprojPath; // mmproj 投影仪文件路径（用于多模态模型）
+  final bool isMultimodal; // 是否支持多模态（视觉）
 
   ModelInfo({
     required this.id,
@@ -50,6 +52,8 @@ class ModelInfo {
     this.minStorageGB = 2,
     this.isQuantized = false,
     this.quantizationMethod,
+    this.mmprojPath,
+    this.isMultimodal = false,
   });
 
   factory ModelInfo.fromJson(Map<String, dynamic> json, ModelSource source) {
@@ -286,7 +290,7 @@ class ModelDownloadManager {
         queryParameters: {
           'search': query,
           'limit': limit,
-          if (filter != null) 'filter': filter,
+          'filter': ?filter,
         },
       );
 
@@ -313,7 +317,7 @@ class ModelDownloadManager {
         queryParameters: {
           'name': query,
           'PageSize': limit,
-          if (filter != null) 'filter': filter,
+          'filter': ?filter,
         },
       );
 

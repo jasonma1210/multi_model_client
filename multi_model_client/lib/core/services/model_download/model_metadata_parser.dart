@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 /// 模型元数据解析器
 class ModelMetadataParser {
   /// 解析参数量（亿）
@@ -251,7 +249,7 @@ class ModelMetadata {
   @override
   String toString() {
     return 'ModelMetadata(params: ${parameterSize}B, quant: $quantizationLevel, '
-        'ctx: ${contextWindow} tokens, layers: $totalLayers, '
-        'mem: ${memoryRequirementDescription})';
+        'ctx: $contextWindow tokens, layers: $totalLayers, '
+        'mem: $memoryRequirementDescription)';
   }
 }

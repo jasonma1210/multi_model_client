@@ -205,6 +205,26 @@ class McpServerManager {
       return null;
     }
 
+    // ★★★ 移动端命令兼容性检查 ★★★
+    // Android/iOS 不支持 npx/node/uvx 等外部命令，只能运行内置或 Python 类型
+    final command = config.command;
+    final isNpxCommand = command == 'npx' || command == 'npx.cmd';
+    final isNodeCommand = command == 'node' || command == 'node.exe';
+    final isUvxCommand = command == 'uvx' || command == 'uvx.exe';
+    
+    if (Platform.isAndroid || Platform.isIOS) {
+      if (isNpxCommand || isNodeCommand || isUvxCommand) {
+        debugPrint('[McpServerManager] ⚠️ 移动端不支持 $command 命令: $serverId');
+        _updateStatus(serverId, McpServerStatus.error);
+        _addLog(serverId, 'error', '移动端不支持 $command 命令，请在桌面端使用');
+        return null;
+      }
+      if (command == 'python' || command == 'python3') {
+        // Python 命令需要额外确认环境
+        debugPrint('[McpServerManager] ⚠️ 移动端可能不支持 Python 命令: $serverId');
+      }
+    }
+
     // 如果已经在运行，先停止
     if (_serverStatuses[serverId] == McpServerStatus.running) {
       await stopServer(serverId);
@@ -466,13 +486,17 @@ class McpServerManager {
       if (dir != null && await Directory(dir).exists()) {
         return dir;
       }
-    } catch (_) {}
+    } catch (_) {
+      // ignore: non-critical error
+    }
     
     // 降级：返回临时目录
     try {
       final tempDir = Directory.systemTemp.path;
       return tempDir;
-    } catch (_) {}
+    } catch (_) {
+      // ignore: non-critical error
+    }
     
     // 最终降级：返回当前目录
     return Directory.current.path;
@@ -495,7 +519,9 @@ class McpServerManager {
         _cachedAppSupportDir = '${process.stdout.toString().trim()}/Application Support';
         return _cachedAppSupportDir;
       }
-    } catch (_) {}
+    } catch (_) {
+      // ignore: non-critical error
+    }
     
     return null;
   }

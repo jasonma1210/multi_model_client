@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../protocols/mcp_connection_manager.dart';
-import '../protocols/mcp_protocol.dart' show MCPTool, MCPToolResult, MCPContent;
+import '../protocols/mcp_protocol.dart' show MCPTool, MCPToolResult;
 import '../protocols/mcp_server_manager.dart';
 import 'mcp_config_manager.dart';
 
@@ -229,7 +229,7 @@ class MCPServiceManager {
       
       toolCall.result = result;
       toolCall.isLoading = false;
-      debugPrint('[MCPServiceManager] 工具调用成功: ${toolName}, 结果: ${result.content.length} items');
+      debugPrint('[MCPServiceManager] 工具调用成功: $toolName, 结果: ${result.content.length} items');
     } catch (e) {
       debugPrint('[MCPServiceManager] 工具调用失败: $e');
       toolCall.error = e.toString();
@@ -275,7 +275,9 @@ class MCPServiceManager {
           if (argsStr != null) {
             try {
               args = jsonDecode(argsStr) as Map<String, dynamic>;
-            } catch (_) {}
+            } catch (_) {
+              // ignore: non-critical error
+            }
           }
         } else {
           // XML 格式

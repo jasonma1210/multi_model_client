@@ -1,210 +1,326 @@
-/// llama.cpp 库加载器 - 简化版
-///
-/// 工业级标准实现：
-/// - App 打包时，各平台编译好的 llama.cpp 动态库已嵌入安装包
-/// - 运行时只需找到库路径并设置 Llama.libraryPath
-/// - .gguf 模型文件通过模型下载功能动态获取
-///
-/// 查找优先级：
-/// 1. app bundle Frameworks 目录（macOS 生产环境）
-/// 2. 项目 libs 目录（开发环境）
-/// 3. 系统路径（homebrew / usr/local）
-///
-/// @author JianMa
-/// @version 3.0.0
-library;
-
 import 'dart:io';
+import 'dart:ffi';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
-/// llama.cpp 库加载器单例
+import 'hardware_feature_detector.dart';
+
+/// llama.cpp 库版本（对应不同的 CPU 特性优化）
+enum LlamaLibraryVersion {
+  /// 高通 QNN NPU 版本（最快最省电）
+  /// 需要系统安装 QNN 驱动，用户应用无法强制安装
+  qnn('libllama_qnn.so', AccelerationPriority.npuQnn),
+
+  /// Vulkan GPU 加速版本（通用性强）
+  vulkan('libllama_vulkan.so', AccelerationPriority.vulkan),
+
+  /// DotProd 优化版本（ARMv8.2+，提升 2-3 倍）
+  dotprod('libllama_dotprod.so', AccelerationPriority.dotprod),
+
+  /// i8mm 优化版本（ARMv8.2+，INT8 量化加速）
+  i8mm('libllama_i8mm.so', AccelerationPriority.dotprod),
+
+  /// SME 优化版本（ARMv9+，但 Android GKI 内核可能有 bug）
+  /// ⚠️ 已禁用：Realme GT7 Pro (骁龙 8 Elite) + Android 16 会 SIGILL 崩溃
+  // sme('libllama_sme.so', AccelerationPriority.dotprod),
+
+  /// 通用版本（兜底，所有设备可用）
+  generic('libllama.so', AccelerationPriority.generic);
+
+  final String fileName;
+  final AccelerationPriority priority;
+
+  const LlamaLibraryVersion(this.fileName, this.priority);
+}
+
+/// 动态库加载结果
+class LibraryLoadResult {
+  final bool success;
+  final DynamicLibrary? library;
+  final LlamaLibraryVersion version;
+  final String? error;
+  final String? note;
+
+  const LibraryLoadResult({
+    required this.success,
+    this.library,
+    required this.version,
+    this.error,
+    this.note,
+  });
+
+  @override
+  String toString() {
+    return 'LibraryLoadResult(success: $success, version: ${version.fileName}, error: $error)';
+  }
+}
+
+/// llama.cpp 动态库加载器
 ///
-/// 职责单一：找到动态库 → 设置 Llama.libraryPath → 完成
-/// 不再负责沙盒复制、版本更新等，由上层 LlamaParent/Isolate 处理推理
+/// 多维度动态适配核心：
+/// 1. 检测 CPU 特性（DotProd, i8mm, SME）
+/// 2. 检测芯片厂商（高通、联发科、华为等）
+/// 3. 检测 NPU 可用性（QNN、NeuroPilot、HiAI）
+/// 4. 动态选择最优的库版本加载
 class LlamaLibraryLoader {
-  static final LlamaLibraryLoader _instance = LlamaLibraryLoader._();
-  static LlamaLibraryLoader get instance => _instance;
+  static LlamaLibraryLoader? _instance;
+  static LlamaLibraryLoader get instance => _instance ??= LlamaLibraryLoader._();
 
   LlamaLibraryLoader._();
 
-  /// 缓存找到的库路径
-  String? _cachedLibraryPath;
+  final _featureDetector = CpuFeatureDetector.instance;
 
-  /// 是否已初始化
-  bool _initialized = false;
+  // 缓存已加载的库
+  DynamicLibrary? _loadedLibrary;
+  LlamaLibraryVersion? _loadedVersion;
 
-  /// 获取库文件名（按平台）
-  static String get libraryName {
-    if (Platform.isMacOS || Platform.isIOS) {
-      return 'libllama.dylib';
-    } else if (Platform.isWindows) {
-      return 'libllama.dll';
-    } else {
-      return 'libllama.so';
-    }
-  }
-
-  /// 初始化加载器
+  /// ★★★ 核心：动态加载最优的 llama.cpp 库 ★★★
   ///
-  /// 仅查找库路径并缓存，不复制文件
-  Future<void> init() async {
-    if (_initialized) return;
+  /// 加载策略（优先级从高到低）：
+  /// 1. 高通 QNN NPU（最快最省电）
+  /// 2. Vulkan GPU 加速（通用性强）
+  /// 3. DotProd/i8mm CPU 优化（提升 2-3 倍）
+  /// 4. 通用版本（兜底）
+  Future<LibraryLoadResult> loadOptimalLibrary() async {
+    // 如果已经加载过，直接返回缓存
+    if (_loadedLibrary != null && _loadedVersion != null) {
+      debugPrint('[LlamaLibraryLoader] 使用已加载的库: ${_loadedVersion!.fileName}');
+      return LibraryLoadResult(
+        success: true,
+        library: _loadedLibrary,
+        version: _loadedVersion!,
+        note: '使用缓存',
+      );
+    }
 
-    debugPrint('[LlamaLibraryLoader] 初始化...');
+    // 获取硬件特性
+    final features = await _featureDetector.getCpuFeatures();
+    final npuResult = await _featureDetector.checkNpuAvailability();
+    final vendorInfo = await _featureDetector.getChipVendor();
 
-    try {
-      final libraryPath = await _findLibraryPath();
-      if (libraryPath != null) {
-        _cachedLibraryPath = libraryPath;
-        debugPrint('[LlamaLibraryLoader] ✅ 找到库: $libraryPath');
+    debugPrint('[LlamaLibraryLoader] 硬件检测结果:');
+    debugPrint('[LlamaLibraryLoader]   - CPU 特性: ${features.recommendedLibrary}');
+    debugPrint('[LlamaLibraryLoader]   - 芯片厂商: ${vendorInfo.vendor}');
+    debugPrint('[LlamaLibraryLoader]   - NPU 可用: ${npuResult.available} (${npuResult.runtime})');
+
+    // 尝试加载优先级列表
+    final priorityList = await _featureDetector.getAccelerationPriority();
+
+    for (final priority in priorityList) {
+      final version = _getVersionForPriority(priority, features, npuResult);
+      if (version == null) continue;
+
+      final result = await _tryLoadLibrary(version);
+      if (result.success) {
+        _loadedLibrary = result.library;
+        _loadedVersion = version;
+        debugPrint('[LlamaLibraryLoader] ✅ 成功加载: ${version.fileName}');
+        return result;
       } else {
-        debugPrint('[LlamaLibraryLoader] ❌ 未找到 llama.cpp 库文件');
-        debugPrint('[LlamaLibraryLoader] 提示：请确保 macos/Frameworks/ 目录包含 libraryName');
+        debugPrint('[LlamaLibraryLoader] ❌ 加载失败: ${version.fileName}, 尝试下一个...');
       }
-    } catch (e) {
-      debugPrint('[LlamaLibraryLoader] 初始化失败: $e');
     }
 
-    _initialized = true;
+    // 所有版本都失败，返回错误
+    return const LibraryLoadResult(
+      success: false,
+      version: LlamaLibraryVersion.generic,
+      error: '所有 llama.cpp 库版本加载失败',
+    );
   }
 
-  /// 查找库文件路径
-  ///
-  /// 按优先级搜索，找到即返回
-  Future<String?> _findLibraryPath() async {
-    debugPrint('[LlamaLibraryLoader] 搜索库文件: $libraryName');
+  /// 根据优先级获取对应的库版本
+  LlamaLibraryVersion? _getVersionForPriority(
+    AccelerationPriority priority,
+    CpuFeatureResult features,
+    NpuAvailabilityResult npuResult,
+  ) {
+    switch (priority) {
+      case AccelerationPriority.npuQnn:
+        // 高通 QNN NPU
+        if (npuResult.available && npuResult.vendor == ChipVendor.qualcomm) {
+          return LlamaLibraryVersion.qnn;
+        }
+        return null;
 
-    // 1. app bundle Frameworks 目录（macOS 沙盒内可访问）
-    final bundlePath = _getBundleFrameworksPath();
-    if (bundlePath != null) {
-      final path = '$bundlePath/$libraryName';
-      debugPrint('[LlamaLibraryLoader] 检查 bundle: $path');
-      if (File(path).existsSync()) {
-        debugPrint('[LlamaLibraryLoader] ✅ 在 bundle 中找到');
-        return path;
+      case AccelerationPriority.vulkan:
+        // Vulkan 版本（通用）
+        return LlamaLibraryVersion.vulkan;
+
+      case AccelerationPriority.dotprod:
+        // CPU 优化版本
+        if (features.supportsI8mm) {
+          return LlamaLibraryVersion.i8mm;
+        }
+        if (features.supportsDotProd) {
+          return LlamaLibraryVersion.dotprod;
+        }
+        return null;
+
+      case AccelerationPriority.generic:
+        return LlamaLibraryVersion.generic;
+    }
+  }
+
+  /// 尝试加载指定版本的库
+  Future<LibraryLoadResult> _tryLoadLibrary(LlamaLibraryVersion version) async {
+    try {
+      // 1. 首先尝试从应用 bundle 加载（静态打包）
+      final bundlePath = await _getBundleLibraryPath(version);
+      if (bundlePath != null && await File(bundlePath).exists()) {
+        debugPrint('[LlamaLibraryLoader] 从 bundle 加载: $bundlePath');
+        final library = DynamicLibrary.open(bundlePath);
+        return LibraryLoadResult(
+          success: true,
+          library: library,
+          version: version,
+          note: '从应用 bundle 加载',
+        );
       }
-    }
 
-    // 2. 项目 libs 目录（开发环境）
-    final projectLibsPath = _getProjectLibsPath();
-    final projectPath = '$projectLibsPath/$libraryName';
-    debugPrint('[LlamaLibraryLoader] 检查 libs: $projectPath');
-    if (File(projectPath).existsSync()) {
-      debugPrint('[LlamaLibraryLoader] ✅ 在 libs 中找到');
-      return projectPath;
-    }
-
-    // 3. macOS Frameworks 源目录（macos/Frameworks/，构建前）
-    final macosFrameworksPath = _getMacOSFrameworksPath();
-    if (macosFrameworksPath != null) {
-      final path = '$macosFrameworksPath/$libraryName';
-      debugPrint('[LlamaLibraryLoader] 检查 macos/Frameworks: $path');
-      if (File(path).existsSync()) {
-        debugPrint('[LlamaLibraryLoader] ✅ 在 macos/Frameworks 中找到');
-        return path;
+      // 2. 尝试从 libs 目录加载（Flutter 插件方式）
+      final libsPath = await _getLibsDirectoryPath(version);
+      if (libsPath != null && await File(libsPath).exists()) {
+        debugPrint('[LlamaLibraryLoader] 从 libs 加载: $libsPath');
+        final library = DynamicLibrary.open(libsPath);
+        return LibraryLoadResult(
+          success: true,
+          library: library,
+          version: version,
+          note: '从 libs 目录加载',
+        );
       }
-    }
 
-    // 4. 系统常见路径
-    final homeDir = Platform.environment['HOME'] ?? '';
-    final commonPaths = [
-      '$homeDir/llama.cpp/build/src/$libraryName',
-      '/usr/local/lib/$libraryName',
-      '/opt/homebrew/lib/$libraryName',
-    ];
-
-    for (final path in commonPaths) {
-      debugPrint('[LlamaLibraryLoader] 检查系统路径: $path');
-      if (File(path).existsSync()) {
-        debugPrint('[LlamaLibraryLoader] ✅ 在系统路径中找到');
-        return path;
+      // 3. 尝试系统路径（作为最后的回退）
+      final systemPath = _getSystemLibraryPath(version);
+      try {
+        debugPrint('[LlamaLibraryLoader] 尝试系统路径: $systemPath');
+        final library = DynamicLibrary.open(systemPath);
+        return LibraryLoadResult(
+          success: true,
+          library: library,
+          version: version,
+          note: '从系统路径加载',
+        );
+      } catch (e) {
+        // 系统路径也失败
+        return LibraryLoadResult(
+          success: false,
+          version: version,
+          error: '库文件不存在: $bundlePath, $libsPath, $systemPath',
+        );
       }
+    } catch (e, stack) {
+      debugPrint('[LlamaLibraryLoader] 加载异常: $e');
+      debugPrint('[LlamaLibraryLoader] 堆栈: $stack');
+      return LibraryLoadResult(
+        success: false,
+        version: version,
+        error: '加载异常: $e',
+      );
     }
+  }
 
-    debugPrint('[LlamaLibraryLoader] ❌ 所有路径都未找到库文件');
+  /// 获取应用 bundle 中的库路径
+  Future<String?> _getBundleLibraryPath(LlamaLibraryVersion version) async {
+    if (!Platform.isAndroid) return null;
+
+    try {
+      // Android 应用 bundle 路径
+      final appDir = await getApplicationDocumentsDirectory();
+      // bundle 中的库通常在 app/libs 或 app/lib 中
+      // 但 Flutter 打包时会把 .so 放在 lib/ 目录下
+      final libDir = Directory('${appDir.path}/../lib');
+      if (await libDir.exists()) {
+        final libPath = '${libDir.path}/${version.fileName}';
+        if (await File(libPath).exists()) {
+          return libPath;
+        }
+      }
+    } catch (e) {
+      debugPrint('[LlamaLibraryLoader] 获取 bundle 路径失败: $e');
+    }
     return null;
   }
 
-  /// 获取 app bundle 中 Frameworks 目录的路径
-  String? _getBundleFrameworksPath() {
-    try {
-      final executablePath = Platform.resolvedExecutable;
-      // macOS: /path/to/app.app/Contents/MacOS/executable
-      // Frameworks: /path/to/app.app/Contents/Frameworks/
-      final executableDir = File(executablePath).parent.path;
-      final frameworksPath = '$executableDir/../Frameworks';
+  /// 获取 libs 目录路径（Flutter 插件方式）
+  Future<String?> _getLibsDirectoryPath(LlamaLibraryVersion version) async {
+    if (!Platform.isAndroid) return null;
 
-      final dir = Directory(frameworksPath);
-      if (dir.existsSync()) {
-        return frameworksPath;
+    try {
+      // Flutter 插件的 .so 文件通常放在 app/libs/ 目录下
+      final appDir = await getApplicationDocumentsDirectory();
+      final libsDir = Directory('${appDir.path}/../libs');
+      if (await libsDir.exists()) {
+        final libPath = '${libsDir.path}/${version.fileName}';
+        if (await File(libPath).exists()) {
+          return libPath;
+        }
       }
     } catch (e) {
-      debugPrint('[LlamaLibraryLoader] 获取 bundle Frameworks 路径失败: $e');
+      debugPrint('[LlamaLibraryLoader] 获取 libs 路径失败: $e');
     }
     return null;
   }
 
-  /// 获取项目 libs 目录路径（开发时使用）
-  String _getProjectLibsPath() {
-    final executablePath = Platform.resolvedExecutable;
-    if (executablePath.contains('.app/')) {
-      // Debug 构建: /path/to/build/macos/Build/Products/Debug/app.app/Contents/MacOS/app
-      final executableDir = File(executablePath).parent.path;
-      return '$executableDir/../../../../libs';
+  /// 获取系统库路径
+  String _getSystemLibraryPath(LlamaLibraryVersion version) {
+    if (Platform.isAndroid) {
+      return '/vendor/lib64/${version.fileName}';
+    } else if (Platform.isLinux) {
+      return '/usr/lib/${version.fileName}';
     }
-    return '/Users/jianma/Desktop/LLM STUDIO/multi_model_client/libs';
+    return version.fileName;
   }
 
-  /// 获取 macos/Frameworks 目录路径
-  String? _getMacOSFrameworksPath() {
-    try {
-      final executablePath = Platform.resolvedExecutable;
-      if (executablePath.contains('.app/')) {
-        final executableDir = File(executablePath).parent.path;
-        // macos/Frameworks/ 相对于构建产物目录
-        return '$executableDir/../../../../macos/Frameworks';
-      }
-      // 非 app bundle（如测试），直接用项目路径
-      return '/Users/jianma/Desktop/LLM STUDIO/multi_model_client/macos/Frameworks';
-    } catch (e) {
+  /// 预加载所有可能的库版本（用于快速切换）
+  Future<Map<LlamaLibraryVersion, LibraryLoadResult>> preloadAllLibraries() async {
+    final results = <LlamaLibraryVersion, LibraryLoadResult>{};
+
+    // 预加载所有版本
+    for (final version in LlamaLibraryVersion.values) {
+      final result = await _tryLoadLibrary(version);
+      results[version] = result;
+      debugPrint('[LlamaLibraryLoader] 预加载 ${version.fileName}: ${result.success}');
+    }
+
+    return results;
+  }
+
+  /// 获取当前已加载的库信息
+  LibraryLoadResult? get currentLibrary {
+    if (_loadedLibrary == null || _loadedVersion == null) {
       return null;
     }
+    return LibraryLoadResult(
+      success: true,
+      library: _loadedLibrary,
+      version: _loadedVersion!,
+    );
   }
 
-  /// 获取库文件路径
-  ///
-  /// 如果尚未初始化，会自动初始化
-  Future<String?> getLibraryPath() async {
-    if (_cachedLibraryPath != null && File(_cachedLibraryPath!).existsSync()) {
-      return _cachedLibraryPath;
+  /// 卸载当前库
+  void unload() {
+    _loadedLibrary = null;
+    _loadedVersion = null;
+    debugPrint('[LlamaLibraryLoader] 库已卸载');
+  }
+
+  /// 获取所有可用的库版本
+  Future<List<LlamaLibraryVersion>> getAvailableVersions() async {
+    final available = <LlamaLibraryVersion>[];
+
+    for (final version in LlamaLibraryVersion.values) {
+      final bundlePath = await _getBundleLibraryPath(version);
+      final libsPath = await _getLibsDirectoryPath(version);
+
+      if ((bundlePath != null && await File(bundlePath).exists()) ||
+          (libsPath != null && await File(libsPath).exists())) {
+        available.add(version);
+      }
     }
 
-    if (!_initialized) {
-      await init();
-    }
-
-    return _cachedLibraryPath;
-  }
-
-  /// 检查库是否可用
-  Future<bool> isLibraryAvailable() async {
-    final path = await getLibraryPath();
-    return path != null && File(path).existsSync();
-  }
-
-  /// 清除缓存（用于重新检测）
-  void clearCache() {
-    _cachedLibraryPath = null;
-    _initialized = false;
-  }
-
-  /// 重新加载库文件（热更新后调用）
-  ///
-  /// 清除缓存并重新查找库路径
-  Future<String?> reload() async {
-    debugPrint('[LlamaLibraryLoader] 重新加载库文件...');
-    clearCache();
-    return await getLibraryPath();
+    return available;
   }
 }

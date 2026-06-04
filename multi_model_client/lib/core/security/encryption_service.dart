@@ -1,10 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:crypto/crypto.dart';
 
 class EncryptionService {
+  static const String _tag = 'EncryptionService';
   static final EncryptionService _instance = EncryptionService._internal();
   factory EncryptionService() => _instance;
   EncryptionService._internal();
@@ -25,6 +26,25 @@ class EncryptionService {
   // Delete key
   Future<void> deleteKey(String keyId) async {
     await _secureStorage.delete(key: keyId);
+  }
+
+  /// 安全存储敏感值（API Key 等）的便利方法
+  /// 将值安全加密存储在系统 Keychain/Keystore 中
+  Future<void> storeSecureValue(String key, String value) =>
+      _secureStorage.write(key: key, value: value);
+
+  /// 读取安全存储的敏感值
+  Future<String?> readSecureValue(String key) =>
+      _secureStorage.read(key: key);
+
+  /// 删除安全存储的敏感值
+  Future<void> deleteSecureValue(String key) =>
+      _secureStorage.delete(key: key);
+
+  /// 检查指定 key 是否存在安全存储中
+  Future<bool> hasSecureValue(String key) async {
+    final value = await _secureStorage.read(key: key);
+    return value != null && value.isNotEmpty;
   }
 
   // Generate hash
@@ -51,7 +71,7 @@ class EncryptionService {
       return result ?? '';
     } on PlatformException catch (e) {
       // Fallback to basic encryption if platform channel not available
-      print('Encryption platform channel not available, using fallback: ${e.message}');
+      debugPrint('[$_tag] 平台通道不可用，使用备用方案: ${e.message}');
       return _encryptFallback(plainText, key);
     }
   }
@@ -66,7 +86,7 @@ class EncryptionService {
       return result ?? '';
     } on PlatformException catch (e) {
       // Fallback to basic decryption if platform channel not available
-      print('Decryption platform channel not available, using fallback: ${e.message}');
+      debugPrint('[$_tag] 平台通道不可用，使用备用方案: ${e.message}');
       return _decryptFallback(encryptedText, key);
     }
   }
@@ -82,7 +102,7 @@ class EncryptionService {
   String _decryptFallback(String encryptedText, String key) {
     // Note: This is a placeholder. Real AES decryption will be available
     // once platform channels are implemented
-    print('Warning: Using fallback decryption - not fully functional');
+    debugPrint('[$_tag] 警告：使用备用解密方案，功能不完整');
     return encryptedText;
   }
 

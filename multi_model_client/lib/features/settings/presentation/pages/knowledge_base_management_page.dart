@@ -3,10 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/storage/database.dart';
-import '../../../../core/storage/database_connection.dart';
 import '../../../../core/services/knowledge_base_service.dart';
 import '../../../../core/providers/database_provider.dart';
-import '../../../../l10n/app_localizations.dart';
+import '../../../../generated/app_localizations.dart';
 
 /// 知识库服务 Provider
 final knowledgeBaseServiceProvider = Provider<KnowledgeBaseService>((ref) {
@@ -15,7 +14,9 @@ final knowledgeBaseServiceProvider = Provider<KnowledgeBaseService>((ref) {
 });
 
 /// 知识库列表 Provider
-final knowledgeBaseListProvider = FutureProvider<List<KnowledgeBase>>((ref) async {
+final knowledgeBaseListProvider = FutureProvider<List<KnowledgeBase>>((
+  ref,
+) async {
   final service = ref.watch(knowledgeBaseServiceProvider);
   return await service.getAllKnowledgeBases();
 });
@@ -58,44 +59,54 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/settings'),
-        ),
-        title: Text(l10n.knowledgeBase),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _showCreateKnowledgeBaseDialog(context, ref),
-            tooltip: '创建知识库',
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.go('/settings'),
           ),
-        ],
-      ),
-      body: knowledgeBasesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stack) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
-              const SizedBox(height: 16),
-              Text('加载失败: $error'),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () => ref.invalidate(knowledgeBaseListProvider),
-                child: const Text('重试'),
-              ),
-            ],
-          ),
+          title: Text(l10n.knowledgeBase),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => _showCreateKnowledgeBaseDialog(context, ref),
+              tooltip: '创建知识库',
+            ),
+          ],
         ),
-        data: (knowledgeBases) {
-          if (knowledgeBases.isEmpty) {
-            return _buildEmptyState(context, ref);
-          }
-          return _buildKnowledgeBaseList(context, ref, knowledgeBases);
-        },
+        body: knowledgeBasesAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (error, stack) => Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  size: 48,
+                  color: theme.colorScheme.error,
+                ),
+                const SizedBox(height: 16),
+                Text('加载失败: $error'),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => ref.invalidate(knowledgeBaseListProvider),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          ),
+          data: (knowledgeBases) {
+            if (knowledgeBases.isEmpty) {
+              return _buildEmptyState(context, ref);
+            }
+            return _buildKnowledgeBaseList(context, ref, knowledgeBases);
+          },
+        ),
       ),
     );
   }
@@ -112,7 +123,9 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.6),
+                color: theme.colorScheme.primaryContainer.withValues(
+                  alpha: 0.6,
+                ),
                 borderRadius: BorderRadius.circular(24),
               ),
               child: Icon(
@@ -143,7 +156,10 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
               icon: const Icon(Icons.add),
               label: const Text('创建知识库'),
               style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
+                  vertical: 14,
+                ),
               ),
             ),
           ],
@@ -181,9 +197,7 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('创建知识库'),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -229,15 +243,15 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
                   ref.invalidate(knowledgeBaseListProvider);
                   if (context.mounted) {
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('已创建知识库: $name')),
-                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('已创建知识库: $name')));
                   }
                 } catch (e) {
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('创建失败: $e')),
-                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('创建失败: $e')));
                   }
                 }
               }
@@ -257,9 +271,7 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('编辑知识库'),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -302,15 +314,15 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
                 ref.invalidate(knowledgeBaseListProvider);
                 if (context.mounted) {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('已更新')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('已更新')));
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('更新失败: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('更新失败: $e')));
                 }
               }
             },
@@ -321,7 +333,11 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
     );
   }
 
-  void _showDeleteDialog(BuildContext context, WidgetRef ref, KnowledgeBase kb) async {
+  void _showDeleteDialog(
+    BuildContext context,
+    WidgetRef ref,
+    KnowledgeBase kb,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -350,15 +366,15 @@ class KnowledgeBaseManagementPage extends ConsumerWidget {
       await service.deleteKnowledgeBase(kb.id);
       ref.invalidate(knowledgeBaseListProvider);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已删除知识库: ${kb.name}')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('已删除知识库: ${kb.name}')));
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('删除失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
       }
     }
   }

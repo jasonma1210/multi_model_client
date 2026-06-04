@@ -1,15 +1,10 @@
 import 'dart:io';
-import 'package:drift/drift.dart';
-import '../../../core/storage/database.dart';
-import '../../../core/services/vector_search_service.dart';
+import 'package:flutter/foundation.dart';
 
 /// RAG引擎增强版
 /// 支持多格式文档解析和语义检索
 class RAGEngineEnhanced {
-  final AppDatabase _db;
-  final VectorSearchService _vectorSearchService;
-
-  RAGEngineEnhanced(this._db, this._vectorSearchService);
+  static const String _tag = 'RAGEngineEnhanced';
 
   /// 解析PDF文档
   Future<List<String>> parsePDF(String filePath) async {
@@ -38,10 +33,10 @@ class RAGEngineEnhanced {
 
       // 当前实现：简单的文本提取框架
       // 实际使用时请添加上述依赖
-      print('PDF parsing requires pdf_text package. File: $filePath');
+      debugPrint('[$_tag] PDF 解析需要 pdf_text 包，文件: $filePath');
       return ['PDF content extraction requires pdf_text package'];
     } catch (e) {
-      print('PDF parsing error: $e');
+      debugPrint('[$_tag] PDF 解析错误: $e');
       return ['Error parsing PDF: $e'];
     }
   }
@@ -63,10 +58,10 @@ class RAGEngineEnhanced {
       // Word文档是ZIP压缩包，包含XML文件
       // 可以使用archive包解压，xml包解析
 
-      print('Word parsing requires docx_to_text package. File: $filePath');
+      debugPrint('[$_tag] Word 解析需要 docx_to_text 包，文件: $filePath');
       return ['Word content extraction requires docx_to_text package'];
     } catch (e) {
-      print('Word parsing error: $e');
+      debugPrint('[$_tag] Word 解析错误: $e');
       return ['Error parsing Word document: $e'];
     }
   }
@@ -92,10 +87,10 @@ class RAGEngineEnhanced {
       // }
       // return sheets;
 
-      print('Excel parsing requires excel package. File: $filePath');
+      debugPrint('[$_tag] Excel 解析需要 excel 包，文件: $filePath');
       return ['Excel content extraction requires excel package'];
     } catch (e) {
-      print('Excel parsing error: $e');
+      debugPrint('[$_tag] Excel 解析错误: $e');
       return ['Error parsing Excel document: $e'];
     }
   }
@@ -141,7 +136,7 @@ class RAGEngineEnhanced {
     // final text = await TesseractOcr.extractText(filePath);
     // return text;
 
-    print('Image OCR requires google_ml_kit or tesseract_ocr package');
+    debugPrint('[$_tag] 图片 OCR 需要 google_ml_kit 或 tesseract_ocr 包');
     return 'Image OCR requires google_ml_kit or tesseract_ocr package';
   }
 
@@ -175,10 +170,10 @@ class RAGEngineEnhanced {
       // final text = await whisper.transcribe(filePath);
       // return text;
 
-      print('Audio transcription requires whisper_engine integration');
+      debugPrint('[$_tag] 音频转录需要 whisper_engine 集成');
       return 'Audio transcription requires whisper_engine integration';
     } catch (e) {
-      print('Audio parsing error: $e');
+      debugPrint('[$_tag] 音频解析错误: $e');
       return 'Error transcribing audio: $e';
     }
   }
@@ -197,7 +192,7 @@ class RAGEngineEnhanced {
       // 优点：功能强大，格式支持全
       // 缺点：需要集成ffmpeg
       // import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
-      // final audioPath = '${filePath}_audio.mp3';
+      // final audioPath = '$filePath_audio.mp3';
       // await FFmpegKit.execute('-i $filePath -vn -acodec mp3 $audioPath');
       // final transcription = await parseAudio(audioPath);
       // return transcription;
@@ -210,10 +205,10 @@ class RAGEngineEnhanced {
       // await controller.initialize();
       // 提取音频并转写...
 
-      print('Video parsing requires ffmpeg_kit_flutter package');
+      debugPrint('[$_tag] 视频解析需要 ffmpeg_kit_flutter 包');
       return 'Video parsing requires ffmpeg_kit_flutter and audio transcription';
     } catch (e) {
-      print('Video parsing error: $e');
+      debugPrint('[$_tag] 视频解析错误: $e');
       return 'Error parsing video: $e';
     }
   }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/interfaces/memory_interface.dart';
@@ -7,25 +8,21 @@ import '../../../core/interfaces/dialogue_interface.dart' as dialogue show Messa
 import '../../../core/storage/database_connection.dart';
 import '../../../core/storage/database.dart' hide Message;
 import '../../../core/engines/model_inference_engine.dart';
-import '../../../core/services/vector_search_service.dart';
 import '../../../core/services/embedding_service.dart';
-import 'dart:math';
 
 class MemoryEngine implements IMemoryEngine {
   final AppDatabase _db = database;
   final ModelInferenceEngine? _modelEngine;
-  final VectorSearchService? _vectorSearchService;
   final EmbeddingService _embeddingService;
+  static const String _tag = 'MemoryEngine';
 
   // 是否启用语义搜索（需要有效的 embedding 服务）
   bool _semanticSearchEnabled = false;
 
   MemoryEngine({
     ModelInferenceEngine? modelEngine,
-    VectorSearchService? vectorSearchService,
     EmbeddingService? embeddingService,
   })  : _modelEngine = modelEngine,
-        _vectorSearchService = vectorSearchService,
         _embeddingService = embeddingService ?? EmbeddingService() {
     // 尝试启用语义搜索
     _initSemanticSearch();
@@ -67,7 +64,7 @@ Format as JSON:
     // Try to use LLM for extraction if available
     if (_modelEngine != null) {
       try {
-        final response = await _modelEngine!.generate(
+        final response = await _modelEngine.generate(
           'memory-extraction-model',
           extractionPrompt,
           maxTokens: 500,
@@ -98,7 +95,7 @@ Format as JSON:
           }
         }
       } catch (e) {
-        print('LLM memory extraction failed: $e');
+        debugPrint('[$_tag] LLM 记忆提取失败: $e');
         // Fall back to simple extraction
         await _simpleExtraction(sessionId, messages);
       }
@@ -123,7 +120,7 @@ Format as JSON:
     try {
       embedding = await _embeddingService.generateEmbedding(content);
     } catch (e) {
-      print('Failed to generate embedding: $e');
+      debugPrint('[$_tag] 生成嵌入向量失败: $e');
       embedding = _embeddingService.generatePseudoEmbedding(content);
     }
 
@@ -192,7 +189,7 @@ Format as JSON:
             score = _embeddingService.cosineSimilarity(queryEmbedding, memoryEmbedding);
           } catch (e) {
             // 如果解析失败，回退到关键词匹配
-            print('Failed to parse embedding for memory ${memory.id}: $e');
+            debugPrint('[$_tag] 解析记忆嵌入失败 ${memory.id}: $e');
           }
         }
 
@@ -209,7 +206,7 @@ Format as JSON:
 
       return scoredMemories.map((entry) => entry.key).toList();
     } catch (e) {
-      print('Semantic search failed: $e');
+      debugPrint('[$_tag] 语义搜索失败: $e');
       return _keywordSearch(memories, query);
     }
   }
@@ -274,7 +271,7 @@ Format as JSON:
     try {
       embedding = await _embeddingService.generateEmbedding(content);
     } catch (e) {
-      print('Failed to generate embedding: $e');
+      debugPrint('[$_tag] 生成嵌入向量失败: $e');
       embedding = _embeddingService.generatePseudoEmbedding(content);
     }
 

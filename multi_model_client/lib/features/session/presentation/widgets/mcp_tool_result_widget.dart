@@ -25,7 +25,7 @@ class McpToolResultWidget extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
       color: isError
           ? theme.colorScheme.errorContainer
-          : theme.colorScheme.primaryContainer.withOpacity(0.3),
+          : theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(

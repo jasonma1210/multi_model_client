@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart';
 

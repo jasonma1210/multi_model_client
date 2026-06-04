@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/interfaces/session_interface.dart';
-import '../../../core/storage/database_connection.dart';
 import '../../../core/storage/database.dart' show Session, Message;
 import '../data/repositories/session_repository.dart';
 import '../data/repositories/message_repository.dart';

@@ -250,7 +250,7 @@ class MCPConnection {
   }
 
   /// 处理错误
-  void _onError(error) {
+  void _onError(Object error) {
     debugPrint('MCP WebSocket error: $error');
     _updateStatus(MCPConnectionStatus.error, error: error.toString());
   }

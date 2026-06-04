@@ -1,21 +1,18 @@
 /// 推理引擎管理器 - LLM Studio 模型推理调度模块
-/// 
+///
 /// 功能：
 /// - 自动选择最优推理引擎
-/// - 协调本地服务器 / FFI / Ollama / 远程 API 引擎
+/// - 协调本地 FFI / Ollama / 远程 API 引擎
 /// - 引擎状态监控
 /// - 故障自动切换
-/// 
-/// 使用策略（双轨制）：
-/// 桌面端（macOS/Windows/Linux）：
-///   1. 尝试 LocalServerEngine（llama-server 进程 + HTTP API）
-///   2. 如果 llama-server 不可用，回退到 LocalFFIEngine
-/// 
-/// 移动端（iOS/Android）：
-///   1. 使用 LocalFFIEngine（FFI 直接调用 llama.cpp）
-/// 
+///
+/// 静态打包方案：
+/// - llama.cpp 引擎已内置在应用中（通过 Flutter 打包）
+/// - 所有平台统一使用 LocalFFIEngine（FFI 直接调用）
+/// - 模型文件（.gguf）通过应用内下载功能获取
+///
 /// @author JianMa
-/// @version 2.0.0
+/// @version 3.0.0
 library;
 
 import 'dart:async';
@@ -28,11 +25,10 @@ import 'package:flutter/foundation.dart';
 import '../models/model_entry.dart';
 import '../platform/platform_utils.dart';
 import 'local_ffi_engine.dart';
-import 'local_server_engine.dart';
 import 'model_inference_engine.dart';
 
 /// 推理引擎管理器
-/// 负责协调本地服务器引擎、本地 FFI 引擎、Ollama 引擎和远程 API 引擎
+/// 负责协调本地 FFI 引擎、Ollama 引擎和远程 API 引擎
 class InferenceEngineManager {
   static final InferenceEngineManager _instance = InferenceEngineManager._();
   static InferenceEngineManager get instance => _instance;
@@ -43,11 +39,9 @@ class InferenceEngineManager {
   //  引擎实例
   // ════════════════════════════════════════════════════════════════════════
 
-  /// 本地 FFI 引擎（移动端 + 桌面端回退）
+  /// 本地 FFI 引擎（移动端 + 桌面端统一使用）
+  /// 静态打包方案：llama.cpp 库已内置在应用中
   final LocalFFIEngine _localFFIEngine = LocalFFIEngine.instance;
-  
-  /// 本地服务器引擎（桌面端，LM Studio 架构）
-  final LocalServerEngine _localServerEngine = LocalServerEngine.instance;
 
   // ════════════════════════════════════════════════════════════════════════
   //  状态
@@ -75,14 +69,8 @@ class InferenceEngineManager {
   /// 获取本地 FFI 引擎实例
   LocalFFIEngine get localFFIEngine => _localFFIEngine;
 
-  /// 获取本地服务器引擎实例
-  LocalServerEngine get localServerEngine => _localServerEngine;
-
   /// 检查本地 FFI 引擎是否可用
   bool get isLocalFFIAvailable => _localFFIEngine.isInitialized;
-
-  /// 检查本地服务器引擎是否可用
-  bool get isLocalServerAvailable => _localServerEngine.isInitialized;
 
   /// 检查 Ollama 是否可用
   Future<bool> isOllamaAvailable() async {
@@ -121,37 +109,22 @@ class InferenceEngineManager {
     }
   }
 
-  /// 加载本地模型 - 双轨制架构
+  /// 加载本地模型 - 统一使用 FFI 引擎
+  /// 静态打包方案：所有平台都使用 llama.cpp FFI
   Future<void> _loadLocalModel(ModelEntry model) async {
     if (model.filePath == null) {
       throw InferenceEngineException('Local model file path is null');
     }
 
-    // 桌面端：优先使用 llama-server 进程架构
-    if (_isDesktopPlatform()) {
-      try {
-        // 尝试使用 LocalServerEngine（LM Studio 架构）
-        await _localServerEngine.loadModel(
-          modelPath: model.filePath!,
-          params: model.localParams,
-        );
-        _currentMode = InferenceMode.localServer;
-        debugPrint('[InferenceEngineManager] ✅ 使用 LocalServerEngine (llama-server 进程)');
-        return;
-      } catch (e) {
-        debugPrint('[InferenceEngineManager] LocalServerEngine 不可用，回退到 FFI: $e');
-        // 回退到 FFI
-      }
-    }
-
-    // 移动端 或 桌面端回退：使用 FFI
+    // 所有平台统一使用 LocalFFIEngine
     if (_isLocalFFISupported()) {
       await _localFFIEngine.loadModel(
         modelPath: model.filePath!,
         params: model.localParams,
+        mmprojPath: model.mmprojFileName,
       );
       _currentMode = InferenceMode.localFFI;
-      debugPrint('[InferenceEngineManager] ✅ 使用 LocalFFIEngine (FFI 直接调用)');
+      debugPrint('[InferenceEngineManager] ✅ 使用 LocalFFIEngine (llama.cpp FFI)');
       return;
     }
 
@@ -159,11 +132,6 @@ class InferenceEngineManager {
       'Local model loading is not supported on this platform. '
       'Please ensure llama.cpp library is available.',
     );
-  }
-
-  /// 检查是否为桌面平台
-  bool _isDesktopPlatform() {
-    return Platform.isMacOS || Platform.isWindows || Platform.isLinux;
   }
 
   /// 检查本地 FFI 是否支持
@@ -184,9 +152,6 @@ class InferenceEngineManager {
   Future<void> unloadModel() async {
     // 根据当前模式卸载
     switch (_currentMode) {
-      case InferenceMode.localServer:
-        await _localServerEngine.unloadModel();
-        break;
       case InferenceMode.localFFI:
         await _localFFIEngine.unloadModel();
         break;
@@ -207,8 +172,6 @@ class InferenceEngineManager {
     ChatOptions? options,
   }) async {
     switch (_currentMode) {
-      case InferenceMode.localServer:
-        return _localServerEngine.generate(messages, options: options);
       case InferenceMode.localFFI:
         return _localFFIEngine.generate(messages, options: options);
       case InferenceMode.localOllama:
@@ -228,8 +191,6 @@ class InferenceEngineManager {
     ChatOptions? options,
   }) {
     switch (_currentMode) {
-      case InferenceMode.localServer:
-        return _localServerEngine.generateStream(messages, options: options);
       case InferenceMode.localFFI:
         return _localFFIEngine.generateStream(messages, options: options);
       case InferenceMode.localOllama:
@@ -263,7 +224,7 @@ class InferenceEngineManager {
     // 构建 Ollama API 请求
     final requestBody = {
       'model': modelName,
-      'messages': messages.map((m) => m.toJson()).toList(),
+      'messages': messages.map((m) => m.toOllamaJson()).toList(),
       'stream': false,
       if (options != null) ..._buildOllamaOptions(options),
     };
@@ -295,7 +256,7 @@ class InferenceEngineManager {
 
     final requestBody = {
       'model': modelName,
-      'messages': messages.map((m) => m.toJson()).toList(),
+      'messages': messages.map((m) => m.toOllamaJson()).toList(),
       'stream': true,
       if (options != null) ..._buildOllamaOptions(options),
     };
@@ -324,7 +285,9 @@ class InferenceEngineManager {
                 if (json['message'] != null) {
                   controller.add(json['message']['content'] ?? '');
                 }
-              } catch (_) {}
+              } catch (_) {
+                // ignore: non-critical error
+              }
             }
           }
         },
@@ -393,7 +356,6 @@ class InferenceEngineManager {
   // ════════════════════════════════════════════════════════════════════════
 
   Future<void> dispose() async {
-    await _localServerEngine.dispose();
     await _localFFIEngine.dispose();
     for (final dio in _dioClients.values) {
       dio.close();

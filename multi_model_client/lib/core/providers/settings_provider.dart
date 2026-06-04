@@ -13,6 +13,7 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
+import '../security/encryption_service.dart';
 
 /// 搜索模式枚举
 enum SearchMode {
@@ -36,7 +37,7 @@ class SettingsService {
   
   // 搜索配置
   static const String _searchModeKey = 'search_mode';
-  static const String _tavilyApiKeyKey = 'tavily_api_key';
+  static const String _tavilyApiKeyKey = 'tavily_api_key';  // 敏感→EncryptionService
   static const String _webSearchEnabledKey = 'web_search_enabled';
   
   // TTS 配置
@@ -46,7 +47,8 @@ class SettingsService {
   static const String _asrProviderKey = 'asr_provider';
   
   // 小米 MiMo TTS 配置
-  static const String _mimoApiKeyKey = 'mimo_api_key';
+  static const String _mimoApiKeyKey = 'mimo_api_key';      // 敏感→EncryptionService
+  static const String _mimoBaseUrlKey = 'mimo_base_url';    // 自定义 MiMo API 地址
   static const String _mimoVoiceKey = 'mimo_voice';
   static const String _mimoSpeedKey = 'mimo_speed';
   static const String _mimoFormatKey = 'mimo_format';
@@ -54,10 +56,16 @@ class SettingsService {
   // Ollama 配置
   static const String _ollamaBaseUrlKey = 'ollama_base_url';
   static const String _ollamaDefaultModelKey = 'ollama_default_model';
-  static const String _ollamaApiKeyKey = 'ollama_api_key';
+  static const String _ollamaApiKeyKey = 'ollama_api_key'; // 敏感→EncryptionService
 
   SharedPreferences? _prefs;
   bool _isInitialized = false;
+  
+  /// 加密存储服务（用于 API Key 等敏感数据）
+  final EncryptionService? _encryptionService;
+  
+  SettingsService({EncryptionService? encryptionService})
+      : _encryptionService = encryptionService;
   
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -235,19 +243,51 @@ class SettingsService {
     await _prefs?.setInt(_searchModeKey, mode.index);
   }
   
-  /// 获取 Tavily API Key
+  /// 获取 Tavily API Key（加密存储）
   String? getTavilyApiKey() {
     if (!_isInitialized) return null;
+    // API Key 使用 EncryptionService 加密存储
+    // 但同步 getter 无法 await → 先尝试 SharedPreferences 兜底
+    // 运行时优先使用异步的 getTavilyApiKeyAsync()
     return _prefs?.getString(_tavilyApiKeyKey);
   }
   
-  /// 设置 Tavily API Key
+  /// 异步获取 Tavily API Key（优先从加密存储读取）
+  Future<String?> getTavilyApiKeyAsync() async {
+    if (!_isInitialized) return null;
+    final enc = _encryptionService;
+    if (enc != null) {
+      final secureKey = 'secure_$_tavilyApiKeyKey';
+      final value = await enc.readSecureValue(secureKey);
+      if (value != null && value.isNotEmpty) {
+        // 从加密存储读取到了 → 同步更新缓存
+        await _prefs?.setString(_tavilyApiKeyKey, value);
+        return value;
+      }
+    }
+    return _prefs?.getString(_tavilyApiKeyKey);
+  }
+  
+  /// 设置 Tavily API Key（加密存储）
   Future<void> setTavilyApiKey(String? apiKey) async {
     await _ensureInitialized();
-    if (apiKey == null || apiKey.isEmpty) {
-      await _prefs?.remove(_tavilyApiKeyKey);
+    final enc = _encryptionService;
+    if (enc != null) {
+      final secureKey = 'secure_$_tavilyApiKeyKey';
+      if (apiKey == null || apiKey.isEmpty) {
+        await enc.deleteSecureValue(secureKey);
+        await _prefs?.remove(_tavilyApiKeyKey);
+      } else {
+        await enc.storeSecureValue(secureKey, apiKey);
+        await _prefs?.setString(_tavilyApiKeyKey, apiKey);
+      }
     } else {
-      await _prefs?.setString(_tavilyApiKeyKey, apiKey);
+      // 降级到 SharedPreferences
+      if (apiKey == null || apiKey.isEmpty) {
+        await _prefs?.remove(_tavilyApiKeyKey);
+      } else {
+        await _prefs?.setString(_tavilyApiKeyKey, apiKey);
+      }
     }
   }
   
@@ -265,22 +305,67 @@ class SettingsService {
   
   // ============ 小米 MiMo TTS 设置 ============
   
-  /// 获取 MiMo API Key
+  /// 获取 MiMo API Key（加密存储）
   String? getMimoApiKey() {
     if (!_isInitialized) return null;
     return _prefs?.getString(_mimoApiKeyKey);
   }
   
-  /// 设置 MiMo API Key
+  /// 异步获取 MiMo API Key（优先从加密存储读取）
+  Future<String?> getMimoApiKeyAsync() async {
+    if (!_isInitialized) return null;
+    final enc = _encryptionService;
+    if (enc != null) {
+      final secureKey = 'secure_$_mimoApiKeyKey';
+      final value = await enc.readSecureValue(secureKey);
+      if (value != null && value.isNotEmpty) {
+        await _prefs?.setString(_mimoApiKeyKey, value);
+        return value;
+      }
+    }
+    return _prefs?.getString(_mimoApiKeyKey);
+  }
+  
+  /// 设置 MiMo API Key（加密存储）
   Future<void> setMimoApiKey(String? apiKey) async {
     await _ensureInitialized();
-    if (apiKey == null || apiKey.isEmpty) {
-      await _prefs?.remove(_mimoApiKeyKey);
+    final enc = _encryptionService;
+    if (enc != null) {
+      final secureKey = 'secure_$_mimoApiKeyKey';
+      if (apiKey == null || apiKey.isEmpty) {
+        await enc.deleteSecureValue(secureKey);
+        await _prefs?.remove(_mimoApiKeyKey);
+      } else {
+        await enc.storeSecureValue(secureKey, apiKey);
+        await _prefs?.setString(_mimoApiKeyKey, apiKey);
+      }
     } else {
-      await _prefs?.setString(_mimoApiKeyKey, apiKey);
+      if (apiKey == null || apiKey.isEmpty) {
+        await _prefs?.remove(_mimoApiKeyKey);
+      } else {
+        await _prefs?.setString(_mimoApiKeyKey, apiKey);
+      }
     }
   }
   
+  /// 获取 MiMo 自定义 Base URL（空字符串表示使用默认）
+  String getMimoBaseUrl() {
+    if (!_isInitialized) return '';
+    return _prefs?.getString(_mimoBaseUrlKey) ?? '';
+  }
+
+  /// 设置 MiMo 自定义 Base URL
+  Future<void> setMimoBaseUrl(String? url) async {
+    await _ensureInitialized();
+    if (url == null || url.isEmpty) {
+      await _prefs?.remove(_mimoBaseUrlKey);
+    } else {
+      // 确保 URL 以 /v1 结尾（MiMo API 格式要求）
+      final normalized = url.endsWith('/v1') ? url : '$url/v1';
+      await _prefs?.setString(_mimoBaseUrlKey, normalized);
+    }
+  }
+
   /// 获取 MiMo 音色
   String getMimoVoice() {
     if (!_isInitialized) return 'alloy';
@@ -318,15 +403,17 @@ class SettingsService {
   }
   
   /// 获取 TTS 提供商
+  /// 默认 'system'（系统内置，无需下载模型）
   String getTtsProvider() {
-    if (!_isInitialized) return 'sherpa';
-    return _prefs?.getString(_ttsProviderKey) ?? 'sherpa';
+    if (!_isInitialized) return 'system';
+    return _prefs?.getString(_ttsProviderKey) ?? 'system';
   }
   
   /// 获取 ASR 提供商
+  /// 默认 'system'（与 VoiceSettings 初始值一致，无需下载模型）
   String getAsrProvider() {
-    if (!_isInitialized) return 'sherpa';
-    return _prefs?.getString(_asrProviderKey) ?? 'sherpa';
+    if (!_isInitialized) return 'system';
+    return _prefs?.getString(_asrProviderKey) ?? 'system';
   }
   
   /// 设置 TTS 提供商
@@ -367,22 +454,53 @@ class SettingsService {
     await _prefs?.setString(_ollamaDefaultModelKey, model);
   }
 
-  /// 获取 Ollama API Key
+  /// 获取 Ollama API Key（加密存储）
   String getOllamaApiKey() {
     if (!_isInitialized) return '';
     return _prefs?.getString(_ollamaApiKeyKey) ?? '';
   }
 
-  /// 设置 Ollama API Key
+  /// 异步获取 Ollama API Key（优先从加密存储读取）
+  Future<String> getOllamaApiKeyAsync() async {
+    if (!_isInitialized) return '';
+    final enc = _encryptionService;
+    if (enc != null) {
+      final secureKey = 'secure_$_ollamaApiKeyKey';
+      final value = await enc.readSecureValue(secureKey);
+      if (value != null && value.isNotEmpty) {
+        await _prefs?.setString(_ollamaApiKeyKey, value);
+        return value;
+      }
+    }
+    return _prefs?.getString(_ollamaApiKeyKey) ?? '';
+  }
+
+  /// 设置 Ollama API Key（加密存储）
   Future<void> setOllamaApiKey(String apiKey) async {
     await _ensureInitialized();
-    await _prefs?.setString(_ollamaApiKeyKey, apiKey);
+    final enc = _encryptionService;
+    if (enc != null) {
+      final secureKey = 'secure_$_ollamaApiKeyKey';
+      if (apiKey.isEmpty) {
+        await enc.deleteSecureValue(secureKey);
+        await _prefs?.remove(_ollamaApiKeyKey);
+      } else {
+        await enc.storeSecureValue(secureKey, apiKey);
+        await _prefs?.setString(_ollamaApiKeyKey, apiKey);
+      }
+    } else {
+      if (apiKey.isEmpty) {
+        await _prefs?.remove(_ollamaApiKeyKey);
+      } else {
+        await _prefs?.setString(_ollamaApiKeyKey, apiKey);
+      }
+    }
   }
 }
 
 /// 设置服务 Provider (单例)
 final settingsServiceProvider = Provider<SettingsService>((ref) {
-  return SettingsService();
+  return SettingsService(encryptionService: EncryptionService());
 });
 
 /// 下载路径 Provider

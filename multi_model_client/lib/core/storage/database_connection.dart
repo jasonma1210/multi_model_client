@@ -93,52 +93,98 @@ LazyDatabase openConnection() {
         // 2.1 如果 document_chunks 表缺少列，添加它们
         try {
           db.execute('ALTER TABLE document_chunks ADD COLUMN document_id TEXT');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE document_chunks ADD COLUMN metadata TEXT');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE document_chunks ADD COLUMN vector TEXT');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE document_chunks ADD COLUMN chunk_index INTEGER NOT NULL DEFAULT 0');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE document_chunks ADD COLUMN knowledge_base_id TEXT NOT NULL DEFAULT ""');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         
         // 3. 确保 sessions 表有所有必要的列
         try {
           db.execute('ALTER TABLE sessions ADD COLUMN enabled_skill TEXT');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE sessions ADD COLUMN enabled_knowledge_base_id TEXT');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE sessions ADD COLUMN enable_voice_input INTEGER DEFAULT 0');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE sessions ADD COLUMN enable_voice_output INTEGER DEFAULT 0');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE sessions ADD COLUMN enable_camera INTEGER DEFAULT 0');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE sessions ADD COLUMN enable_file_upload INTEGER DEFAULT 0');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         
         // 4. 确保 knowledge_bases 表有 description 和 document_count 列
         try {
           db.execute('ALTER TABLE knowledge_bases ADD COLUMN description TEXT');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         try {
           db.execute('ALTER TABLE knowledge_bases ADD COLUMN document_count INTEGER DEFAULT 0');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
         
         // 5. 确保 memories 表有 embedding 列
         try {
           db.execute('ALTER TABLE memories ADD COLUMN embedding TEXT');
-        } catch (e) {}
+        } catch (e) {
+          // 忽略：安全错误
+        }
+        
+        // 6. 确保 app_logs 表存在（如果不存在则创建）
+        try {
+          db.execute('''
+            CREATE TABLE IF NOT EXISTS app_logs (
+              id TEXT PRIMARY KEY,
+              level TEXT NOT NULL,
+              category TEXT NOT NULL,
+              title TEXT NOT NULL,
+              message TEXT NOT NULL,
+              stack_trace TEXT,
+              device_info TEXT,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+        } catch (e) {
+          // 表已存在，忽略
+        }
       },
     );
   });
@@ -161,6 +207,12 @@ extension AppDatabaseDAO on AppDatabase {
       (update(sessions)..where((t) => t.id.equals(session.id.value)))
           .write(session);
 
+  /// 删除会话（同时级联删除关联的消息）
+  Future<void> deleteSessionWithMessages(String id) async {
+    await deleteSessionMessages(id);
+    await deleteSession(id);
+  }
+
   Future<int> deleteSession(String id) =>
       (delete(sessions)..where((t) => t.id.equals(id))).go();
 
@@ -173,6 +225,29 @@ extension AppDatabaseDAO on AppDatabase {
             ..where((t) => t.sessionId.equals(sessionId))
             ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
           .get();
+
+  /// 分页获取会话消息（内存优化：避免一次加载全部消息）
+  /// [offset] 跳过前 N 条, [limit] 最多返回 N 条
+  /// 按 createdAt 升序（最早的消息在前）
+  Future<List<Message>> getSessionMessagesPaginated(
+    String sessionId, {
+    int limit = 50,
+    int offset = 0,
+  }) =>
+      (select(messages)
+            ..where((t) => t.sessionId.equals(sessionId))
+            ..orderBy([(t) => OrderingTerm.asc(t.createdAt)])
+            ..limit(limit, offset: offset))
+          .get();
+
+  /// 获取会话消息总数
+  Future<int> getSessionMessageCount(String sessionId) {
+    final countExpr = messages.id.count();
+    final query = selectOnly(messages)
+      ..addColumns([countExpr])
+      ..where(messages.sessionId.equals(sessionId));
+    return query.getSingleOrNull().then((row) => row?.read(countExpr) ?? 0);
+  }
 
   Future<List<Message>> getAllMessages() => select(messages).get();
 
@@ -215,6 +290,10 @@ extension AppDatabaseDAO on AppDatabase {
 
   Future<List<Memory>> getAllMemories() => select(memories).get();
 
+  /// 获取单条记忆
+  Future<Memory?> getMemory(String id) =>
+      (select(memories)..where((t) => t.id.equals(id))).getSingleOrNull();
+
   Future<int> updateMemory(MemoriesCompanion memory) =>
       (update(memories)..where((t) => t.id.equals(memory.id.value)))
           .write(memory);
@@ -233,8 +312,25 @@ extension AppDatabaseDAO on AppDatabase {
   /// 删除所有记忆
   Future<int> deleteAllMemories() => delete(memories).go();
 
+  /// 删除所有共享/全局记忆（isGlobal=true）
+  ///
+  /// 【修复 V72】随着记忆宫殿改为"会话隔离"策略，所有遗留的 isGlobal=true 共享数据
+  ///   都属于脏数据，应该清理掉。该方法仅删除共享记忆，不会影响会话级记忆。
+  ///
+  /// 返回被删除的行数。
+  Future<int> deleteAllGlobalMemories() =>
+      (delete(memories)..where((t) => t.isGlobal.equals(true))).go();
+
   /// 删除所有消息
   Future<int> deleteAllMessages() => delete(messages).go();
+
+  /// 获取消息总数（用户消息 + AI 回复）
+  Future<int> getMessageCount() async {
+    final count = messages.id.count();
+    final query = selectOnly(messages)..addColumns([count]);
+    final result = await query.getSingle();
+    return result.read(count) ?? 0;
+  }
 
   // Knowledge Base DAO methods
   Future<int> insertKnowledgeBase(KnowledgeBasesCompanion kb) =>

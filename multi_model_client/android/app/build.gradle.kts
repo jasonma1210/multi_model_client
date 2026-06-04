@@ -15,30 +15,53 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+    kotlin {
+        jvmToolchain(17)
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.multimodel.client.multi_model_client"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 确保 Kotlin 编译插件的 Kotlin 类
+        multiDexEnabled = true
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        debug {
+            // Debug 构建也启用 multidex，确保所有类都能被编译
+            multiDexEnabled = true
+        }
+    }
+
+    // 确保 Kotlin 编译完整
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Google Play Core
+    implementation("com.google.android.play:core:1.10.3")
+    // Kotlin 标准库
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24")
+    // 强制使用统一版本，解决 background_downloader 的 WorkManager 初始化问题
+    implementation("androidx.work:work-runtime-ktx:2.8.1")
 }

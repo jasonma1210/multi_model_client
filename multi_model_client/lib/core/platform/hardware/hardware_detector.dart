@@ -1,16 +1,19 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:mj_nexus/core/platform/platform_utils.dart';
 import 'device_env.dart';
 import '../models/device_capabilities.dart';
 
 /// 硬件检测服务
 class HardwareDetector {
   static const MethodChannel _channel = MethodChannel('com.example.ai_assistant/hardware');
+  static const String _tag = 'HardwareDetector';
 
   /// 获取设备环境信息
   Future<DeviceEnv> getDeviceEnv() async {
     try {
-      if (Platform.isMacOS || Platform.isIOS || Platform.isWindows || Platform.isAndroid) {
+      if (PlatformUtils.isMacOS || PlatformUtils.isIOS || PlatformUtils.isWindows || PlatformUtils.isAndroid) {
         final Map<dynamic, dynamic> result = await _channel.invokeMethod('getDeviceEnv');
         return DeviceEnv.fromJson(Map<String, dynamic>.from(result));
       } else {
@@ -18,7 +21,7 @@ class HardwareDetector {
         return _getLinuxDeviceEnv();
       }
     } catch (e) {
-      print('Failed to get device env: $e');
+      debugPrint('[$_tag] 获取设备环境失败: $e');
       // 返回默认值
       return DeviceEnv(
         cpuArch: 'unknown',
@@ -36,7 +39,7 @@ class HardwareDetector {
 
   /// 检查Metal可用性（macOS/iOS）
   Future<bool> checkMetalAvailability() async {
-    if (!Platform.isMacOS && !Platform.isIOS) {
+    if (!PlatformUtils.isMacOS && !PlatformUtils.isIOS) {
       return false;
     }
 
@@ -44,14 +47,14 @@ class HardwareDetector {
       final bool isAvailable = await _channel.invokeMethod('checkMetalAvailability');
       return isAvailable;
     } catch (e) {
-      print('Failed to check Metal availability: $e');
+      debugPrint('[$_tag] 检查 Metal 可用性失败: $e');
       return false;
     }
   }
 
   /// 检查CUDA可用性（Windows）
   Future<bool> checkCudaAvailability() async {
-    if (!Platform.isWindows) {
+    if (!PlatformUtils.isWindows) {
       return false;
     }
 
@@ -59,7 +62,7 @@ class HardwareDetector {
       final bool isAvailable = await _channel.invokeMethod('checkCudaAvailability');
       return isAvailable;
     } catch (e) {
-      print('Failed to check CUDA availability: $e');
+      debugPrint('[$_tag] 检查 CUDA 可用性失败: $e');
       return false;
     }
   }
@@ -67,13 +70,13 @@ class HardwareDetector {
   /// 获取GPU信息
   Future<Map<String, dynamic>> getGpuInfo() async {
     try {
-      if (Platform.isMacOS || Platform.isIOS || Platform.isWindows) {
+      if (PlatformUtils.isMacOS || PlatformUtils.isIOS || PlatformUtils.isWindows) {
         final Map<dynamic, dynamic> result = await _channel.invokeMethod('getGpuInfo');
         return Map<String, dynamic>.from(result);
       }
       return {};
     } catch (e) {
-      print('Failed to get GPU info: $e');
+      debugPrint('[$_tag] 获取 GPU 信息失败: $e');
       return {};
     }
   }

@@ -43,10 +43,10 @@ class _QuantLevelSelectorState extends State<QuantLevelSelector> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
               ),
             ),
             child: Row(
@@ -138,14 +138,14 @@ class _QuantLevelSelectorState extends State<QuantLevelSelector> {
           color: isSelected
               ? Theme.of(context).colorScheme.primaryContainer
               : _hoveredLevel == level && isEnabled
-                  ? Theme.of(context).colorScheme.surfaceVariant
+                  ? Theme.of(context).colorScheme.surfaceContainerHighest
                   : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isSelected
                 ? Theme.of(context).colorScheme.primary
                 : isRecommended && isEnabled
-                    ? Theme.of(context).colorScheme.primary.withOpacity(0.5)
+                    ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.5)
                     : isEnabled
                         ? Theme.of(context).dividerColor
                         : Theme.of(context).disabledColor,
@@ -154,7 +154,9 @@ class _QuantLevelSelectorState extends State<QuantLevelSelector> {
         ),
         child: RadioListTile<String>(
           value: level,
+          // ignore: deprecated_member_use
           groupValue: widget.selectedLevel,
+          // ignore: deprecated_member_use
           onChanged: isEnabled ? (value) => widget.onLevelSelected(value!) : null,
           title: Row(
             children: [

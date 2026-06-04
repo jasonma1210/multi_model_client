@@ -32,7 +32,9 @@ class _PromptEditorPageState extends ConsumerState<PromptEditorPage> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.template?.name ?? '');
-    _contentController = TextEditingController(text: widget.template?.content ?? '');
+    _contentController = TextEditingController(
+      text: widget.template?.content ?? '',
+    );
     _selectedCategory = widget.template?.category ?? PromptCategory.general;
     _isGlobal = widget.template?.isGlobal ?? false;
 
@@ -59,85 +61,88 @@ class _PromptEditorPageState extends ConsumerState<PromptEditorPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => context.pop(),
-        ),
-        title: Text(_isEditing ? '编辑模板' : '创建模板'),
-        actions: [
-          TextButton(
-            onPressed: _saveTemplate,
-            child: const Text('保存'),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => context.pop(),
           ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppTheme.spacingM),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Name field
-            TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(
-                labelText: '模板名称',
-                hintText: '输入模板名称',
-                border: OutlineInputBorder(),
-              ),
-              enabled: widget.template?.isBuiltin != true,
-            ),
-            const SizedBox(height: AppTheme.spacingL),
-
-            // Category selector
-            Text('分类', style: theme.textTheme.titleSmall),
-            const SizedBox(height: AppTheme.spacingS),
-            Wrap(
-              spacing: AppTheme.spacingS,
-              runSpacing: AppTheme.spacingS,
-              children: PromptCategory.all.map((category) {
-                return ChoiceChip(
-                  label: Text(PromptCategory.getDisplayName(category)),
-                  selected: _selectedCategory == category,
-                  onSelected: widget.template?.isBuiltin != true
-                      ? (selected) {
-                          if (selected) {
-                            setState(() => _selectedCategory = category);
-                          }
-                        }
-                      : null,
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: AppTheme.spacingL),
-
-            // Global toggle
-            SwitchListTile(
-              title: const Text('全局模板'),
-              subtitle: const Text('可跨会话使用'),
-              value: _isGlobal,
-              onChanged: widget.template?.isBuiltin ?? true
-                  ? (value) => setState(() => _isGlobal = value)
-                  : null,
-              contentPadding: EdgeInsets.zero,
-            ),
-            const SizedBox(height: AppTheme.spacingL),
-
-            // Variables section
-            _buildVariablesSection(theme),
-            const SizedBox(height: AppTheme.spacingL),
-
-            // Content editor
-            Text('模板内容', style: theme.textTheme.titleSmall),
-            const SizedBox(height: AppTheme.spacingS),
-            _buildContentEditor(theme),
-            const SizedBox(height: AppTheme.spacingL),
-
-            // Preview section
-            _buildPreviewSection(theme),
-            const SizedBox(height: AppTheme.spacingXXL),
+          title: Text(_isEditing ? '编辑模板' : '创建模板'),
+          actions: [
+            TextButton(onPressed: _saveTemplate, child: const Text('保存')),
           ],
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppTheme.spacingM),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Name field
+              TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: '模板名称',
+                  hintText: '输入模板名称',
+                  border: OutlineInputBorder(),
+                ),
+                enabled: widget.template?.isBuiltin != true,
+              ),
+              const SizedBox(height: AppTheme.spacingL),
+
+              // Category selector
+              Text('分类', style: theme.textTheme.titleSmall),
+              const SizedBox(height: AppTheme.spacingS),
+              Wrap(
+                spacing: AppTheme.spacingS,
+                runSpacing: AppTheme.spacingS,
+                children: PromptCategory.all.map((category) {
+                  return ChoiceChip(
+                    label: Text(PromptCategory.getDisplayName(category)),
+                    selected: _selectedCategory == category,
+                    onSelected: widget.template?.isBuiltin != true
+                        ? (selected) {
+                            if (selected) {
+                              setState(() => _selectedCategory = category);
+                            }
+                          }
+                        : null,
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: AppTheme.spacingL),
+
+              // Global toggle
+              SwitchListTile(
+                title: const Text('全局模板'),
+                subtitle: const Text('可跨会话使用'),
+                value: _isGlobal,
+                onChanged: widget.template?.isBuiltin ?? true
+                    ? (value) => setState(() => _isGlobal = value)
+                    : null,
+                contentPadding: EdgeInsets.zero,
+              ),
+              const SizedBox(height: AppTheme.spacingL),
+
+              // Variables section
+              _buildVariablesSection(theme),
+              const SizedBox(height: AppTheme.spacingL),
+
+              // Content editor
+              Text('模板内容', style: theme.textTheme.titleSmall),
+              const SizedBox(height: AppTheme.spacingS),
+              _buildContentEditor(theme),
+              const SizedBox(height: AppTheme.spacingL),
+
+              // Preview section
+              _buildPreviewSection(theme),
+              const SizedBox(height: AppTheme.spacingXXL),
+            ],
+          ),
         ),
       ),
     );
@@ -214,7 +219,8 @@ class _PromptEditorPageState extends ConsumerState<PromptEditorPage> {
             maxLines: 12,
             style: const TextStyle(fontFamily: 'monospace'),
             decoration: const InputDecoration(
-              hintText: '输入模板内容...\n\n使用 {{变量名}} 格式定义变量，例如：\n请翻译成 {{target_language}}\n{{content}}',
+              hintText:
+                  '输入模板内容...\n\n使用 {{变量名}} 格式定义变量，例如：\n请翻译成 {{target_language}}\n{{content}}',
               border: InputBorder.none,
               contentPadding: EdgeInsets.all(AppTheme.spacingM),
             ),
@@ -308,16 +314,16 @@ class _PromptEditorPageState extends ConsumerState<PromptEditorPage> {
     final content = _contentController.text.trim();
 
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入模板名称')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请输入模板名称')));
       return;
     }
 
     if (content.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入模板内容')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请输入模板内容')));
       return;
     }
 
@@ -351,9 +357,9 @@ class _PromptEditorPageState extends ConsumerState<PromptEditorPage> {
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_isEditing ? '模板已更新' : '模板已创建')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_isEditing ? '模板已更新' : '模板已创建')));
       context.pop();
     }
   }
@@ -363,10 +369,7 @@ class _VariableChip extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onDelete;
 
-  const _VariableChip({
-    required this.controller,
-    required this.onDelete,
-  });
+  const _VariableChip({required this.controller, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {

@@ -1,11 +1,13 @@
+// ignore_for_file: unnecessary_underscores
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:dio/dio.dart';
-import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 
 import '../../../../core/providers/model_provider.dart';
 import '../../../../core/providers/settings_provider.dart';
+import '../../../../core/models/model_entry.dart';
 import '../../../../core/services/model_download_manager.dart' hide DownloadProgress;
 import '../../../../core/services/model_download/download_task_manager.dart';
 import '../../../../core/services/hardware_compatibility_checker.dart';
@@ -27,18 +29,26 @@ class ModelMarketPage extends ConsumerStatefulWidget {
   ConsumerState<ModelMarketPage> createState() => _ModelMarketPageState();
 }
 
-class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
+class _ModelMarketPageState extends ConsumerState<ModelMarketPage>
+    with SingleTickerProviderStateMixin {
   final _searchController = TextEditingController();
   final _dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 10)));
 
   late final HuggingFaceApi _hfApi;
   late final HardwareCompatibilityChecker _hardwareChecker;
   late final DownloadTaskManager _taskManager;
+  late final TabController _tabController;
+
   HardwareInfo? _hardwareInfo;
 
   List<ModelInfo> _searchResults = [];
+  List<ModelInfo> _hotModels = []; // 热门模型列表
   bool _isLoading = false;
+  bool _isLoadingHot = false;
   String? _error;
+
+  /// 当前 Tab 索引: 0=推荐, 1=热门, 2=全部
+  int get _currentTabIndex => _tabController.index;
 
   /// 当前正在下载的模型进度 modelId -> DownloadProgress
   final Map<String, DownloadProgress> _downloadProgress = {};
@@ -87,57 +97,51 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
     ),
   ];
 
-  final _featuredMS = const [
-    _FeaturedModel(
-      id: 'Qwen/Qwen2.5-7B-Instruct-GGUF',
-      name: 'Qwen2.5 7B Instruct GGUF',
-      author: 'Qwen',
-      params: '7B',
-      quantLevel: 'Q4_K_M',
-      description: '官方通义千问 2.5 GGUF 版本，国内下载速度快',
-      minRam: 6,
-      minStorage: 5,
-    ),
-    _FeaturedModel(
-      id: 'LLM-Research/Meta-Llama-3.1-8B-Instruct-GGUF',
-      name: 'Llama 3.1 8B Instruct',
-      author: 'LLM-Research',
-      params: '8B',
-      quantLevel: 'Q4_K_M',
-      description: 'Meta Llama 3.1 8B 指令版 GGUF',
-      minRam: 7,
-      minStorage: 5,
-    ),
-    _FeaturedModel(
-      id: 'BAAI/bge-small-zh-v1.5-gguf',
-      name: 'BGE Small ZH v1.5',
-      author: 'BAAI',
-      params: '0.3B',
-      quantLevel: 'Q8_0',
-      description: '中文向量嵌入模型，RAG 场景适用',
-      minRam: 1,
-      minStorage: 1,
-    ),
-    _FeaturedModel(
-      id: 'internlm/internlm2_5-7b-chat-gguf',
-      name: 'InternLM 2.5 7B Chat',
-      author: 'Shanghai AI Lab',
-      params: '7B',
-      quantLevel: 'Q4_K_M',
-      description: '书生浦语 2.5 7B 对话版，中英双语强',
-      minRam: 6,
-      minStorage: 5,
-    ),
-  ];
-
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(_onTabChanged);
     _hfApi = HuggingFaceApi(_dio);
     _hardwareChecker = HardwareCompatibilityChecker();
-    _taskManager = DownloadTaskManager(_dio);
+    _taskManager = DownloadTaskManager.instance;
     _loadHardwareInfo();
     _loadDownloadProgress();
+    _loadHotModels(); // 加载热门模型
+  }
+
+  void _onTabChanged() {
+    // ★★★ 修复：只在 Tab 索引真正改变完成时触发 rebuild ★★★
+    // addListener 会触发 3 次：动画开始、动画中、动画结束
+    // 使用 _tabController.indexIsChanging 确保动画已完成
+    if (!_tabController.indexIsChanging && mounted) {
+      setState(() {});
+    }
+  }
+
+  /// 加载热门模型（从 hf-mirror.com 获取下载量最高的 GGUF 模型）
+  Future<void> _loadHotModels() async {
+    if (_isLoadingHot) return;
+    setState(() => _isLoadingHot = true);
+    try {
+      // 从 hf-mirror.com 搜索 GGUF 模型并按下载量排序
+      final results = await _hfApi.searchModels(
+        query: 'gguf',
+        sortBy: 'downloads',
+        limit: 20,
+      );
+      if (mounted) {
+        setState(() {
+          _hotModels = results;
+          _isLoadingHot = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('加载热门模型失败: $e');
+      if (mounted) {
+        setState(() => _isLoadingHot = false);
+      }
+    }
   }
 
   Future<void> _loadHardwareInfo() async {
@@ -194,6 +198,7 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
   @override
   void dispose() {
     _taskManager.progressNotifier.removeListener(_onDownloadProgress);
+    _tabController.dispose();
     _searchController.dispose();
     _dio.close();
     super.dispose();
@@ -220,14 +225,35 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
             onPressed: () => context.push('/downloads'),
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.star_rounded), text: '推荐'),
+            Tab(icon: Icon(Icons.trending_up_rounded), text: '热门'),
+            Tab(icon: Icon(Icons.apps_rounded), text: '全部'),
+          ],
+          labelColor: theme.colorScheme.primary,
+          unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
+          indicatorColor: theme.colorScheme.primary,
+        ),
       ),
       body: Column(
         children: [
-          // 搜索框
-          _buildSearchBar(theme),
-          // 内容区
+          // 搜索框（仅在「全部」Tab 显示）
+          if (_currentTabIndex == 2) _buildSearchBar(theme),
+          // 内容区（TabBarView）
           Expanded(
-            child: _buildContent(theme, ModelSource.huggingFace),
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                // Tab 0: 推荐
+                _buildFeatured(theme, _featuredHF, ModelSource.huggingFace),
+                // Tab 1: 热门
+                _buildHotModels(theme),
+                // Tab 2: 全部（搜索结果）
+                _buildAllModels(theme),
+              ],
+            ),
           ),
         ],
       ),
@@ -243,7 +269,7 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                hintText: 'e.g. llama, qwen, mistral, gemma...',
+                hintText: '搜索模型...',
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
@@ -280,6 +306,72 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
     );
   }
 
+  /// 构建热门模型列表
+  Widget _buildHotModels(ThemeData theme) {
+    if (_isLoadingHot) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_hotModels.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.trending_up_rounded, size: 64, color: theme.colorScheme.outline),
+            const SizedBox(height: 16),
+            Text('暂无热门模型', style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _loadHotModels,
+              child: const Text('点击刷新'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadHotModels,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+        itemCount: _hotModels.length,
+        itemBuilder: (context, i) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _SearchResultCard(
+            model: _hotModels[i],
+            downloadProgress: _downloadProgress[_hotModels[i].id],
+            hardwareInfo: _hardwareInfo,
+            onDetail: () => _showModelDetail(context, _hotModels[i].id, ModelSource.huggingFace),
+            onDownload: () => _downloadSearchResult(context, _hotModels[i], ModelSource.huggingFace),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建全部模型列表（搜索结果）
+  Widget _buildAllModels(ThemeData theme) {
+    // 如果有搜索结果，显示搜索结果
+    if (_searchResults.isNotEmpty) {
+      return _buildSearchResults(theme);
+    }
+
+    // 否则显示提示
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.search_rounded, size: 64, color: theme.colorScheme.outline),
+          const SizedBox(height: 16),
+          Text('搜索模型以查看全部', style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 8),
+          Text('输入关键词如 llama, qwen, mistral', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        ],
+      ),
+    );
+  }
+
+  /// 内部方法：根据当前状态构建内容（被 Tab 0 调用）
   Widget _buildContent(ThemeData theme, ModelSource source) {
     if (_error != null) {
       return _buildError(theme);
@@ -445,6 +537,11 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
     await _downloadModel(context, modelInfo);
   }
 
+  /// 下载搜索结果中的模型
+  Future<void> _downloadSearchResult(BuildContext context, ModelInfo model, ModelSource source) async {
+    await _downloadModel(context, model);
+  }
+
   Future<void> _downloadModel(BuildContext context, ModelInfo model) async {
     debugPrint('开始下载流程: ${model.name}, URL: ${model.downloadUrl}');
     
@@ -493,6 +590,8 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
           'author': model.author,
           'description': model.description,
           'parameterSize': model.parameterSize,
+          'isMultimodal': model.isMultimodal,
+          'mmprojFile': model.mmprojPath,
         },
       );
 
@@ -577,14 +676,95 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
 
   void _onDownloadCompleted(BuildContext context, ModelInfo model, String filePath) async {
 
-    // 添加到本地模型列表
-    final addedModel = await ref.read(modelProvider.notifier).addLocalModel(
-      displayName: model.name,
-      filePath: filePath,
-      parameterSize: model.parameterSize > 0 ? model.parameterSize : null,
-      quantLevel: model.quantizationMethod,
-      description: model.description,
-    );
+    // 检查是否需要下载 mmproj 文件
+    String? mmprojFilePath;
+    if (model.isMultimodal && model.mmprojPath != null) {
+      // 获取下载目录
+      final settingsService = ref.read(settingsServiceProvider);
+      final downloadDir = await settingsService.getEffectiveDownloadPath();
+      final modelDirName = model.downloadUrl.split('/').last.replaceAll('.gguf', '');
+      final modelDir = '$downloadDir/$modelDirName';
+      
+      // 确保目录存在
+      await Directory(modelDir).create(recursive: true);
+      
+      // 构建 mmproj 文件路径
+      final mmprojFileName = model.mmprojPath!.split('/').last;
+      mmprojFilePath = '$modelDir/$mmprojFileName';
+      
+      // 检查 mmproj 文件是否已存在
+      if (!await File(mmprojFilePath).exists()) {
+        try {
+          // 显示 mmproj 下载提示
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('正在下载 mmproj 投影仪文件...'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+          
+          // 下载 mmproj 文件（使用简单的 Dio 下载）
+          final dio = Dio();
+          await dio.download(
+            model.mmprojPath!,
+            mmprojFilePath,
+            onReceiveProgress: (received, total) {
+              if (total > 0) {
+                debugPrint('[ModelMarket] mmproj 下载进度: ${(received / total * 100).toStringAsFixed(1)}%');
+              }
+            },
+          );
+          
+          debugPrint('[ModelMarket] ✅ mmproj 文件下载完成: $mmprojFilePath');
+          
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('✅ mmproj 投影仪文件下载完成'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } catch (e) {
+          debugPrint('[ModelMarket] ❌ mmproj 文件下载失败: $e');
+          mmprojFilePath = null; // 标记下载失败
+          
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('⚠️ mmproj 文件下载失败: $e'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      } else {
+        debugPrint('[ModelMarket] mmproj 文件已存在，跳过下载: $mmprojFilePath');
+      }
+    }
+
+    // 检查模型是否已注册（防止重复注册，如从下载页面自动注册过）
+    final existingModel = ref.read(modelProvider).models
+        .where((m) => m.filePath == filePath)
+        .firstOrNull;
+    
+    final ModelEntry addedModel;
+    if (existingModel != null) {
+      debugPrint('[ModelMarket] 模型已注册，跳过重复添加: ${existingModel.id}');
+      addedModel = existingModel;
+    } else {
+      // 添加到本地模型列表
+      addedModel = await ref.read(modelProvider.notifier).addLocalModel(
+        displayName: model.name,
+        filePath: filePath,
+        parameterSize: model.parameterSize > 0 ? model.parameterSize : null,
+        quantLevel: model.quantizationMethod,
+        description: model.description,
+        mmprojFileName: mmprojFilePath, // 保存 mmproj 文件路径
+      );
+    }
 
     if (!context.mounted) return;
 
@@ -675,42 +855,29 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage> {
           Navigator.pop(context);
         }
 
-        // 显示成功提示并询问是否开始对话
+        // 显示简短成功提示
         if (context.mounted) {
-          final shouldChat = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: Row(
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
                 children: [
-                  Icon(Icons.check_circle_rounded, color: Colors.green.shade600),
-                  const SizedBox(width: 10),
-                  const Text('模型加载成功'),
+                  Icon(Icons.check_circle, color: Colors.green[300], size: 20),
+                  const SizedBox(width: 8),
+                  Text('${model.name} 加载成功'),
                 ],
               ),
-              content: Text('${model.name} 已加载完成，可以开始对话了。'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('稍后再说'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('开始对话'),
-                ),
-              ],
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(milliseconds: 1500),
             ),
           );
 
-          if (shouldChat == true && context.mounted) {
-            // 创建新会话并开始对话
-            final sessionManager = ref.read(sessionManagerProvider);
-            final session = await sessionManager.createSession(
-              SessionConfig(modelId: addedModel.id, name: '${model.name} 对话'),
-            );
-            if (context.mounted) {
-              context.go('/session/${session.id}');
-            }
+          // 直接创建会话并跳转（无需用户手动选择）
+          final sessionManager = ref.read(sessionManagerProvider);
+          final session = await sessionManager.createSession(
+            SessionConfig(modelId: addedModel.id, name: '${model.name} 对话'),
+          );
+          if (context.mounted) {
+            context.go('/session/${session.id}');
           }
         }
       } catch (e) {
@@ -1128,7 +1295,7 @@ class _SearchResultCard extends StatelessWidget {
                     children: [
                       Icon(Icons.download_rounded, size: 12, color: theme.colorScheme.onSurfaceVariant),
                       const SizedBox(width: 3),
-                      Text('${_formatCount(model.downloads)}',
+                      Text(_formatCount(model.downloads),
                           style: theme.textTheme.labelSmall),
                     ],
                   ),
@@ -1524,6 +1691,27 @@ class _DownloadConfirmDialogState extends State<_DownloadConfirmDialog> {
               _InfoItem('内存需求', '≥ ${widget.model.minRamGB} GB'),
               if (widget.model.parameterSize > 0) _InfoItem('参数量', '${widget.model.parameterSize}B'),
               if (widget.model.quantizationMethod != null) _InfoItem('量化格式', widget.model.quantizationMethod!),
+              // 显示多模态/mmproj 信息
+              if (widget.model.isMultimodal) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.purple.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.purple.shade200),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [Icon(Icons.image_rounded, size: 18, color: Colors.purple.shade700), const SizedBox(width: 8), Text('🌟 多模态模型', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple.shade700))]),
+                    const SizedBox(height: 8),
+                    const Text('• 支持图片/视频理解能力', style: TextStyle(fontSize: 12)),
+                    const Text('• 将同时下载 mmproj 投影仪文件', style: TextStyle(fontSize: 12)),
+                    const Text('• 需要约额外 500MB-1GB 内存', style: TextStyle(fontSize: 12)),
+                    const SizedBox(height: 4),
+                    Text('💡 若内存不足 16GB，建议不加载 mmproj', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                  ]),
+                ),
+              ],
               if (!isCompatible) ...[
                 const SizedBox(height: 12),
                 Container(

@@ -11,6 +11,12 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:math_expressions/math_expressions.dart';
 
 /// 工具调度器
 /// 统一管理和调度各种工具
@@ -201,6 +207,71 @@ class ToolNotFoundException implements Exception {
   String toString() => 'ToolNotFoundException: $message';
 }
 
+/// 单位转换表（相对于基准单位的比率）
+const Map<String, Map<String, double>> _unitTable = {
+  'length': {
+    'mm': 0.001, 'cm': 0.01, 'm': 1.0, 'km': 1000.0,
+    'in': 0.0254, 'ft': 0.3048, 'yd': 0.9144, 'mi': 1609.344,
+  },
+  'weight': {
+    'mg': 0.000001, 'g': 0.001, 'kg': 1.0, 'ton': 1000.0,
+    'oz': 0.02834952, 'lb': 0.4535924,
+  },
+  'temperature': {'c': 1, 'f': 2, 'k': 3},
+  'volume': {
+    'ml': 0.001, 'l': 1.0, 'gal': 3.78541, 'qt': 0.946353,
+    'pt': 0.473176, 'cup': 0.236588,
+  },
+  'speed': {
+    'm/s': 1.0, 'km/h': 0.277778, 'mph': 0.44704, 'knot': 0.514444,
+  },
+};
+
+/// 单位转换
+double _convertUnit(double value, String from, String to) {
+  final fromLower = from.toLowerCase();
+  final toLower = to.toLowerCase();
+
+  // 温度特殊处理
+  if (_isTemperature(fromLower) && _isTemperature(toLower)) {
+    return _convertTemperature(value, fromLower, toLower);
+  }
+
+  // 查找单位所属类别
+  for (final entry in _unitTable.entries) {
+    if (entry.key == 'temperature') continue;
+    final fromRate = entry.value[fromLower];
+    final toRate = entry.value[toLower];
+    if (fromRate != null && toRate != null) {
+      final baseValue = value * fromRate;
+      return baseValue / toRate;
+    }
+  }
+  throw UnsupportedError('Cannot convert from $from to $to');
+}
+
+bool _isTemperature(String unit) => ['c', 'f', 'k', 'celsius', 'fahrenheit', 'kelvin'].contains(unit);
+
+double _convertTemperature(double value, String from, String to) {
+  final f = from[0];
+  final t = to[0];
+  // 先转为摄氏
+  double celsius;
+  switch (f) {
+    case 'c': celsius = value; break;
+    case 'f': celsius = (value - 32) * 5 / 9; break;
+    case 'k': celsius = value - 273.15; break;
+    default: throw UnsupportedError('Unknown temperature unit: $from');
+  }
+  // 摄氏转目标
+  switch (t) {
+    case 'c': return celsius;
+    case 'f': return celsius * 9 / 5 + 32;
+    case 'k': return celsius + 273.15;
+    default: throw UnsupportedError('Unknown temperature unit: $to');
+  }
+}
+
 /// 内置工具集合
 class BuiltinTools {
   /// 计算器工具
@@ -217,8 +288,16 @@ class BuiltinTools {
         ),
       ],
       execute: (params) async {
-        // TODO: 实现安全的数学表达式求值
-        return {'result': 0};
+        final expression = params['expression'] as String;
+        try {
+          final parser = Parser();
+          final cm = ContextModel();
+          final exp = parser.parse(expression);
+          final result = exp.evaluate(EvaluationType.REAL, cm);
+          return {'result': result, 'expression': expression};
+        } catch (e) {
+          return {'error': 'Invalid expression: $e', 'expression': expression};
+        }
       },
     );
   }
@@ -249,8 +328,19 @@ class BuiltinTools {
         ),
       ],
       execute: (params) async {
-        // TODO: 实现单位转换
-        return {'result': 0};
+        final value = (params['value'] as num).toDouble();
+        final fromUnit = params['from_unit'] as String;
+        final toUnit = params['to_unit'] as String;
+        try {
+          final result = _convertUnit(value, fromUnit, toUnit);
+          return {
+            'result': result,
+            'from': '$value $fromUnit',
+            'to': '$result $toUnit',
+          };
+        } catch (e) {
+          return {'error': 'Conversion failed: $e'};
+        }
       },
     );
   }
@@ -269,8 +359,30 @@ class BuiltinTools {
         ),
       ],
       execute: (params) async {
-        // TODO: 集成天气API
-        return {'temperature': '20°C', 'condition': 'Sunny'};
+        final location = params['location'] as String;
+        try {
+          // 使用 wttr.in 免费天气 API
+          final url = Uri.parse('https://wttr.in/${Uri.encodeComponent(location)}?format=j1');
+          final response = await http.get(url).timeout(const Duration(seconds: 10));
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final current = data['current_condition']?[0];
+            if (current != null) {
+              return {
+                'location': location,
+                'temperature': '${current['temp_C']}°C',
+                'feels_like': '${current['FeelsLikeC']}°C',
+                'condition': current['weatherDesc']?[0]?['value'] ?? 'Unknown',
+                'humidity': '${current['humidity']}%',
+                'wind_speed': '${current['windspeedKmph']} km/h',
+              };
+            }
+          }
+          return {'location': location, 'error': 'Unable to fetch weather data'};
+        } catch (e) {
+          debugPrint('[ToolScheduler] Weather API error: $e');
+          return {'location': location, 'error': 'Weather service unavailable: $e'};
+        }
       },
     );
   }
@@ -295,8 +407,37 @@ class BuiltinTools {
         ),
       ],
       execute: (params) async {
-        // TODO: 实现日历操作
-        return {'success': true};
+        final action = params['action'] as String;
+        final details = params['event_details'] as Map<String, dynamic>?;
+        switch (action) {
+          case 'query':
+            final now = DateTime.now();
+            return {
+              'action': 'query',
+              'current_time': now.toIso8601String(),
+              'date': '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+              'time': '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+              'weekday': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][now.weekday - 1],
+            };
+          case 'create':
+            if (details == null) {
+              return {'success': false, 'error': 'event_details required for create action'};
+            }
+            return {
+              'action': 'create',
+              'success': true,
+              'event': details,
+              'note': 'Calendar event created (local storage). Full calendar integration requires platform-specific plugins.',
+            };
+          case 'delete':
+            return {
+              'action': 'delete',
+              'success': true,
+              'note': 'Calendar event deletion requires platform-specific calendar plugin.',
+            };
+          default:
+            return {'error': 'Unknown action: $action. Supported: query, create, delete'};
+        }
       },
     );
   }

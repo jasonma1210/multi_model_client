@@ -17,12 +17,151 @@ library;
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'voice_model_service.dart';
+import 'asset_model_service.dart';
+
+/// 后台 Isolate 识别函数（顶层函数，供 compute 使用）
+Future<String> _sherpaRecognizeInBackground(Map<String, String> params) async {
+  final modelPath = params['modelPath']!;
+  final tokensPath = params['tokensPath']!;
+  final ruleFst = params['ruleFst'] ?? '';
+  final filePath = params['filePath']!;
+
+  // 初始化 bindings
+  initBindings();
+
+  // 根据模型类型选择配置
+  final modelPathLower = modelPath.toLowerCase();
+  OfflineModelConfig modelConfig;
+
+  if (modelPathLower.contains('sense_voice') ||
+      modelPathLower.contains('sensevoice') ||
+      modelPathLower.contains('sense-voice')) {
+    modelConfig = OfflineModelConfig(
+      senseVoice: OfflineSenseVoiceModelConfig(model: modelPath),
+      tokens: tokensPath,
+      numThreads: 2,
+      provider: 'cpu',
+    );
+  } else if (modelPathLower.contains('whisper')) {
+    modelConfig = OfflineModelConfig(
+      whisper: OfflineWhisperModelConfig(encoder: modelPath, decoder: modelPath),
+      tokens: tokensPath,
+      numThreads: 2,
+      provider: 'cpu',
+    );
+  } else if (modelPathLower.contains('paraformer')) {
+    modelConfig = OfflineModelConfig(
+      paraformer: OfflineParaformerModelConfig(model: modelPath),
+      tokens: tokensPath,
+      numThreads: 2,
+      provider: 'cpu',
+    );
+  } else {
+    modelConfig = OfflineModelConfig(
+      senseVoice: OfflineSenseVoiceModelConfig(model: modelPath),
+      tokens: tokensPath,
+      numThreads: 2,
+      provider: 'cpu',
+    );
+  }
+
+  final config = OfflineRecognizerConfig(
+    model: modelConfig,
+    ruleFsts: ruleFst,
+    ruleFars: '',
+    maxActivePaths: 4,
+  );
+
+  final recognizer = OfflineRecognizer(config);
+
+  try {
+    // 读取 WAV 文件
+    final file = File(filePath);
+    final bytes = await file.readAsBytes();
+
+    if (bytes.length < 44) throw Exception('WAV 文件太小');
+
+    // 解析 WAV 头
+    final riff = String.fromCharCodes(bytes.sublist(0, 4));
+    if (riff != 'RIFF') throw Exception('不是有效的 WAV 文件');
+
+    int fmtOffset = 12;
+    int audioFormat = 1;
+    int numChannels = 1;
+    int sampleRate = 16000;
+    int bitsPerSample = 16;
+    int dataOffset = -1;
+    int dataSize = 0;
+
+    while (fmtOffset < bytes.length - 8) {
+      if (fmtOffset + 8 > bytes.length) break;
+      final chunkId = String.fromCharCodes(bytes.sublist(fmtOffset, fmtOffset + 4));
+      if (chunkId.length != 4) break;
+      final chunkSize = ByteData.sublistView(bytes, fmtOffset + 4, fmtOffset + 8).getUint32(0, Endian.little);
+
+      if (chunkId == 'fmt ') {
+        audioFormat = ByteData.sublistView(bytes, fmtOffset + 8, fmtOffset + 10).getUint16(0, Endian.little);
+        numChannels = ByteData.sublistView(bytes, fmtOffset + 10, fmtOffset + 12).getUint16(0, Endian.little);
+        sampleRate = ByteData.sublistView(bytes, fmtOffset + 12, fmtOffset + 16).getUint32(0, Endian.little);
+        bitsPerSample = ByteData.sublistView(bytes, fmtOffset + 22, fmtOffset + 24).getUint16(0, Endian.little);
+        fmtOffset += 8 + chunkSize;
+      } else if (chunkId == 'data') {
+        dataSize = chunkSize;
+        dataOffset = fmtOffset + 8;
+        break;
+      } else {
+        fmtOffset += 8 + chunkSize;
+      }
+    }
+
+    if (dataOffset < 0) throw Exception('WAV 文件中未找到 data chunk');
+    if (audioFormat != 1 && audioFormat != 3 && audioFormat != 65534) {
+      throw Exception('不支持的 WAV 格式: $audioFormat');
+    }
+
+    // 提取音频样本
+    final samples = <double>[];
+    final bytesPerSample = bitsPerSample ~/ 8;
+    final blockSize = bytesPerSample * numChannels;
+
+    for (int i = dataOffset; i < dataOffset + dataSize && i + bytesPerSample <= bytes.length; i += blockSize) {
+      double sample;
+      if (audioFormat == 3 && bitsPerSample == 32) {
+        sample = ByteData.sublistView(bytes, i, i + 4).getFloat32(0, Endian.little);
+      } else if (bitsPerSample == 16) {
+        sample = ByteData.sublistView(bytes, i, i + 2).getInt16(0, Endian.little) / 32768.0;
+      } else if (bitsPerSample == 32) {
+        sample = ByteData.sublistView(bytes, i, i + 4).getInt32(0, Endian.little) / 2147483648.0;
+      } else if (bitsPerSample == 8) {
+        sample = (bytes[i] - 128) / 128.0;
+      } else {
+        throw Exception('不支持的位深: $bitsPerSample');
+      }
+      samples.add(sample.clamp(-1.0, 1.0));
+    }
+
+    if (samples.isEmpty) throw Exception('音频文件为空');
+
+    // 执行识别
+    final stream = recognizer.createStream();
+    final floatData = Float32List.fromList(samples);
+    stream.acceptWaveform(samples: floatData, sampleRate: sampleRate);
+    recognizer.decode(stream);
+    final result = recognizer.getResult(stream);
+    final text = result.text;
+    stream.free();
+
+    return text;
+  } finally {
+    recognizer.free();
+  }
+}
 
 /// ASR 提供商类型
 enum ASRProvider {
@@ -30,13 +169,18 @@ enum ASRProvider {
   aliyun,    // 阿里云 ASR
   tencent,   // 腾讯云 ASR
   sherpa,    // Sherpa-ONNX 本地离线识别
+  system,    // 系统语音识别（iOS/Android/macOS/Windows 原生）
 }
 
 /// 语音识别服务 (ASR)
-/// 支持多种后端：OpenAI Whisper、阿里云 ASR、腾讯云 ASR、Sherpa-ONNX
+/// 支持多种后端：OpenAI Whisper、阿里云 ASR、腾讯云 ASR、Sherpa-ONNX、系统语音识别
 class ASRService {
-  // 当前使用的提供商
+  // 当前使用的提供商（暴露给外部）
   final ASRProvider _provider;
+  
+  /// 获取当前 ASR 提供商类型
+  ASRProvider get provider => _provider;
+  
   final String? _apiKey;
   
   // Sherpa-ONNX 相关
@@ -47,22 +191,34 @@ class ASRService {
   /// Sherpa 模型 ID（对应 VoiceModelService 中的模型 id，优先于 _modelPath）
   final String? _sherpaModelId;
   bool _initialized = false;
+  
+  // 系统语音识别 (speech_to_text) 相关
+  stt.SpeechToText? _systemSpeech;
+  bool _systemSpeechInitialized = false;
+  /// 系统语音识别语言（默认中文）
+  final String _systemLocaleId;
 
   ASRService({
-    ASRProvider provider = ASRProvider.sherpa,
+    ASRProvider provider = ASRProvider.system,  // 默认使用系统语音识别
     String? apiKey,
     String? modelPath,
     String? tokensPath,
     String? ruleFst,
     String? sherpaModelId,
+    String systemLocaleId = 'zh_CN',
   })  : _provider = provider,
         _apiKey = apiKey,
         _modelPath = modelPath,
         _tokensPath = tokensPath,
         _ruleFst = ruleFst,
-        _sherpaModelId = sherpaModelId;
+        _sherpaModelId = sherpaModelId,
+        _systemLocaleId = systemLocaleId;
 
   /// 初始化 Sherpa-ONNX 识别器
+  /// 
+  /// 模型查找优先级：
+  /// 1. VoiceModelService（用户在语音设置中下载的模型）
+  /// 2. AssetModelService（按需下载的模型）
   Future<void> initSherpa() async {
     if (_initialized) return;
 
@@ -71,16 +227,45 @@ class ASRService {
     String? resolvedRuleFst = _ruleFst;
 
     // 优先通过 sherpaModelId 从 VoiceModelService 定位已解压模型
-    if (_sherpaModelId != null) {
+    final sherpaModelId = _sherpaModelId;
+    if (sherpaModelId != null) {
       final modelService = voiceModelService;
-      final isReady = await modelService.isModelDownloaded(_sherpaModelId!);
-      if (!isReady) {
-        throw Exception('ASR 模型未下载，请先在「语音设置」中下载模型: $_sherpaModelId');
+      final isReady = await modelService.isModelDownloaded(sherpaModelId);
+      
+      if (isReady) {
+        // 用户已下载模型
+        resolvedModelPath = await modelService.findOnnxModel(sherpaModelId);
+        resolvedTokensPath = await modelService.findTokensFile(sherpaModelId);
+        final fstFiles = await modelService.findFstFiles(sherpaModelId);
+        resolvedRuleFst = fstFiles.isNotEmpty ? fstFiles.first : null;
+      } else {
+        // 用户未下载，尝试从预捆绑资源中查找
+        debugPrint('[ASRService] 用户模型未下载，尝试从预捆绑资源中查找: $sherpaModelId');
+        final assetService = AssetModelService.instance;
+        final assetPath = await assetService.getResourcePath(sherpaModelId);
+        
+        if (assetPath != null) {
+          // 预捆绑模型存在
+          resolvedModelPath = assetPath;
+          // 尝试查找 tokens 文件
+          final dir = Directory(assetPath).parent;
+          if (await dir.exists()) {
+            final files = await dir.list().toList();
+            for (final file in files) {
+              if (file.path.endsWith('tokens.txt')) {
+                resolvedTokensPath = file.path;
+                break;
+              }
+            }
+          }
+          debugPrint('[ASRService] 使用预捆绑模型: $resolvedModelPath');
+        } else {
+          throw Exception(
+            'ASR 模型未下载，请先在「语音设置」中下载模型: $_sherpaModelId\n'
+            '或等待首次启动时自动解压预捆绑模型'
+          );
+        }
       }
-      resolvedModelPath = await modelService.findOnnxModel(_sherpaModelId!);
-      resolvedTokensPath = await modelService.findTokensFile(_sherpaModelId!);
-      final fstFiles = await modelService.findFstFiles(_sherpaModelId!);
-      resolvedRuleFst = fstFiles.isNotEmpty ? fstFiles.first : null;
     }
 
     if (resolvedModelPath == null || !await File(resolvedModelPath).exists()) {
@@ -112,9 +297,10 @@ class ASRService {
       // 查找 encoder 文件
       String? encoderPath;
       String? decoderPath;
-      if (_sherpaModelId != null) {
+      final sherpaModelId = _sherpaModelId;
+      if (sherpaModelId != null) {
         final modelService = voiceModelService;
-        final dir = await modelService.getModelDirectory(_sherpaModelId!);
+        final dir = await modelService.getModelDirectory(sherpaModelId);
         if (dir != null) {
           final d = Directory(dir);
           await for (final f in d.list(recursive: true)) {
@@ -164,7 +350,12 @@ class ASRService {
     
     // 初始化 sherpa-onnx 绑定
     initBindings();
-    
+
+    // 保存解析后的路径供后台 Isolate 使用
+    _resolvedModelPath = resolvedModelPath;
+    _resolvedTokensPath = resolvedTokensPath;
+    _resolvedRuleFst = resolvedRuleFst;
+
     _recognizer = OfflineRecognizer(config);
     _initialized = true;
     debugPrint('[ASRService] Sherpa-ONNX 初始化成功: $resolvedModelPath');
@@ -181,49 +372,44 @@ class ASRService {
         return await _recognizeWithTencent(filePath, language: language);
       case ASRProvider.sherpa:
         return await _recognizeWithSherpa(filePath);
+      case ASRProvider.system:
+        // 系统语音识别不支持文件识别，只支持实时录音
+        throw UnimplementedError('系统语音识别不支持文件识别，请使用实时语音识别');
     }
   }
 
-  /// 使用 Sherpa-ONNX 识别音频文件
+  /// 使用 Sherpa-ONNX 识别音频文件（在后台 Isolate 中执行）
   Future<String> _recognizeWithSherpa(String filePath) async {
     if (!_initialized) {
       await initSherpa();
     }
-    
-    if (_recognizer == null) {
-      throw StateError('Sherpa 识别器未初始化');
+
+    if (_resolvedModelPath == null || _resolvedTokensPath == null) {
+      throw StateError('Sherpa 模型路径未解析');
     }
-    
+
     try {
-      // 读取音频文件
-      final waveData = await _readWaveFile(filePath);
-      if (waveData == null) {
-        throw Exception('无法读取音频文件: $filePath');
-      }
-      
-      // 创建识别器输入 - 使用 Float32List
-      final stream = _recognizer!.createStream();
-      final floatData = Float32List.fromList(waveData.map((e) => e).toList());
-      stream.acceptWaveform(samples: floatData, sampleRate: 16000);
-      
-      // 执行识别 - 使用 decode 方法
-      _recognizer!.decode(stream);
-      
-      // 获取识别结果
-      final result = _recognizer!.getResult(stream);
-      final text = result.text;
-      
-      // 释放资源
-      stream.free();
-      
+      final params = {
+        'modelPath': _resolvedModelPath!,
+        'tokensPath': _resolvedTokensPath!,
+        'ruleFst': _resolvedRuleFst ?? '',
+        'filePath': filePath,
+      };
+
+      final text = await compute(_sherpaRecognizeInBackground, params);
       return text;
     } catch (e) {
       throw Exception('Sherpa 识别失败: $e');
     }
   }
 
+  String? _resolvedModelPath;
+  String? _resolvedTokensPath;
+  String? _resolvedRuleFst;
+
   /// 读取 WAV 文件并返回音频数据（支持多种格式）
-  Future<List<double>?> _readWaveFile(String filePath) async {
+  @visibleForTesting
+  Future<List<double>?> readWaveFile(String filePath) async {
     try {
       final file = File(filePath);
       final bytes = await file.readAsBytes();
@@ -291,12 +477,12 @@ class ASRService {
       
       debugPrint('[ASRService] WAV: format=$audioFormat, channels=$numChannels, rate=$sampleRate, bits=$bitsPerSample, dataOffset=$dataOffset');
       
-      // 支持 PCM (1) 和 WAVEFORMATEXTENSIBLE (65534)
-      if (audioFormat != 1 && audioFormat != 65534) {
+      // 支持 PCM (1)、IEEE float (3) 和 WAVEFORMATEXTENSIBLE (65534)
+      if (audioFormat != 1 && audioFormat != 3 && audioFormat != 65534) {
         debugPrint('[ASRService] Only PCM format is supported, got format $audioFormat');
         return null;
       }
-      
+
       // 如果是 WAVEFORMATEXTENSIBLE，尝试读取实际的编码格式
       if (audioFormat == 65534) {
         // SubFormat 位于 fmtOffset + 24，GUID 格式
@@ -310,16 +496,19 @@ class ASRService {
           // 尝试从文件推断
         }
       }
-      
+
       // 计算音频样本
       final samples = <double>[];
       final bytesPerSample = bitsPerSample ~/ 8;
       final blockSize = bytesPerSample * numChannels;
-      
+
       for (int i = dataOffset; i < dataOffset + dataSize && i + bytesPerSample <= bytes.length; i += blockSize) {
         // 只取第一个通道
         double sample;
-        if (bitsPerSample == 16) {
+        if (audioFormat == 3 && bitsPerSample == 32) {
+          // IEEE float 32位格式
+          sample = ByteData.sublistView(bytes, i, i + 4).getFloat32(0, Endian.little);
+        } else if (bitsPerSample == 16) {
           sample = ByteData.sublistView(bytes, i, i + 2).getInt16(0, Endian.little) / 32768.0;
         } else if (bitsPerSample == 32) {
           sample = ByteData.sublistView(bytes, i, i + 4).getInt32(0, Endian.little) / 2147483648.0;
@@ -360,7 +549,7 @@ class ASRService {
       buffer.addAll(chunk);
       
       // 计算音频能量
-      final energy = _calculateEnergy(chunk);
+      final energy = calculateEnergy(chunk);
       
       if (energy > energyThreshold) {
         // 检测到人声
@@ -398,7 +587,8 @@ class ASRService {
   }
   
   /// 计算音频能量（简单 RMS）
-  double _calculateEnergy(List<int> chunk) {
+  @visibleForTesting
+  double calculateEnergy(List<int> chunk) {
     if (chunk.length < 2) return 0;
     
     double sum = 0;
@@ -425,18 +615,15 @@ class ASRService {
       final tempFile = File('${tempDir.path}/asr_temp_${DateTime.now().millisecondsSinceEpoch}.wav');
       
       // 添加 WAV 头
-      final wavData = _addWavHeader(audioData);
+      final wavData = addWavHeader(audioData);
       await tempFile.writeAsBytes(wavData);
       
       // 使用 sherpa 读取并识别
-      final wave = readWave(tempFile.path);
-      if (wave == null) {
-        await tempFile.delete();
-        return '';
-      }
+      final waveData = readWave(tempFile.path);
+      // readWave 返回非空 WaveData
       
       final stream = _recognizer!.createStream();
-      stream.acceptWaveform(samples: wave.samples, sampleRate: wave.sampleRate);
+      stream.acceptWaveform(samples: waveData.samples, sampleRate: waveData.sampleRate);
       _recognizer!.decode(stream);
       final result = _recognizer!.getResult(stream);
       final text = result.text;
@@ -455,7 +642,8 @@ class ASRService {
   }
   
   /// 为 PCM 数据添加 WAV 头
-  List<int> _addWavHeader(List<int> pcmData) {
+  @visibleForTesting
+  List<int> addWavHeader(List<int> pcmData) {
     const sampleRate = 16000;
     const numChannels = 1;
     const bitsPerSample = 16;
@@ -467,28 +655,29 @@ class ASRService {
     
     // RIFF header
     header.addAll('RIFF'.codeUnits);
-    header.addAll(_intToBytes(fileSize, 4));
+    header.addAll(intToBytes(fileSize, 4));
     header.addAll('WAVE'.codeUnits);
     
     // fmt subchunk
     header.addAll('fmt '.codeUnits);
-    header.addAll(_intToBytes(16, 4)); // Subchunk1Size
-    header.addAll(_intToBytes(1, 2));  // AudioFormat (1 = PCM)
-    header.addAll(_intToBytes(numChannels, 2));
-    header.addAll(_intToBytes(sampleRate, 4));
-    header.addAll(_intToBytes(sampleRate * numChannels * bitsPerSample ~/ 8, 4)); // ByteRate
-    header.addAll(_intToBytes(numChannels * bitsPerSample ~/ 8, 2)); // BlockAlign
-    header.addAll(_intToBytes(bitsPerSample, 2));
+    header.addAll(intToBytes(16, 4)); // Subchunk1Size
+    header.addAll(intToBytes(1, 2));  // AudioFormat (1 = PCM)
+    header.addAll(intToBytes(numChannels, 2));
+    header.addAll(intToBytes(sampleRate, 4));
+    header.addAll(intToBytes(sampleRate * numChannels * bitsPerSample ~/ 8, 4)); // ByteRate
+    header.addAll(intToBytes(numChannels * bitsPerSample ~/ 8, 2)); // BlockAlign
+    header.addAll(intToBytes(bitsPerSample, 2));
     
     // data subchunk
     header.addAll('data'.codeUnits);
-    header.addAll(_intToBytes(dataSize, 4));
+    header.addAll(intToBytes(dataSize, 4));
     
     return [...header, ...pcmData];
   }
   
   /// 整数转字节数组
-  List<int> _intToBytes(int value, int byteCount) {
+  @visibleForTesting
+  List<int> intToBytes(int value, int byteCount) {
     final bytes = <int>[];
     for (int i = 0; i < byteCount; i++) {
       bytes.add((value >> (8 * i)) & 0xFF);
@@ -514,7 +703,7 @@ class ASRService {
           filename: fileName,
         ),
         'model': 'whisper-1',
-        if (language != null) 'language': language,
+        'language': ?language,
         'response_format': 'json',
       });
 
@@ -574,6 +763,106 @@ class ASRService {
     _recognizer?.free();
     _recognizer = null;
     _initialized = false;
+    _systemSpeech?.cancel();
+    _systemSpeech = null;
+    _systemSpeechInitialized = false;
+  }
+
+  // ========== 系统语音识别 (speech_to_text) ==========
+
+  /// 初始化系统语音识别
+  Future<void> _initSystemSpeech() async {
+    if (_systemSpeechInitialized) return;
+
+    try {
+      _systemSpeech = stt.SpeechToText();
+      final available = await _systemSpeech!.initialize(
+        onError: (error) {
+          debugPrint('[ASRService] 系统语音识别错误: ${error.errorMsg}');
+        },
+        onStatus: (status) {
+          debugPrint('[ASRService] 系统语音识别状态: $status');
+        },
+      );
+
+      if (!available) {
+        throw Exception('系统语音识别不可用');
+      }
+
+      _systemSpeechInitialized = true;
+      debugPrint('[ASRService] 系统语音识别初始化成功');
+    } catch (e) {
+      debugPrint('[ASRService] 系统语音识别初始化失败: $e');
+      rethrow;
+    }
+  }
+
+  /// 使用系统语音识别进行实时识别
+  /// 返回识别结果的 Stream
+  Stream<String> recognizeWithSystem({
+    Function(String)? onResult,
+    Function()? onDone,
+    Function(String)? onError,
+  }) async* {
+    await _initSystemSpeech();
+
+    if (_systemSpeech == null) {
+      throw Exception('系统语音识别未初始化');
+    }
+
+    final controller = StreamController<String>();
+
+    // 开始监听
+    await _systemSpeech!.listen(
+      onResult: (result) {
+        final text = result.recognizedWords;
+        if (text.isNotEmpty) {
+          controller.add(text);
+          onResult?.call(text);
+        }
+        if (result.finalResult) {
+          controller.close();
+          onDone?.call();
+        }
+      },
+      listenFor: const Duration(seconds: 30), // 最长识别时间
+      pauseFor: const Duration(seconds: 3), // 静音多久后认为结束
+      localeId: _systemLocaleId,
+      listenOptions: stt.SpeechListenOptions(
+        cancelOnError: true,
+        partialResults: true,
+        listenMode: stt.ListenMode.dictation,
+      ),
+    );
+
+    yield* controller.stream;
+  }
+
+  /// 检查系统语音识别是否可用
+  Future<bool> isSystemSpeechAvailable() async {
+    try {
+      final speech = stt.SpeechToText();
+      return await speech.initialize();
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// 获取系统支持的语音识别语言
+  Future<List<stt.LocaleName>> getSystemLocales() async {
+    await _initSystemSpeech();
+    if (_systemSpeech == null) return [];
+    return await _systemSpeech!.locales();
+  }
+
+  /// 停止系统语音识别
+  void stopSystemSpeech() {
+    _systemSpeech?.stop();
+  }
+
+  /// 取消系统语音识别
+  void cancelSystemSpeech() {
+    _systemSpeech?.cancel();
   }
 }
 

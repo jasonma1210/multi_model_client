@@ -12,12 +12,11 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
-import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:uuid/uuid.dart';
 
 import '../storage/database.dart';
 import '../storage/database_connection.dart';
@@ -25,7 +24,6 @@ import '../storage/database_connection.dart';
 /// 数据备份恢复服务
 class BackupService {
   final AppDatabase _db = database;
-  final _uuid = const Uuid();
 
   /// 导出所有数据到 JSON 文件
   Future<String> exportAllData({String? outputPath}) async {
@@ -250,7 +248,7 @@ class BackupService {
         ));
         count++;
       } catch (e) {
-        // Skip duplicates
+        debugPrint('[backup_service] Error: $e');
       }
     }
 
@@ -270,7 +268,7 @@ class BackupService {
         ));
         count++;
       } catch (e) {
-        // Skip duplicates
+        debugPrint('[backup_service] Error: $e');
       }
     }
 
@@ -289,7 +287,7 @@ class BackupService {
         ));
         count++;
       } catch (e) {
-        // Skip duplicates
+        debugPrint('[backup_service] Error: $e');
       }
     }
 
@@ -315,7 +313,7 @@ class BackupService {
         ));
         count++;
       } catch (e) {
-        // Skip duplicates
+        debugPrint('[backup_service] Error: $e');
       }
     }
 
@@ -333,7 +331,7 @@ class BackupService {
         ));
         count++;
       } catch (e) {
-        // Skip duplicates
+        debugPrint('[backup_service] Error: $e');
       }
     }
 
@@ -351,7 +349,7 @@ class BackupService {
         ));
         count++;
       } catch (e) {
-        // Skip duplicates
+        debugPrint('[backup_service] Error: $e');
       }
     }
 
@@ -372,7 +370,7 @@ class BackupService {
         ));
         count++;
       } catch (e) {
-        // Skip duplicates
+        debugPrint('[backup_service] Error: $e');
       }
     }
 
@@ -394,7 +392,7 @@ class BackupService {
         ));
         count++;
       } catch (e) {
-        // Skip duplicates
+        debugPrint('[backup_service] Error: $e');
       }
     }
 

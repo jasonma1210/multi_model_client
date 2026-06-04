@@ -1,3 +1,4 @@
+// ignore_for_file: non_constant_identifier_names
 /// Piper TTS 引擎 - LLM Studio 本地语音合成模块
 /// 
 /// 功能：

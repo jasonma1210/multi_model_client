@@ -11,9 +11,10 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// 视频理解服务
@@ -22,6 +23,7 @@ class VideoUnderstandingService {
   // 视频帧提取配置
   final int maxFrames; // 最多提取多少帧
   final int frameInterval; // 帧提取间隔（秒）
+  static const String _tag = 'VideoUnderstanding';
 
   VideoUnderstandingService({
     this.maxFrames = 10,
@@ -66,7 +68,7 @@ class VideoUnderstandingService {
       frames.sort();
       return frames.take(maxFrames).toList();
     } catch (e) {
-      print('Failed to extract frames: $e');
+      debugPrint('[$_tag] 提取视频帧失败: $e');
       return [];
     }
   }
@@ -83,7 +85,7 @@ class VideoUnderstandingService {
     }
 
     // 生成分析提示词
-    final prompt = generatePrompt?.call('') ??
+    final _ = generatePrompt?.call('') ??
         '''
 请分析这些视频帧，描述：
 1. 视频的主要内容
@@ -120,7 +122,7 @@ class VideoUnderstandingService {
 
       return frames;
     } catch (e) {
-      print('Failed to download and extract frames: $e');
+      debugPrint('[$_tag] 下载并提取视频帧失败: $e');
       return [];
     }
   }
@@ -137,11 +139,52 @@ class VideoUnderstandingService {
       ]);
 
       if (result.exitCode == 0) {
-        // 解析 ffprobe 输出
-        // 这里简化处理，实际应该解析 JSON
+        // 解析 ffprobe JSON 输出
+        final jsonStr = result.stdout as String;
+        try {
+          final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+          final format = data['format'] as Map<String, dynamic>?;
+          final streams = data['streams'] as List<dynamic>?;
+          
+          final duration = (format?['duration'] as num?)?.toDouble() ?? 0;
+          
+          // 从视频流中获取分辨率和帧率
+          int width = 0, height = 0;
+          double fps = 30;
+          if (streams != null) {
+            for (final stream in streams) {
+              if (stream['codec_type'] == 'video') {
+                width = (stream['width'] as num?)?.toInt() ?? 0;
+                height = (stream['height'] as num?)?.toInt() ?? 0;
+                // 解析帧率，格式如 "30/1" 或 "29.97"
+                final rFrameRate = stream['r_frame_rate'] as String? ?? '30/1';
+                final parts = rFrameRate.split('/');
+                if (parts.length == 2) {
+                  final num = double.tryParse(parts[0]) ?? 30;
+                  final den = double.tryParse(parts[1]) ?? 1;
+                  fps = den > 0 ? num / den : 30;
+                } else {
+                  fps = double.tryParse(rFrameRate) ?? 30;
+                }
+                break;
+              }
+            }
+          }
+          
+          return VideoMetadata(
+            path: videoPath,
+            duration: duration.round(),
+            width: width,
+            height: height,
+            fps: fps.round(),
+          );
+        } catch (parseError) {
+          debugPrint('[VideoUnderstanding] ffprobe JSON parse error: $parseError');
+        }
+        
         return VideoMetadata(
           path: videoPath,
-          duration: 0, // TODO: 解析实际时长
+          duration: 0,
           width: 0,
           height: 0,
           fps: 30,

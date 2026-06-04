@@ -12,6 +12,7 @@ library;
 
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 应用锁服务
 /// 支持 PIN 码和生物识别（Face ID / Touch ID / 指纹）
 class AppLockService {
+  static const String _tag = 'AppLockService';
   static const String _pinHashKey = 'app_lock_pin_hash';
   static const String _biometricEnabledKey = 'app_lock_biometric_enabled';
   static const String _lockEnabledKey = 'app_lock_enabled';
@@ -103,7 +105,7 @@ class AppLockService {
         sensitiveTransaction: true,
       );
     } catch (e) {
-      print('Biometric verification failed: $e');
+      debugPrint('[$_tag] 生物识别验证失败: $e');
       return false;
     }
   }

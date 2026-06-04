@@ -4,7 +4,7 @@
 
 **A powerful multi-model AI assistant with local/remote model support**
 
-[![Version](https://img.shields.io/badge/version-0.21.0--beta-blue.svg)](https://github.com/jasonma1210/multi_model_client/releases)
+[![Version](https://img.shields.io/badge/version-0.35.0--beta-blue.svg)](https://github.com/jasonma1210/multi_model_client/releases)
 [![Flutter](https://img.shields.io/badge/Flutter-3.10+-02569B.svg)](https://flutter.dev)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -196,6 +196,44 @@ lib/
 ---
 
 ## 📊 Version History
+
+### v0.35.0-beta (2026-06-04)
+
+**✨ New Features**
+- Real-time voice conversation page (ASR → LLM → TTS full pipeline streaming)
+- Manual context compression (one-click compress all messages into a summary)
+- TTS director mode prompt template system
+- Voice cloning service (MIMO API integration)
+- Inspiration feature (recording, ASR transcription, summary, mind map)
+- Streaming TTS service (double-buffered playback, parallel synthesis and playback)
+- Smart context manager (5-layer architecture)
+- Model path cache service
+- Document generation service (Markdown/PDF/XMind)
+- 7 new professional skills (social media, concert planning, etc.)
+- Log system service
+- Security bookmark service (macOS sandbox)
+- Plugin download service
+- Voice Activity Detection (VAD) service
+- Speaker diarization service
+- Memory palace service & memory compression engine
+- Memory retrieval service
+- Media ingestion pipeline service
+- Mirror service
+
+**🔧 Improvements**
+- Fixed real-time voice conversation stuck after 1 round (TTS playback state recovery, audio player reset)
+- Fixed context compression summary not included in subsequent conversations
+- Rewrote autoCompressContext: all messages compressed into a single summary
+- Added compression summary injection logic: ensure subsequent conversations include summary and system description
+- UI color system and icon system refactoring
+- Expert skill icon configuration (Material Icons replacing Emoji)
+
+**🐛 Bug Fixes**
+- Fixed _speakResponse early return not restoring state causing conversation stuck
+- Fixed _waitForPlaybackComplete hanging until 3-minute timeout
+- Fixed audio player not stop after playback causing next round anomaly
+- Fixed _processWithLLM catch block not restoring idle state
+- Fixed system messages being skipped in _buildStructuredMessages and _buildStructuredMessagesWithContent
 
 ### v0.21.0-beta (2026-05-15)
 

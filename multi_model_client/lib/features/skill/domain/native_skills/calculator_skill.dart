@@ -40,7 +40,7 @@ class CalculatorSkill extends Skill {
       final precision = validatedParams['precision'] as int? ?? 10;
 
       // 创建解析器
-      final parser = Parser();
+      final parser = ShuntingYardParser();
       final exp = parser.parse(expression);
 
       // 创建上下文并添加常量
@@ -50,8 +50,9 @@ class CalculatorSkill extends Skill {
       context.bindVariable(
           Variable('e'), Number(math.e));
 
-      // 计算结果
-      final result = exp.evaluate(EvaluationType.REAL, context);
+      // 计算结果 - RealEvaluator 需要传入 context
+      final evaluator = RealEvaluator(context);
+      final result = evaluator.evaluate(exp);
 
       // 格式化结果
       String formattedResult;

@@ -1,5 +1,5 @@
 abstract class IModelManager {
-  Future<ModelInfo> loadModel(String modelId);
+  Future<ModelInfo> loadModel(String modelId, {String? mmprojPath});
   Future<void> unloadModel(String modelId);
   Future<void> downloadModel(ModelDownloadConfig config);
   Future<ModelInfo> getModelInfo(String modelId);

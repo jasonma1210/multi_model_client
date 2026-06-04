@@ -1,13 +1,10 @@
-import 'dart:io';
-import 'dart:ffi';
-import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:mj_nexus/core/platform/platform_utils.dart';
 import '../hardware/device_env.dart';
 
 /// Metal加速器（macOS/iOS）
 class MetalAccelerator {
   final DeviceEnv deviceEnv;
-  bool _isInitialized = false;
   bool _isAvailable = false;
 
   MetalAccelerator(this.deviceEnv);
@@ -17,7 +14,7 @@ class MetalAccelerator {
 
   /// 初始化
   Future<bool> initialize() async {
-    if (!Platform.isMacOS && !Platform.isIOS) {
+    if (!PlatformUtils.isMacOS && !PlatformUtils.isIOS) {
       debugPrint('Metal is only available on macOS and iOS');
       return false;
     }
@@ -30,7 +27,6 @@ class MetalAccelerator {
     try {
       // 检查Metal设备
       _isAvailable = await _checkMetalDevice();
-      _isInitialized = true;
 
       if (_isAvailable) {
         debugPrint('Metal accelerator initialized successfully');

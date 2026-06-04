@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../skill.dart';
 
@@ -147,7 +148,7 @@ class SearchSkill extends Skill {
         }
       }
     } catch (e) {
-      // API 调用失败，返回模拟结果
+      debugPrint('[search_skill] Error: $e');
     }
 
     // 返回模拟搜索结果

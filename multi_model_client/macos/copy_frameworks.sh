@@ -1,5 +1,5 @@
 #!/bin/bash
-# 将 llama.cpp 动态库复制到 macOS app bundle 的 Frameworks 目录
+# 将 llama.cpp 动态库复制到 macOS app bundle 的 Frameworks 目录，并进行 ad-hoc 签名
 # 此脚本由 Xcode Build Phase 自动调用，也可手动运行
 #
 # Xcode 环境变量:
@@ -83,4 +83,41 @@ if [ $COPIED -gt 0 ]; then
     echo "🔧 [Copy Frameworks] ✅ 已复制 ${COPIED} 个动态库"
 else
     echo "🔧 [Copy Frameworks] ℹ️ 无新文件需要复制"
+fi
+
+# ════════════════════════════════════════════════════════════════════════
+# ★ 关键：对 Frameworks 目录内所有 .dylib 进行 ad-hoc 签名
+#
+# 背景：llamadart（ggml）在运行时通过 dlopen 动态加载后端 .dylib（如
+# libggml-metal.dylib），macOS 沙盒会拒绝加载未签名的动态库，
+# 导致 EXC_BAD_ACCESS (SIGKILL - Code Signature Invalid) 崩溃。
+#
+# 解决方案：每次构建后对所有 dylib 执行 ad-hoc 签名（不需要开发者证书）
+# ════════════════════════════════════════════════════════════════════════
+echo "🔐 [Copy Frameworks] 对所有 dylib 进行 ad-hoc 签名..."
+SIGNED=0
+FAILED_SIGN=0
+
+for dylib in "${FRAMEWORKS_DST}"/*.dylib; do
+    if [ -f "$dylib" ]; then
+        # 强制重新签名（--force 覆盖已有签名，-s - 表示 ad-hoc）
+        if codesign --force --sign - "$dylib" 2>/dev/null; then
+            SIGNED=$((SIGNED + 1))
+        else
+            echo "⚠️ [Copy Frameworks] 签名失败: $(basename "$dylib")"
+            FAILED_SIGN=$((FAILED_SIGN + 1))
+        fi
+    fi
+done
+
+echo "🔐 [Copy Frameworks] ✅ 签名完成: ${SIGNED} 个成功, ${FAILED_SIGN} 个失败"
+
+# 验证关键库（libggml-metal.dylib）签名
+METAL_LIB="${FRAMEWORKS_DST}/libggml-metal.dylib"
+if [ -f "${METAL_LIB}" ]; then
+    if codesign --verify "${METAL_LIB}" 2>/dev/null; then
+        echo "🔐 [Copy Frameworks] ✅ libggml-metal.dylib 签名验证通过"
+    else
+        echo "❌ [Copy Frameworks] libggml-metal.dylib 签名验证失败！"
+    fi
 fi

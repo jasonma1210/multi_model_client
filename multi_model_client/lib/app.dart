@@ -6,7 +6,7 @@ import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'core/providers/locale_provider.dart';
 import 'core/services/onboarding_service.dart';
-import 'l10n/app_localizations.dart';
+import 'generated/app_localizations.dart';
 
 class App extends ConsumerStatefulWidget {
   const App({super.key});
@@ -42,8 +42,20 @@ class _AppState extends ConsumerState<App> {
   @override
   Widget build(BuildContext context) {
     if (_isCheckingOnboarding) {
-      return const MaterialApp(
-        home: Scaffold(
+      return MaterialApp(
+        title: 'MJ Nexus',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        locale: ref.watch(localeProvider),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: const Scaffold(
           body: Center(
             child: CircularProgressIndicator(),
           ),
@@ -53,10 +65,18 @@ class _AppState extends ConsumerState<App> {
 
     if (_showOnboarding) {
       return MaterialApp(
-        title: 'LLM Studio',
+        title: 'MJ Nexus',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
+        locale: ref.watch(localeProvider),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
         home: OnboardingPage(onComplete: _completeOnboarding),
       );
     }
@@ -90,6 +110,16 @@ class _MainApp extends ConsumerWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
+      // ✅ macOS 兼容：显式 locale 解析回调，确保带国家代码的 locale 正确回退
+      localeResolutionCallback: (locale, supportedLocales) {
+        if (locale == null) return supportedLocales.first;
+        for (final supported in supportedLocales) {
+          if (supported.languageCode == locale.languageCode) {
+            return supported;
+          }
+        }
+        return supportedLocales.first;
+      },
 
       // Router
       routerConfig: router,

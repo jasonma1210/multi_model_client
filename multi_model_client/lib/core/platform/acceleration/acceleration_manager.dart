@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:mj_nexus/core/platform/platform_utils.dart';
 import '../hardware/device_env.dart';
 import '../models/device_capabilities.dart';
 import 'metal_accelerator.dart';
@@ -57,7 +57,7 @@ class AccelerationManager {
 
   /// 初始化Metal加速器
   Future<void> _initializeMetal() async {
-    if (!Platform.isMacOS && !Platform.isIOS) {
+    if (!PlatformUtils.isMacOS && !PlatformUtils.isIOS) {
       return;
     }
 
@@ -67,7 +67,7 @@ class AccelerationManager {
 
   /// 初始化CUDA加速器
   Future<void> _initializeCuda() async {
-    if (!Platform.isWindows) {
+    if (!PlatformUtils.isWindows) {
       return;
     }
 

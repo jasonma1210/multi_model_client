@@ -10,15 +10,16 @@
 /// @version 1.0.0
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:archive/archive.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as spdf;
 import 'package:pdfx/pdfx.dart';
 import 'ocr_service.dart';
+import 'media_ingestion_pipeline.dart';
 
 /// 文件解析服务 - 从各种文档格式提取文本内容
 class FileParserService {
@@ -57,6 +58,24 @@ class FileParserService {
         return _parseXlsx(file);
       case '.xmind':
         return _parseXmind(file);
+      // 视频文件：使用媒体摄入管道处理
+      case '.mp4':
+      case '.mov':
+      case '.avi':
+      case '.mkv':
+      case '.webm':
+      case '.flv':
+      case '.wmv':
+        return _parseVideoWithPipeline(file);
+      // 音频文件：使用媒体摄入管道处理
+      case '.mp3':
+      case '.wav':
+      case '.m4a':
+      case '.aac':
+      case '.ogg':
+      case '.flac':
+      case '.wma':
+        return _parseAudioWithPipeline(file);
       // 图片文件：直接调用本地 OCR 识别文字
       case '.jpg':
       case '.jpeg':
@@ -66,6 +85,18 @@ class FileParserService {
       case '.tif':
       case '.webp':
         return _parseImageWithOcr(file);
+      // === 新增支持的文档格式 ===
+      case '.rtf':
+        return _parseRtf(file);
+      case '.epub':
+        return _parseEpub(file);
+      case '.xml':
+        return _parseXml(file);
+      case '.log':
+        return _parseLog(file);
+      case '.srt':
+      case '.vtt':
+        return _parseSubtitle(file);
       default:
         // 尝试作为纯文本处理
         try {
@@ -90,6 +121,46 @@ class FileParserService {
     } catch (e) {
       debugPrint('[FileParserService] 图片 OCR 失败: $e');
       return '【图片 OCR 识别失败】\n\n错误: $e';
+    }
+  }
+
+  /// 解析视频文件（使用媒体摄入管道）
+  static Future<String> _parseVideoWithPipeline(File file) async {
+    debugPrint('[FileParserService] 视频文件处理: ${file.path}');
+    try {
+      // 使用媒体摄入管道处理视频
+      final pipeline = MediaIngestionPipeline.instance;
+      final result = await pipeline.processFile(file.path);
+      
+      if (result.success && result.textContent != null) {
+        debugPrint('[FileParserService] 视频处理完成，分块数: ${result.chunkCount}');
+        return result.textContent!;
+      } else {
+        return '【视频处理失败】\n\n${result.errorMessage ?? "未知错误"}';
+      }
+    } catch (e) {
+      debugPrint('[FileParserService] 视频处理异常: $e');
+      return '【视频处理异常】\n\n错误: $e\n\n提示：视频处理需要 FFmpeg 和 ASR 引擎支持。';
+    }
+  }
+
+  /// 解析音频文件（使用媒体摄入管道）
+  static Future<String> _parseAudioWithPipeline(File file) async {
+    debugPrint('[FileParserService] 音频文件处理: ${file.path}');
+    try {
+      // 使用媒体摄入管道处理音频
+      final pipeline = MediaIngestionPipeline.instance;
+      final result = await pipeline.processFile(file.path);
+      
+      if (result.success && result.textContent != null) {
+        debugPrint('[FileParserService] 音频处理完成，分块数: ${result.chunkCount}');
+        return result.textContent!;
+      } else {
+        return '【音频处理失败】\n\n${result.errorMessage ?? "未知错误"}';
+      }
+    } catch (e) {
+      debugPrint('[FileParserService] 音频处理异常: $e');
+      return '【音频处理异常】\n\n错误: $e\n\n提示：音频处理需要 ASR 引擎支持。';
     }
   }
 
@@ -891,15 +962,15 @@ class FileParserService {
           }
           
           currentChunk = tempChunk;
-        } else if ((currentChunk + '\n\n' + trimmed).length > maxChunkSize) {
+        } else if (('$currentChunk\n\n$trimmed').length > maxChunkSize) {
           if (currentChunk.isNotEmpty && currentChunk.length >= minChunkSize ~/ 2) {
             chunks.add(currentChunk.trim());
-            currentChunk = _getOverlapContent(currentChunk, overlap) + '\n\n' + trimmed;
+            currentChunk = '${_getOverlapContent(currentChunk, overlap)}\n\n$trimmed';
           } else {
-            currentChunk = currentChunk.isEmpty ? trimmed : currentChunk + '\n\n' + trimmed;
+            currentChunk = currentChunk.isEmpty ? trimmed : '$currentChunk\n\n$trimmed';
           }
         } else {
-          currentChunk = currentChunk.isEmpty ? trimmed : currentChunk + '\n\n' + trimmed;
+          currentChunk = currentChunk.isEmpty ? trimmed : '$currentChunk\n\n$trimmed';
         }
       }
       
@@ -1011,13 +1082,339 @@ class FileParserService {
   /// 获取重叠内容
   static String _getOverlapContent(String text, int overlap) {
     if (text.length <= overlap) return text;
-    
+
     // 尝试在句子边界处截断
     final lastSentenceEnd = text.lastIndexOf(RegExp(r'[。！？.!?]'), text.length - overlap);
     if (lastSentenceEnd > text.length - overlap * 2) {
       return text.substring(lastSentenceEnd + 1).trim();
     }
-    
+
     return text.substring(text.length - overlap);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  //  新增支持的文档格式解析方法
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /// 解析 RTF 文件（富文本格式）
+  static Future<String> _parseRtf(File file) async {
+    debugPrint('[FileParserService] 解析 RTF 文件: ${file.path}');
+    try {
+      final content = await file.readAsString();
+
+      // 移除 RTF 控制字
+      var text = content
+          // 移除组 { }
+          .replaceAll(RegExp(r'\{([^}]*)\}'), r'$1')
+          // 移除 RTF 关键字
+          .replaceAll(RegExp(r'\\[a-z]+\d*\s*'), '')
+          // 移除特殊字符（十六进制转义）
+          .replaceAll(RegExp(r"\\['\\][0-9a-fA-F]{2}"), ' ')
+          // 移除换行控制
+          .replaceAll(r'\par', '\n')
+          // 规范化空白
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+
+      // 如果结果为空，返回原始内容
+      if (text.isEmpty) {
+        return content;
+      }
+
+      debugPrint('[FileParserService] RTF 解析完成，字符数: ${text.length}');
+      return text;
+    } catch (e) {
+      debugPrint('[FileParserService] RTF 解析失败: $e');
+      throw Exception('RTF 文件解析失败: $e');
+    }
+  }
+
+  /// 解析 EPUB 文件（电子书格式）
+  static Future<String> _parseEpub(File file) async {
+    debugPrint('[FileParserService] 解析 EPUB 文件: ${file.path}');
+    try {
+      final bytes = await file.readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final buffer = StringBuffer();
+
+      // 查找 content.opf 文件获取元数据
+      String? title;
+      String? author;
+
+      try {
+        final contentOpf = archive.files.firstWhere(
+          (f) => f.name.endsWith('.opf'),
+        );
+        final opfContent = String.fromCharCodes(contentOpf.content as List<int>);
+
+        // 提取标题
+        final titleMatch = RegExp(r'<dc:title[^>]*>([^<]+)</dc:title>').firstMatch(opfContent);
+        title = titleMatch?.group(1);
+
+        // 提取作者
+        final authorMatch = RegExp(r'<dc:creator[^>]*>([^<]+)</dc:creator>').firstMatch(opfContent);
+        author = authorMatch?.group(1);
+      } catch (_) {
+        // 忽略元数据提取失败
+      }
+
+      if (title != null) {
+        buffer.writeln('【标题】$title');
+      }
+      if (author != null) {
+        buffer.writeln('【作者】$author');
+      }
+      buffer.writeln();
+
+      // 提取所有 HTML/XHTML 内容
+      final htmlFiles = archive.files
+          .where((f) => f.name.endsWith('.html') || f.name.endsWith('.xhtml') || f.name.endsWith('.htm'))
+          .toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+
+      debugPrint('[FileParserService] EPUB 找到 ${htmlFiles.length} 个 HTML 文件');
+
+      for (int i = 0; i < htmlFiles.length && i < 50; i++) {
+        final htmlContent = String.fromCharCodes(htmlFiles[i].content as List<int>);
+
+        // 提取 body 中的文本
+        final bodyMatch = RegExp(r'<body[^>]*>([\s\S]*?)</body>', caseSensitive: false).firstMatch(htmlContent);
+        if (bodyMatch != null) {
+          final bodyContent = bodyMatch.group(1) ?? '';
+
+          // 移除 HTML 标签
+          var text = bodyContent
+              .replaceAll(RegExp(r'<script[^>]*>.*?</script>', caseSensitive: false, dotAll: true), '')
+              .replaceAll(RegExp(r'<style[^>]*>.*?</style>', caseSensitive: false, dotAll: true), '')
+              .replaceAll(RegExp(r'<[^>]+>'), ' ')
+              .replaceAll(RegExp(r'\s+'), ' ')
+              .trim();
+
+          if (text.isNotEmpty) {
+            buffer.writeln(text);
+            buffer.writeln('\n---\n');
+          }
+        }
+      }
+
+      final result = buffer.toString().trim();
+      if (result.isEmpty) {
+        throw Exception('EPUB 文件内容为空');
+      }
+
+      debugPrint('[FileParserService] EPUB 解析完成，字符数: ${result.length}');
+      return result;
+    } catch (e) {
+      debugPrint('[FileParserService] EPUB 解析失败: $e');
+      throw Exception('EPUB 文件解析失败: $e');
+    }
+  }
+
+  /// 解析 XML 文件
+  static Future<String> _parseXml(File file) async {
+    debugPrint('[FileParserService] 解析 XML 文件: ${file.path}');
+    try {
+      final content = await file.readAsString();
+
+      // 简单提取 XML 中的文本内容
+      var text = content
+          // 移除注释
+          .replaceAll(RegExp(r'<!--[\s\S]*?-->'), '')
+          // 移除 CDATA
+          .replaceAll(RegExp(r'<!\[CDATA\[[\s\S]*?\]\]>'), '')
+          // 移除 XML 声明和标签
+          .replaceAll(RegExp(r'<\?[^>]+\?>'), '')
+          .replaceAll(RegExp(r'<[a-zA-Z:][^>]*>'), ' ')
+          .replaceAll(RegExp(r'</[a-zA-Z:]+>'), '\n')
+          // 规范化空白
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+
+      // 如果结果太短，可能是 XML 结构数据，直接返回原始内容
+      if (text.length < 50) {
+        return content;
+      }
+
+      debugPrint('[FileParserService] XML 解析完成，字符数: ${text.length}');
+      return text;
+    } catch (e) {
+      debugPrint('[FileParserService] XML 解析失败: $e');
+      throw Exception('XML 文件解析失败: $e');
+    }
+  }
+
+  /// 解析日志文件
+  static Future<String> _parseLog(File file) async {
+    debugPrint('[FileParserService] 解析日志文件: ${file.path}');
+    try {
+      final content = await file.readAsString();
+
+      // 日志文件通常很大，限制解析量
+      final lines = content.split('\n');
+      final buffer = StringBuffer();
+
+      // 取最后 500 行（通常是最新日志）
+      final recentLines = lines.length > 500 ? lines.sublist(lines.length - 500) : lines;
+
+      for (final line in recentLines) {
+        buffer.writeln(line);
+      }
+
+      final result = buffer.toString().trim();
+      debugPrint('[FileParserService] 日志解析完成，字符数: ${result.length}');
+      return result;
+    } catch (e) {
+      debugPrint('[FileParserService] 日志解析失败: $e');
+      throw Exception('日志文件解析失败: $e');
+    }
+  }
+
+  /// 解析字幕文件（SRT/VTT）
+  static Future<String> _parseSubtitle(File file) async {
+    debugPrint('[FileParserService] 解析字幕文件: ${file.path}');
+    try {
+      final content = await file.readAsString();
+      final buffer = StringBuffer();
+
+      // SRT 格式：序号\n时间\n文本\n\n
+      // VTT 格式：WEBVTT\n\n序号\n时间\n文本\n\n
+
+      // 检测格式
+      final _ = content.trim().startsWith('WEBVTT');
+
+      // 提取所有字幕文本
+      final lines = content.split('\n');
+      for (final line in lines) {
+        final trimmed = line.trim();
+
+        // 跳过序号
+        if (RegExp(r'^\d+$').hasMatch(trimmed)) continue;
+
+        // 跳过时间行
+        if (trimmed.contains('-->')) continue;
+
+        // 跳过格式标签
+        if (trimmed.startsWith('WEBVTT') ||
+            trimmed.startsWith('NOTE') ||
+            trimmed.startsWith('STYLE')) {
+          continue;
+        }
+
+        // 收集文本内容
+        if (trimmed.isNotEmpty) {
+          buffer.writeln(trimmed);
+        }
+      }
+
+      var result = buffer.toString().trim();
+
+      // 如果结果为空，返回原始内容
+      if (result.isEmpty) {
+        result = content;
+      }
+
+      debugPrint('[FileParserService] 字幕解析完成，字符数: ${result.length}');
+      return result;
+    } catch (e) {
+      debugPrint('[FileParserService] 字幕解析失败: $e');
+      throw Exception('字幕文件解析失败: $e');
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  //  解析稳定性增强：PDF 错误处理优化
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /// 带超时的 PDF 解析（防止超大 PDF 长时间阻塞）
+  static Future<String> parsePdfWithTimeout(String filePath, {Duration timeout = const Duration(seconds: 60)}) async {
+    return parseFileWithTimeout(filePath, timeout: timeout);
+  }
+
+  /// 带超时的文件解析
+  static Future<String> parseFileWithTimeout(String filePath, {Duration timeout = const Duration(seconds: 60)}) async {
+    final completer = Completer<String>();
+
+    // 设置超时
+    Timer(timeout, () {
+      if (!completer.isCompleted) {
+        completer.completeError(Exception('文件解析超时（${timeout.inSeconds}秒），文件可能过大或格式复杂'));
+      }
+    });
+
+    // 执行解析
+    parseFile(filePath).then((result) {
+      if (!completer.isCompleted) {
+        completer.complete(result);
+      }
+    }).catchError((e) {
+      if (!completer.isCompleted) {
+        completer.completeError(e);
+      }
+    });
+
+    return completer.future;
+  }
+
+  /// 获取文件信息（大小、创建时间等）
+  static Future<Map<String, dynamic>> getFileInfo(String filePath) async {
+    final file = File(filePath);
+    if (!await file.exists()) {
+      throw Exception('文件不存在: $filePath');
+    }
+
+    final stat = await file.stat();
+    final extension = p.extension(filePath).toLowerCase();
+
+    return {
+      'path': filePath,
+      'name': p.basename(filePath),
+      'extension': extension,
+      'size': stat.size,
+      'sizeFormatted': _formatFileSize(stat.size),
+      'modified': stat.modified,
+      'type': getFileType(filePath),
+    };
+  }
+
+  /// 格式化文件大小
+  static String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  /// 检查文件是否可能包含可提取的文本（用于快速判断是否需要 OCR）
+  static Future<bool> mightNeedOcr(String filePath) async {
+    final extension = p.extension(filePath).toLowerCase();
+
+    // 纯文本格式不需要 OCR
+    const textFormats = ['.txt', '.md', '.json', '.xml', '.csv', '.log', '.srt', '.vtt'];
+    if (textFormats.contains(extension)) {
+      return false;
+    }
+
+    // 文档格式可能需要 OCR
+    const docFormats = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'];
+    if (docFormats.contains(extension)) {
+      // 获取文件大小，较大的文件更可能是扫描版
+      try {
+        final stat = await File(filePath).stat();
+        // PDF 大于 5MB 更可能是扫描版
+        if (extension == '.pdf' && stat.size > 5 * 1024 * 1024) {
+          return true;
+        }
+      } catch (_) {
+        // ignore: non-critical error
+      }
+    }
+
+    // 图片格式需要 OCR
+    const imageFormats = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif'];
+    if (imageFormats.contains(extension)) {
+      return true;
+    }
+
+    return false;
   }
 }

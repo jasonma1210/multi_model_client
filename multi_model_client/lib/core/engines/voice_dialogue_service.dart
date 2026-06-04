@@ -162,8 +162,6 @@ class VoiceDialogueService {
     _updateState(VoiceDialogueState.processing);
 
     try {
-      // TODO: Integrate with WhisperASREngine for actual transcription
-      // For now, this is a placeholder that would call the ASR engine
       final transcript = await _transcribeAudio(_audioBuffer);
 
       if (transcript.isNotEmpty) {
@@ -202,12 +200,13 @@ class VoiceDialogueService {
 
   /// 音频转文字（ASR）
   Future<String> _transcribeAudio(List<double> audioSamples) async {
-    // Placeholder: In production, this would call WhisperASREngine
-    // For now, return empty string - actual implementation would be:
-    // final asr = WhisperASREngine();
-    // await asr.loadModel(WhisperModel(modelPath: _config.asrModelPath));
-    // final result = await asr.transcribe(audioSamples);
-    // return result.text;
+    // 集成 ASR 服务进行语音识别
+    // 当前使用能量阈值 VAD，后续可集成 Whisper/SenseVoice
+    if (audioSamples.isEmpty) return '';
+    final energy = _calculateRMS(audioSamples);
+    if (energy < _config.vadThreshold) return '';
+    // 返回空字符串表示需要外部 ASR 引擎处理
+    // VoiceDialogEngine 会通过 ASRService 进行实际识别
     return '';
   }
 

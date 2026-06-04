@@ -10,15 +10,29 @@
 /// @version 1.0.0
 library;
 
-import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../storage/database.dart';
 import '../storage/database_connection.dart';
+
+/// 平台通道常量
+const _shareChannel = MethodChannel('com.multimodel.client/share');
+
+/// 全局分享内容存储（用于跨平台接收分享）
+SharedContent? _globalSharedContent;
+
+/// 获取当前接收到的分享内容
+SharedContent? get sharedContent => _globalSharedContent;
+
+/// 清除分享内容
+void clearSharedContent() {
+  _globalSharedContent = null;
+}
 
 /// 分享服务
 /// 支持分享会话、消息、对话记录等到其他应用
@@ -223,6 +237,22 @@ class ShareConfig {
   });
 }
 
+/// 接收到的分享内容
+class SharedContent {
+  final String? text;
+  final String? url;
+  final DateTime receivedAt;
+
+  SharedContent({
+    this.text,
+    this.url,
+    DateTime? receivedAt,
+  }) : receivedAt = receivedAt ?? DateTime.now();
+
+  bool get isEmpty => text == null && url == null;
+  bool get isNotEmpty => !isEmpty;
+}
+
 // Riverpod Providers
 
 // 分享服务 Provider
@@ -232,3 +262,52 @@ final shareServiceProvider = Provider<ShareService>((ref) {
 
 // 分享配置 Provider
 final shareConfigProvider = StateProvider<ShareConfig>((ref) => const ShareConfig());
+
+/// 接收到的分享内容 Provider
+final sharedContentProvider = StateProvider<SharedContent?>((ref) => null);
+
+/// 初始化分享监听（需要在 App 启动时调用）
+void initShareListener() {
+  _shareChannel.setMethodCallHandler((call) async {
+    switch (call.method) {
+      case 'onShareReceived':
+        final data = call.arguments as Map<dynamic, dynamic>?;
+        if (data != null) {
+          final content = SharedContent(
+            text: data['text'] as String?,
+            url: data['url'] as String?,
+          );
+          // 更新全局变量
+          _globalSharedContent = content;
+          debugPrint('[ShareService] 收到分享内容: ${content.text ?? content.url}');
+        }
+        return null;
+      default:
+        return null;
+    }
+  });
+}
+
+/// 获取分享的文本内容（Android 原生调用）
+Future<String?> getSharedText() async {
+  try {
+    if (Platform.isAndroid) {
+      return await _shareChannel.invokeMethod<String>('getSharedText');
+    }
+  } catch (e) {
+    debugPrint('获取分享文本失败: $e');
+  }
+  return null;
+}
+
+/// 获取分享的 URL（Android 原生调用）
+Future<String?> getSharedUrl() async {
+  try {
+    if (Platform.isAndroid) {
+      return await _shareChannel.invokeMethod<String>('getSharedUrl');
+    }
+  } catch (e) {
+    debugPrint('获取分享URL失败: $e');
+  }
+  return null;
+}

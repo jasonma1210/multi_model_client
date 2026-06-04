@@ -1,9 +1,11 @@
+// ignore_for_file: use_build_context_synchronously
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:io';
 
 import '../../../../core/theme/app_theme.dart';
@@ -12,7 +14,7 @@ import '../../../../core/providers/settings_provider.dart';
 import '../../../../core/services/backup_service.dart';
 import '../../../../core/services/llama_cpp_update_service.dart';
 import '../../../../core/engines/local_ffi_engine.dart';
-import '../../../../l10n/app_localizations.dart';
+import 'package:mj_nexus/generated/app_localizations.dart';
 
 // 备份服务 Provider
 final backupServiceProvider = Provider<BackupService>((ref) {
@@ -27,6 +29,27 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
+  String _appVersion = '0.1.0-beta';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _appVersion = packageInfo.version;
+        });
+      }
+    } catch (_) {
+      // Use default version if package_info fails
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeProvider);
@@ -34,17 +57,24 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/'),
+    return PopScope(
+      canPop: true, // 允许返回导航
+      onPopInvokedWithResult: (didPop, result) {
+        // 不需要额外处理，右滑返回行为与返回按钮一致
+        // 如果 Navigator.canPop() = true，会正常返回上一页
+        // 如果 Navigator.canPop() = false，go_router 会自动处理
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.go('/'),
+          ),
+          title: Text(
+            l10n.settings,
+            style: theme.textTheme.headlineMedium,
+          ),
         ),
-        title: Text(
-          l10n.settings,
-          style: theme.textTheme.headlineMedium,
-        ),
-      ),
       body: ListView(
         padding: const EdgeInsets.all(AppTheme.spacingM),
         children: [
@@ -89,7 +119,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           // AI Features Section
           _SettingsSection(
-            title: 'AI Features',
+            title: l10n.aiFeatures,
             children: [
               _SettingsTile(
                 icon: Icons.psychology_outlined,
@@ -112,6 +142,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => context.go('/settings/voice'),
               ),
+              _SettingsTile(
+                icon: Icons.extension_outlined,
+                title: l10n.pluginManagement,
+                subtitle: l10n.pluginManagementDesc,
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.go('/settings/plugins'),
+              ),
             ],
           ),
 
@@ -119,12 +156,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           // Skills Section
           _SettingsSection(
-            title: 'Skills',
+            title: l10n.skills,
             children: [
               _SettingsTile(
                 icon: Icons.extension_outlined,
-                title: '技能中心',
-                subtitle: '浏览、管理和创建自定义技能',
+                title: l10n.skillCenter,
+                subtitle: l10n.skillCenterDesc,
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => context.go('/settings/skills'),
               ),
@@ -146,8 +183,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
               _SettingsTile(
                 icon: Icons.folder_outlined,
-                title: '存储位置配置',
-                subtitle: '自定义模型、知识库、备份等文件存储位置',
+                title: l10n.storagePathConfig,
+                subtitle: l10n.storagePathConfigDesc,
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => context.go('/settings/storage'),
               ),
@@ -158,28 +195,28 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _showBackupOptions(context, l10n),
               ),
+              _SettingsTile(
+                icon: Icons.bug_report_outlined,
+                title: l10n.logManagement,
+                subtitle: l10n.logManagementDesc,
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.go('/settings/logs'),
+              ),
             ],
           ),
 
           const SizedBox(height: AppTheme.spacingM),
 
-          // Engine Section
+          // Help & Guide Section
           _SettingsSection(
-            title: '推理引擎',
+            title: l10n.helpGuide,
             children: [
               _SettingsTile(
-                icon: Icons.cloud_outlined,
-                title: 'Ollama 配置',
-                subtitle: '配置本地 Ollama 服务地址',
+                icon: Icons.menu_book_outlined,
+                title: l10n.userManual,
+                subtitle: l10n.userManualDesc,
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => _showOllamaSettingsDialog(context),
-              ),
-              _SettingsTile(
-                icon: Icons.update_outlined,
-                title: 'llama.cpp 更新',
-                subtitle: '检查并更新本地推理引擎',
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _checkLlamaCppUpdate(context, l10n),
+                onTap: () => context.push('/settings/manual'),
               ),
             ],
           ),
@@ -193,14 +230,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               _SettingsTile(
                 icon: Icons.info_outline,
                 title: l10n.version,
-                subtitle: '1.0.0',
+                subtitle: _appVersion,
                 trailing: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: AppTheme.spacingS,
                     vertical: AppTheme.spacingXS,
                   ),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withOpacity(0.1),
+                    color: theme.colorScheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(AppTheme.radiusS),
                   ),
                   child: Text(
@@ -221,18 +258,83 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   showLicensePage(
                     context: context,
                     applicationName: l10n.appTitle,
-                    applicationVersion: '1.0.0',
+                    applicationVersion: _appVersion,
                     applicationIcon: Container(
-                      padding: const EdgeInsets.all(AppTheme.spacingM),
+                      width: 64,
+                      height: 64,
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary,
                         borderRadius: BorderRadius.circular(AppTheme.radiusM),
                       ),
-                      child: const Icon(
-                        Icons.smart_toy,
-                        color: Colors.white,
-                        size: 48,
+                      clipBehavior: Clip.antiAlias,
+                      child: Image.asset(
+                        'assets/mj_nexus_logo.png',
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          // 如果图片加载失败，显示默认图标
+                          return Container(
+                            padding: const EdgeInsets.all(AppTheme.spacingM),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary,
+                              borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                            ),
+                            child: const Icon(
+                              Icons.hub_rounded,
+                              color: Colors.white,
+                              size: 32,
+                            ),
+                          );
+                        },
                       ),
+                    ),
+                  );
+                },
+              ),
+              _SettingsTile(
+                icon: Icons.warning_amber_outlined,
+                title: '免责声明',
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Row(
+                        children: [
+                          Icon(Icons.warning_amber, color: Colors.orange.shade700),
+                          const SizedBox(width: 8),
+                          const Text('免责声明'),
+                        ],
+                      ),
+                      content: const SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '本应用仅供学习和研究使用。',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            SizedBox(height: 12),
+                            Text('1. AI 生成内容不代表本应用立场，本应用不对其准确性、完整性或适用性做任何保证。'),
+                            SizedBox(height: 8),
+                            Text('2. 用户在使用 AI 功能时，应自行判断内容的可信度，并承担使用风险。'),
+                            SizedBox(height: 8),
+                            Text('3. 本应用不收集用户对话数据，所有数据仅存储在本地设备。'),
+                            SizedBox(height: 8),
+                            Text('4. 请遵守当地法律法规，合理使用 AI 技术。'),
+                            SizedBox(height: 12),
+                            Text(
+                              '使用本应用即表示您同意上述条款。',
+                              style: TextStyle(fontStyle: FontStyle.italic),
+                            ),
+                          ],
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('我已阅读'),
+                        ),
+                      ],
                     ),
                   );
                 },
@@ -242,6 +344,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: AppTheme.spacingXXL),
         ],
+      ),
       ),
     );
   }
@@ -472,7 +575,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         }
       }
     } catch (e) {
-      // Ignore errors
+      debugPrint('[settings_page] Error: $e');
     }
     return size;
   }
@@ -495,7 +598,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 leading: Container(
                   padding: const EdgeInsets.all(AppTheme.spacingS),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(AppTheme.radiusS),
                   ),
                   child: Icon(
@@ -514,7 +617,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 leading: Container(
                   padding: const EdgeInsets.all(AppTheme.spacingS),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(AppTheme.radiusS),
                   ),
                   child: Icon(
@@ -533,7 +636,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 leading: Container(
                   padding: const EdgeInsets.all(AppTheme.spacingS),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(AppTheme.radiusS),
                   ),
                   child: Icon(
@@ -1073,31 +1176,77 @@ class _SettingsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(
-            left: AppTheme.spacingS,
-            bottom: AppTheme.spacingS,
+            left: AppTheme.spacingS + 2,
+            bottom: AppTheme.spacingM,
           ),
-          child: Text(
-            title,
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w600,
-            ),
+          child: Row(
+            children: [
+              Container(
+                width: 3,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentPrimary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: AppTheme.spacingS),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: AppTheme.accentPrimary,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
         ),
-        Card(
-          margin: EdgeInsets.zero,
-          child: Column(
-            children: children,
+        Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? theme.colorScheme.surface.withValues(alpha: 0.6)
+                : theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(AppTheme.radiusL),
+            border: Border.all(
+              color: theme.dividerColor.withValues(alpha: isDark ? 0.3 : 0.5),
+              width: 0.5,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppTheme.radiusL),
+            child: Column(
+              children: _buildChildrenWithDividers(children, theme),
+            ),
           ),
         ),
       ],
     );
+  }
+
+  /// 在子项之间添加分隔线
+  List<Widget> _buildChildrenWithDividers(List<Widget> items, ThemeData theme) {
+    final result = <Widget>[];
+    for (int i = 0; i < items.length; i++) {
+      result.add(items[i]);
+      if (i < items.length - 1) {
+        result.add(
+          Divider(
+            height: 0.5,
+            thickness: 0.5,
+            indent: 56,
+            color: theme.dividerColor.withValues(alpha: 0.3),
+          ),
+        );
+      }
+    }
+    return result;
   }
 }
 
@@ -1118,22 +1267,71 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(AppTheme.spacingS),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(AppTheme.radiusS),
-        ),
-        child: Icon(
-          icon,
-          color: Theme.of(context).colorScheme.primary,
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTheme.spacingL,
+            vertical: AppTheme.spacingM,
+          ),
+          child: Row(
+            children: [
+              // 图标容器 — 带微渐变背景
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentPrimary.withValues(alpha: isDark ? 0.12 : 0.08),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusS),
+                ),
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: AppTheme.accentPrimary,
+                ),
+              ),
+              const SizedBox(width: AppTheme.spacingM),
+              // 文字区域
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              // 尾部组件
+              if (trailing != null)
+                trailing!
+              else if (onTap != null)
+                Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                ),
+            ],
+          ),
         ),
       ),
-      title: Text(title),
-      subtitle: subtitle != null ? Text(subtitle!) : null,
-      trailing: trailing ?? (onTap != null ? const Icon(Icons.chevron_right) : null),
-      onTap: onTap,
     );
   }
 }

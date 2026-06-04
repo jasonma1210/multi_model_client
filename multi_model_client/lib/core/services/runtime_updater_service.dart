@@ -142,13 +142,18 @@ class RuntimeUpdaterService {
   final Dio _dio = Dio();
 
   // ════════════════════════════════════════════════════════════════════════
-  //  配置（请替换为你自己的云端地址）
+  //  配置（使用 GitHub Releases 自动更新）
   // ════════════════════════════════════════════════════════════════════════
 
-  /// 云端 manifest.json 地址
-  /// 替换为你自己的服务器地址或 GitHub Raw 地址
-  static const String _manifestUrl =
-      'https://raw.githubusercontent.com/your-repo/runtime/main/manifest.json';
+  /// GitHub 仓库地址
+  static const String _githubOwner = 'Jianma-Android';
+  static const String _githubRepo = 'LLM-Studio';
+
+  /// GitHub Tags API 地址
+  static const String _tagsUrl = 'https://api.github.com/repos/$_githubOwner/$_githubRepo/tags';
+
+  /// GitHub Releases API 地址
+  static const String _releasesUrl = 'https://api.github.com/repos/$_githubOwner/$_githubRepo/releases/latest';
 
   /// 本地版本文件路径
   String get _versionFilePath {
@@ -233,7 +238,7 @@ class RuntimeUpdaterService {
     }
 
     // 默认返回通用标识
-    return '${os}-x64';
+    return '$os-x64';
   }
 
   /// 检测是否有 NVIDIA GPU
@@ -251,27 +256,91 @@ class RuntimeUpdaterService {
   //  更新检查
   // ════════════════════════════════════════════════════════════════════════
 
-  /// 检查更新
+  /// 从 GitHub Tags API 检查最新版本
   Future<RuntimeVersion?> checkForUpdate() async {
     try {
-      debugPrint('[RuntimeUpdater] 检查更新: $_manifestUrl');
+      debugPrint('[RuntimeUpdater] 从 GitHub Tags 检查更新: $_tagsUrl');
 
       final response = await _dio.get(
-        _manifestUrl,
+        _tagsUrl,
         options: Options(
-          receiveTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 15),
+          headers: {'Accept': 'application/vnd.github.v3+json'},
         ),
       );
 
-      if (response.statusCode == 200) {
-        final version = RuntimeVersion.fromJson(response.data);
-        debugPrint('[RuntimeUpdater] 云端版本: ${version.version}');
-        return version;
+      if (response.statusCode == 200 && response.data is List && (response.data as List).isNotEmpty) {
+        final tags = response.data as List;
+        final latestTag = tags[0] as Map<String, dynamic>;
+        final tagName = latestTag['name'] as String? ?? '';
+
+        if (tagName.isEmpty) return null;
+
+        debugPrint('[RuntimeUpdater] GitHub 最新 tag: $tagName');
+
+        // 尝试获取该 tag 的 release 信息（包含下载资产）
+        RuntimeVersion? releaseVersion;
+        try {
+          final releaseResp = await _dio.get(
+            _releasesUrl,
+            options: Options(
+              receiveTimeout: const Duration(seconds: 15),
+              headers: {'Accept': 'application/vnd.github.v3+json'},
+            ),
+          );
+          if (releaseResp.statusCode == 200) {
+            releaseVersion = _parseGitHubRelease(releaseResp.data as Map<String, dynamic>);
+          }
+        } catch (e) {
+          debugPrint('[RuntimeUpdater] 获取 release 失败，使用 tag: $e');
+        }
+
+        // 如果没有 release 资产，返回仅含版本号的对象
+        return releaseVersion ?? RuntimeVersion(
+          version: tagName,
+          runtimes: {},
+        );
       }
 
       return null;
     } catch (e) {
       debugPrint('[RuntimeUpdater] 检查更新失败: $e');
+      return null;
+    }
+  }
+
+  /// 解析 GitHub Release 数据
+  RuntimeVersion? _parseGitHubRelease(Map<String, dynamic> json) {
+    try {
+      final tagName = json['tag_name'] as String? ?? '';
+      final assets = json['assets'] as List? ?? [];
+
+      final runtimes = <String, RuntimeAsset>{};
+      for (final asset in assets) {
+        final assetMap = asset as Map<String, dynamic>;
+        final name = assetMap['name'] as String? ?? '';
+        final url = assetMap['browser_download_url'] as String? ?? '';
+        final size = assetMap['size'] as int? ?? 0;
+
+        // 匹配平台资源
+        if (name.contains('macos') && name.contains('arm64')) {
+          runtimes['macos-metal-arm64'] = RuntimeAsset(url: url, size: size);
+        } else if (name.contains('macos') && (name.contains('x64') || name.contains('x86'))) {
+          runtimes['macos-x64'] = RuntimeAsset(url: url, size: size);
+        } else if (name.contains('windows') && name.contains('cuda')) {
+          runtimes['windows-cuda-x64'] = RuntimeAsset(url: url, size: size);
+        } else if (name.contains('windows')) {
+          runtimes['windows-avx2-x64'] = RuntimeAsset(url: url, size: size);
+        } else if (name.contains('linux') && name.contains('cuda')) {
+          runtimes['linux-cuda-x64'] = RuntimeAsset(url: url, size: size);
+        } else if (name.contains('linux')) {
+          runtimes['linux-x64'] = RuntimeAsset(url: url, size: size);
+        }
+      }
+
+      return RuntimeVersion(version: tagName, runtimes: runtimes);
+    } catch (e) {
+      debugPrint('[RuntimeUpdater] 解析 release 数据失败: $e');
       return null;
     }
   }

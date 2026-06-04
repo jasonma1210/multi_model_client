@@ -1,11 +1,10 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:mj_nexus/core/platform/platform_utils.dart';
 import '../hardware/device_env.dart';
 
 /// CUDA加速器（Windows）
 class CudaAccelerator {
   final DeviceEnv deviceEnv;
-  bool _isInitialized = false;
   bool _isAvailable = false;
 
   CudaAccelerator(this.deviceEnv);
@@ -15,7 +14,7 @@ class CudaAccelerator {
 
   /// 初始化
   Future<bool> initialize() async {
-    if (!Platform.isWindows) {
+    if (!PlatformUtils.isWindows) {
       debugPrint('CUDA is only available on Windows');
       return false;
     }
@@ -28,7 +27,6 @@ class CudaAccelerator {
     try {
       // 检查CUDA设备
       _isAvailable = await _checkCudaDevice();
-      _isInitialized = true;
 
       if (_isAvailable) {
         debugPrint('CUDA accelerator initialized successfully');

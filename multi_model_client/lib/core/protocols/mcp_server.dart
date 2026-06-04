@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'mcp_protocol.dart';
 
 /// MCP服务器实现

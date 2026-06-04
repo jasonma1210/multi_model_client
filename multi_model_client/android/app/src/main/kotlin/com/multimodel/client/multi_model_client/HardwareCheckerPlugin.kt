@@ -17,7 +17,9 @@ class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var context: Context
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        channel = MethodChannel(binding.binaryMessenger, "com.example.ai_assistant/hardware")
+        // ★ 修复：Channel 名必须与 Dart 端一致
+        // Dart 端（hardware_compatibility_checker.dart / hardware_checker_channel.dart）使用 'hardware_checker'
+        channel = MethodChannel(binding.binaryMessenger, "hardware_checker")
         channel.setMethodCallHandler(this)
         context = binding.applicationContext
     }
@@ -54,6 +56,16 @@ class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
             }
             "getGpuInfo", "getGPUInfo" -> {
                 result.success(getGPUInfo())
+            }
+            // ===== 新增：CPU 特性检测 =====
+            "getCpuFeatures" -> {
+                result.success(getCpuFeatures())
+            }
+            "getChipVendor" -> {
+                result.success(getChipVendor())
+            }
+            "checkNpuAvailability" -> {
+                result.success(checkNpuAvailability())
             }
             else -> {
                 result.notImplemented()
@@ -166,16 +178,59 @@ class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    // 获取内存信息
+    // 获取内存信息（优先使用 /proc/meminfo，更可靠）
     private fun getMemoryInfo(): MemoryInfo {
+        // 方法1: 读取 /proc/meminfo（最可靠，适用于所有 Android 设备）
+        try {
+            val procMemInfo = readProcMemInfo()
+            if (procMemInfo != null) {
+                return procMemInfo
+            }
+        } catch (e: Exception) {
+            // 降级到 ActivityManager
+        }
+
+        // 方法2: 使用 ActivityManager（降级方案）
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memInfo = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(memInfo)
 
-        val totalMB = memInfo.totalMem / 1024 / 1024
-        val availableMB = memInfo.availMem / 1024 / 1024
+        val totalMB = (memInfo.totalMem / 1024L / 1024L).toInt()
+        val availableMB = (memInfo.availMem / 1024L / 1024L).toInt()
 
-        return MemoryInfo(totalMB.toInt(), availableMB.toInt())
+        return MemoryInfo(totalMB, availableMB)
+    }
+
+    // 从 /proc/meminfo 读取内存信息
+    private fun readProcMemInfo(): MemoryInfo? {
+        return try {
+            val file = File("/proc/meminfo")
+            if (!file.exists()) return null
+
+            var totalKB = 0L
+            var availableKB = 0L
+
+            file.readLines().forEach { line ->
+                when {
+                    line.startsWith("MemTotal:") -> {
+                        totalKB = line.split("\\s+".toRegex())[1].toLongOrNull() ?: 0L
+                    }
+                    line.startsWith("MemAvailable:") -> {
+                        availableKB = line.split("\\s+".toRegex())[1].toLongOrNull() ?: 0L
+                    }
+                }
+            }
+
+            if (totalKB > 0) {
+                val totalMB = (totalKB / 1024).toInt()
+                val availableMB = (availableKB / 1024).toInt()
+                MemoryInfo(totalMB, availableMB)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     // 获取可用内存
@@ -260,4 +315,239 @@ class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
     // 数据类
     private data class MemoryInfo(val totalMB: Int, val availableMB: Int)
     private data class StorageInfo(val totalGB: Int, val availableGB: Int)
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  新增：CPU 特性检测 + 芯片厂商识别 + NPU 检测（多维度动态适配核心）
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// 获取 CPU 特性（DotProd, i8mm, SME 等）
+    private fun getCpuFeatures(): Map<String, Any> {
+        val features = mutableMapOf<String, Any>()
+
+        // 读取 /proc/cpuinfo 获取 CPU 特性
+        try {
+            val cpuInfoFile = File("/proc/cpuinfo")
+            if (cpuInfoFile.exists()) {
+                val cpuInfo = cpuInfoFile.readText()
+
+                // 检测 ARM 特性标志
+                val hasNeon = cpuInfo.contains("neon") || cpuInfo.contains("asimd")
+                val hasDotProd = cpuInfo.contains("dotprod")
+                val hasI8mm = cpuInfo.contains("i8mm")
+                val hasSme = cpuInfo.contains("sme")
+                val hasSve = cpuInfo.contains("sve")
+                val hasSve2 = cpuInfo.contains("sve2")
+
+                features["neon"] = hasNeon
+                features["dotprod"] = hasDotProd
+                features["i8mm"] = hasI8mm
+                features["sme"] = hasSme
+                features["sve"] = hasSve
+                features["sve2"] = hasSve2
+
+                // 提取 CPU 型号
+                val cpuModel = Regex("model name\\s*:\\s*(.+)").find(cpuInfo)?.groupValues?.get(1)
+                    ?: Regex("Hardware\\s*:\\s*(.+)").find(cpuInfo)?.groupValues?.get(1)
+                    ?: "Unknown"
+                features["cpuModel"] = cpuModel.trim()
+            } else {
+                // 默认值
+                features["neon"] = true
+                features["dotprod"] = false
+                features["i8mm"] = false
+                features["sme"] = false
+                features["sve"] = false
+                features["sve2"] = false
+                features["cpuModel"] = "Unknown"
+            }
+        } catch (e: Exception) {
+            features["neon"] = true
+            features["dotprod"] = false
+            features["i8mm"] = false
+            features["sme"] = false
+            features["sve"] = false
+            features["sve2"] = false
+            features["cpuModel"] = "Unknown"
+            features["error"] = (e.message ?: "Unknown error")
+        }
+
+        // 架构信息
+        features["architecture"] = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+
+        return features
+    }
+
+    /// 获取芯片厂商（高通、联发科、华为等）
+    private fun getChipVendor(): Map<String, Any> {
+        val vendorInfo = mutableMapOf<String, Any>()
+
+        val board = Build.BOARD.lowercase()
+        val hardware = Build.HARDWARE.lowercase()
+        val manufacturer = Build.MANUFACTURER.lowercase()
+
+        // 厂商识别逻辑
+        val vendor = when {
+            // 高通
+            board.contains("qcom") || hardware.contains("qcom") ||
+            hardware.contains("sc8280") || hardware.contains("sm8") -> "QUALCOMM"
+
+            // 联发科
+            board.contains("mt") || hardware.contains("mt") ||
+            hardware.contains("dimensity") -> "MEDIATEK"
+
+            // 华为海思
+            board.contains("hi") || hardware.contains("kirin") ||
+            hardware.contains("hi36") || manufacturer.contains("huawei") -> "HUAWEI"
+
+            // 三星
+            board.contains("exynos") || hardware.contains("exynos") ||
+            hardware.contains("s5e") -> "SAMSUNG"
+
+            // 谷歌 Tensor
+            board.contains("tensor") || hardware.contains("tensor") ||
+            hardware.contains("gs101") -> "GOOGLE"
+
+            // 苹果（虽然 Android 不太可能）
+            board.contains("apple") -> "APPLE"
+
+            else -> "GENERIC"
+        }
+
+        vendorInfo["vendor"] = vendor
+        vendorInfo["board"] = Build.BOARD
+        vendorInfo["hardware"] = Build.HARDWARE
+        vendorInfo["model"] = Build.MODEL
+        vendorInfo["manufacturer"] = Build.MANUFACTURER
+
+        // 高通特定信息
+        if (vendor == "QUALCOMM") {
+            vendorInfo["gpuArch"] = getAdrenoArch()
+            vendorInfo["npuName"] = getQualcommNpuName()
+        }
+
+        return vendorInfo
+    }
+
+    /// 获取高通 Adreno GPU 架构版本
+    private fun getAdrenoArch(): String {
+        val renderer = try {
+            android.opengl.GLES20.glGetString(android.opengl.GLES20.GL_RENDERER)
+        } catch (e: Exception) { null }
+
+        return when {
+            renderer?.contains("Adreno 7") == true -> "Adreno7xx"  // 骁龙 8 Elite
+            renderer?.contains("Adreno 6") == true -> "Adreno6xx"  // 骁龙 8 Gen 3/2
+            renderer?.contains("Adreno 5") == true -> "Adreno5xx"  // 骁龙 888/870
+            renderer?.contains("Adreno 4") == true -> "Adreno4xx"  // 骁龙 765G 等
+            renderer?.contains("Adreno 3") == true -> "Adreno3xx"  // 较老
+            else -> "Unknown"
+        }
+    }
+
+    /// 获取高通 NPU 名称
+    private fun getQualcommNpuName(): String {
+        // 高通 NPU 命名规则
+        val hardware = Build.HARDWARE.lowercase()
+        return when {
+            hardware.contains("sm8750") -> "Hexagon 780"  // 骁龙 8 Elite
+            hardware.contains("sm8650") -> "Hexagon 770"  // 骁龙 8 Gen 3
+            hardware.contains("sm8550") -> "Hexagon 760"  // 骁龙 8 Gen 2
+            hardware.contains("sm8475") -> "Hexagon 750"  // 骁龙 8+ Gen 1
+            hardware.contains("sm8450") -> "Hexagon 730"  // 骁龙 8 Gen 1
+            else -> "Hexagon (Unknown)"
+        }
+    }
+
+    /// 检测 NPU 可用性（高通 QNN / 联发科 NeuroPilot / 华为 HiAI）
+    private fun checkNpuAvailability(): Map<String, Any> {
+        val npuInfo = mutableMapOf<String, Any>()
+
+        val vendorInfo = getChipVendor()
+        val vendor = vendorInfo["vendor"] as? String ?: "GENERIC"
+
+        npuInfo["vendor"] = vendor
+        npuInfo["available"] = false
+        npuInfo["runtime"] = "none"
+        npuInfo["note"] = ""
+
+        when (vendor) {
+            "QUALCOMM" -> {
+                // 高通：检测 QNN (Qualcomm AI Stack) 运行时
+                // 注意：需要系统内置 QNN 驱动，用户应用无法强制安装
+                val hasQnn = checkQnnRuntime()
+                npuInfo["available"] = hasQnn
+                npuInfo["runtime"] = if (hasQnn) "QNN_HTP" else "none"
+                npuInfo["note"] = if (hasQnn) "高通 QNN 运行时可用，推理速度极快" else "系统未安装 QNN 驱动，使用 GPU/CPU 回退"
+            }
+            "MEDIATEK" -> {
+                // 联发科：检测 NeuroPilot 运行时
+                val hasNeuroPilot = checkNeuroPilotRuntime()
+                npuInfo["available"] = hasNeuroPilot
+                npuInfo["runtime"] = if (hasNeuroPilot) "NeuroPilot" else "none"
+                npuInfo["note"] = if (hasNeuroPilot) "联发科 NeuroPilot 可用" else "系统未安装 NeuroPilot 驱动"
+            }
+            "HUAWEI" -> {
+                // 华为：检测 HiAI/CANN 运行时
+                val hasHiAi = checkHiAiRuntime()
+                npuInfo["available"] = hasHiAi
+                npuInfo["runtime"] = if (hasHiAi) "HiAI" else "none"
+                npuInfo["note"] = if (hasHiAi) "华为 HiAI NPU 可用" else "系统未安装 HiAI 驱动"
+            }
+            else -> {
+                npuInfo["note"] = "当前芯片厂商不支持 NPU 加速"
+            }
+        }
+
+        // 额外信息：检查 NNAPI（Android 标准 API）
+        npuInfo["nnapiAvailable"] = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // 使用反射获取 NNAPI 版本
+            try {
+                val neuralNetworksClass = Class.forName("android.hardware.neuralnetworks.NeuralNetworks")
+                val getVersionMethod = neuralNetworksClass.getMethod("getVersion")
+                npuInfo["nnapiVersion"] = getVersionMethod.invoke(null) as? String ?: "Unknown"
+            } catch (e: Exception) {
+                npuInfo["nnapiVersion"] = "Reflection failed: ${e.message}"
+            }
+        }
+
+        return npuInfo
+    }
+
+    /// 检测高通 QNN 运行时是否可用
+    private fun checkQnnRuntime(): Boolean {
+        // 方法1：尝试加载 QNN 库
+        return try {
+            System.loadLibrary("QnnHtp")
+            true
+        } catch (e: UnsatisfiedLinkError) {
+            // 方法2：检查 /vendor/lib64 下是否有 QNN 驱动
+            try {
+                val vendorLib = File("/vendor/lib64/libQnnHtp.so")
+                vendorLib.exists()
+            } catch (e2: Exception) {
+                false
+            }
+        }
+    }
+
+    /// 检测联发科 NeuroPilot 运行时
+    private fun checkNeuroPilotRuntime(): Boolean {
+        return try {
+            val neuroPilotLib = File("/vendor/lib64/libneuron.so")
+            neuroPilotLib.exists()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /// 检测华为 HiAI 运行时
+    private fun checkHiAiRuntime(): Boolean {
+        return try {
+            val hiAiLib = File("/vendor/lib64/libhiai.so")
+            hiAiLib.exists()
+        } catch (e: Exception) {
+            false
+        }
+    }
 }

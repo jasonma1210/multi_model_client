@@ -12,15 +12,16 @@ library;
 
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 /// 向量嵌入服务
 /// 提供文本向量化功能
 class EmbeddingService {
   // 嵌入维度（sentence-transformers默认768）
   static const int embeddingDimension = 768;
+  static const String _tag = 'EmbeddingService';
 
   // API配置（如果使用远程服务）
   final String? apiKey;
@@ -42,15 +43,15 @@ class EmbeddingService {
       try {
         return await _generateEmbeddingFromAPI(text);
       } catch (e) {
-        print('Remote embedding failed, falling back to local: $e');
+        debugPrint('[$_tag] 远程嵌入失败，降级到本地: $e');
         // 降级到本地方法
       }
     }
 
-    // 方式2：使用本地模型（TODO: 集成TensorFlow Lite）
-    // 目前先使用hash-based方法
+    // 方式2：本地 TF Lite 未集成，使用 hash-based 伪向量作为降级方案
+    // 生产环境推荐使用远程 API 或 Sherpa-ONNX embedding 模型
 
-    // 方式3：Hash-based伪向量（测试用）
+    // 方式3：Hash-based伪向量（降级方案）
     return generatePseudoEmbedding(text);
   }
 

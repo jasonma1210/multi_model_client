@@ -14,21 +14,26 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' show max;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 
 import '../../../core/interfaces/dialogue_interface.dart';
+import '../../../core/services/performance_monitor.dart';
 import '../../../core/engines/model_inference_engine.dart';
 import '../../../core/services/mcp_service_manager.dart';
 import '../../../core/services/context_compressor_service.dart';
+import '../../../core/services/memory_palace_service.dart';
+import '../../../core/services/tts_prompt_template.dart';
 import '../domain/session_manager.dart';
 import '../data/repositories/message_repository.dart';
-import '../../../core/storage/database.dart' hide Message;
-// dialogue_interface imported above
 import '../../memory/domain/memory_engine.dart';
 import '../../rag/domain/rag_engine.dart';
+import '../../skill/domain/skill.dart';
+import '../../skill/domain/skill_dispatcher.dart';
 
 /// 搜索模式
 enum WebSearchMode {
@@ -41,40 +46,51 @@ class DialogueEngine implements IDialogueEngine {
   final ModelInferenceEngine _modelEngine;
   final SessionManager _sessionManager;
   final MessageRepository _messageRepository;
-  final MemoryEngine _memoryEngine;
-  final RAGEngine _ragEngine;
   final MCPToolCallNotifier _mcpNotifier;
   
   /// 上下文压缩服务
   late final ContextCompressorService _compressor;
   
+  /// 记忆宫殿服务
+  late final MemoryPalaceService _memoryPalace;
+  
   /// 压缩状态通知器
-  final StreamController<CompressionEvent>? _compressionController =
+  final StreamController<CompressionEvent> _compressionController =
       StreamController<CompressionEvent>.broadcast();
   
   /// 压缩事件流（供 UI 订阅）
   Stream<CompressionEvent> get compressionStream =>
-      _compressionController?.stream ?? const Stream.empty();
+      _compressionController.stream;
+
+  /// LLM 摘要回调（用于智能压缩）
+  final Future<String> Function(List<Map<String, String>> messages)? _llmSummaryCallback;
 
   DialogueEngine({
     required ModelInferenceEngine modelEngine,
     required SessionManager sessionManager,
     required MessageRepository messageRepository,
-    required MemoryEngine memoryEngine,
-    required RAGEngine ragEngine,
+    MemoryEngine? memoryEngine,
+    RAGEngine? ragEngine,
     MCPToolCallNotifier? mcpNotifier,
     ContextCompressorService? compressor,
+    MemoryPalaceService? memoryPalace,
+    Future<String> Function(List<Map<String, String>> messages)? llmSummaryCallback,
   })  : _modelEngine = modelEngine,
         _sessionManager = sessionManager,
         _messageRepository = messageRepository,
-        _memoryEngine = memoryEngine,
-        _ragEngine = ragEngine,
         _mcpNotifier = mcpNotifier ?? MCPToolCallNotifier(),
+        _llmSummaryCallback = llmSummaryCallback,
         _compressor = compressor ?? ContextCompressorService(
           maxMessages: 50,
           maxTokens: 8000,
           strategy: CompressionStrategy.hybrid,
-        );
+        ),
+        _memoryPalace = memoryPalace ?? MemoryPalaceService() {
+    // 如果提供了 LLM 摘要回调，配置到压缩服务
+    if (llmSummaryCallback != null) {
+      _compressor.setLlmSummaryCallback(llmSummaryCallback);
+    }
+  }
 
   /// MCP 工具调用通知器
   void notifyMcpToolCall(MCPToolCall call) {
@@ -129,19 +145,31 @@ class DialogueEngine implements IDialogueEngine {
     String content, {
     bool enableWebSearch = false,
     String? knowledgeContext,
+    String? locationContext,
   }) async* {
-    // ✅ 第一步：保存用户消息到数据库（保存原始用户输入，不含知识库内容）
-    // 保持用户消息干净，知识库上下文仅在推理时注入，不持久化到历史
+    // 性能监控开始
+    final perf = PerformanceMonitor();
+    final stopwatch = perf.startTimer('dialogue_stream_response');
+
+    try {
+    // ✅ 第一步：保存用户消息到数据库
+    // 保存的是干净的用户文字（去掉多模态图片标记），避免 UI 显示乱码
+    // 图片数据仅在本次推理中使用，不持久化到历史
+    debugPrint('[DialogueEngine] streamResponse 开始: sessionId=$sessionId');
+    final displayContent = _stripImageMarker(content);
     await _messageRepository.createMessage(
       sessionId: sessionId,
       role: 'user',
-      content: content,
+      content: displayContent,
     );
+    debugPrint('[DialogueEngine] ✅ 步骤1: 用户消息已保存');
     // 立即刷新，让用户消息先显示出来
     await _sessionManager.refreshCurrentSession();
+    debugPrint('[DialogueEngine] ✅ 步骤1.5: 会话已刷新');
 
     // 获取会话信息
     final session = await _sessionManager.getSession(sessionId);
+    debugPrint('[DialogueEngine] ✅ 步骤2: 会话已获取, modelId=${session.modelId}');
 
     // ✅ 如果是本地模型且未就绪，自动触发加载（不打断用户，静默加载）
     if (!_modelEngine.isModelReady(session.modelId)) {
@@ -155,59 +183,170 @@ class DialogueEngine implements IDialogueEngine {
       }
     }
 
+    // ★★★ 动态更新上下文压缩阈值（90% of model context size）★★★
+    // 每次流式推理前确保阈值是最新的（模型切换等情况）
+    try {
+      final ctxSize = await _modelEngine.getContextSize(session.modelId);
+      _compressor.updateContextSize(ctxSize); // 内部自动计算 90%
+      debugPrint('[DialogueEngine] 上下文压缩阈值: ${(ctxSize * 0.9).round()} (90% of $ctxSize)');
+    } catch (e) {
+      debugPrint('[DialogueEngine] 获取上下文大小失败: $e，使用默认值');
+    }
+
     // ✅ 第二步：如果启用网络搜索，先搜索再注入上下文
     String enrichedContent = content;
+    WebSearchResponseData? webSearchData;
     if (enableWebSearch) {
       final searchResults = await _performWebSearch(content);
       if (searchResults.isNotEmpty) {
         final resultsText = searchResults
             .map((r) => '- ${r['title']}: ${r['snippet']} (来源: ${r['url']})')
             .join("\n");
-        enrichedContent = '请结合以下网络搜索结果回答用户的问题：\n\n' + resultsText + '\n\n用户问题: $content';
+        enrichedContent = '请结合以下网络搜索结果回答用户的问题：\n\n$resultsText\n\n用户问题: $content';
+        // 构建搜索数据供 UI 展示
+        final keywords = _extractKeywordsFromContent(content);
+        webSearchData = WebSearchResponseData(
+          keywords: keywords,
+          results: searchResults
+              .map((r) => {
+                    'title': (r['title'] ?? '') as String,
+                    'url': (r['url'] ?? '') as String,
+                  })
+              .toList(),
+        );
       }
     }
 
     // ✅ 第三步：构建结构化消息
     // 如果有知识库上下文（RAG），将其以临时 system 消息注入消息列表
     // 不修改用户消息原文，符合标准 RAG 流程
-    final messages = await _buildStructuredMessagesWithContent(
+    debugPrint('[DialogueEngine] ✅ 步骤3: 开始构建结构化消息');
+    var messages = await _buildStructuredMessagesWithContent(
       sessionId,
       enrichedContent,
       ragContext: knowledgeContext,
+      locationContext: locationContext,
     );
+    debugPrint('[DialogueEngine] ✅ 步骤3: 结构化消息构建完成, 消息数=${messages.length}');
 
-    // ✅ 第四步：流式推理
+    // ✅ 第三步半：安全截断 - 确保消息总 token 在上下文预算内
+    try {
+      final ctxSize = await _modelEngine.getContextSize(session.modelId);
+      final tokenBudget = (ctxSize * 0.90).round(); // 使用 90% 预算（给输出留空间）
+      final estimatedTokens = ContextCompressorService.estimateTotalTokens(
+        messages.map((m) => _MessageAdapter(m.role, m.content)).toList(),
+      );
+      debugPrint('[DialogueEngine] 📊 预截断检查: 估算${estimatedTokens}tokens, 预算${tokenBudget}tokens');
+      
+      if (estimatedTokens > tokenBudget) {
+        debugPrint('[DialogueEngine] ⚠️ 消息超出预算，执行安全截断...');
+        final truncated = ContextCompressorService.truncateToFit(
+          messages.map((m) => _MessageAdapter(m.role, m.content)).toList(),
+          tokenBudget,
+        );
+        // 将截断结果转回 ChatMessage
+        messages = truncated.map((m) => ChatMessage(role: m.role, content: m.content)).toList();
+        debugPrint('[DialogueEngine] ✅ 安全截断完成: ${messages.length} 条消息');
+      }
+    } catch (e) {
+      debugPrint('[DialogueEngine] ⚠️ 安全截断检查失败（非致命）: $e');
+    }
+
+    // ✅ 第四步：流式推理（带自动重试机制）
     final responseBuffer = StringBuffer();
     bool hasError = false;
     
     // 速度追踪
-    int tokenCount = 0;
+    // 注意：这里统计的是字符数，不是真正的 token 数
+    // 真正的 token 数需要模型返回，但 llama.cpp 不直接返回
+    // 估算：中文约 1-1.5 字符 = 1 token，英文约 3-4 字符 = 1 token
+    // 使用 1.5 作为估算比率（中文为主，更符合实际）
+    const double charToTokenRatio = 1.5;
+    int charCount = 0;
     final Stopwatch stopwatch = Stopwatch()..start();
 
     try {
+      debugPrint('[DialogueEngine] ✅ 步骤4: 开始流式推理, modelId=${session.modelId}');
       await for (final token in _modelEngine.generateChatStream(session.modelId, messages)) {
         responseBuffer.write(token);
-        tokenCount++;
+        charCount += token.length; // 统计实际字符数
         
-        // 计算实时速度
+        // 计算实时速度（字符数 / 比率 = 估算的 token 数）
         final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
         double? currentTPS;
         if (elapsedSeconds > 0) {
-          currentTPS = tokenCount / elapsedSeconds;
+          currentTPS = (charCount / charToTokenRatio) / elapsedSeconds;
         }
         
         yield DialogueResponse(
           content: token, 
           isComplete: false,
-          tokenCount: tokenCount,
+          tokenCount: (charCount / charToTokenRatio).round(),
           tokensPerSecond: currentTPS,
+          webSearchData: webSearchData,
         );
       }
       stopwatch.stop();
       
+      // 计算估算的 token 数用于性能监控
+      final estimatedTokens = (charCount / charToTokenRatio).round();
       // 记录到性能监控
-      _modelEngine.recordGenerationTime(session.modelId, stopwatch.elapsedMilliseconds, tokenCount);
+      _modelEngine.recordGenerationTime(session.modelId, stopwatch.elapsedMilliseconds, estimatedTokens);
     } catch (e) {
+      // ★★★ 错误恢复：检测 "prompt too long" 并自动截断重试 ★★★
+      final errStr = e.toString().toLowerCase();
+      final isPromptTooLong = errStr.contains('tokenization failed') ||
+          errStr.contains('prompt too long') ||
+          errStr.contains('too long') ||
+          errStr.contains('token') && errStr.contains('limit');
+      
+      if (isPromptTooLong) {
+        debugPrint('[DialogueEngine] 🔄 检测到 prompt 超长错误，尝试激进截断重试...');
+        try {
+          // 清空之前的响应
+          responseBuffer.clear();
+          charCount = 0;
+          
+          // 激进截断：只保留 system 消息 + 最近 6 条消息
+          final ctxSize = await _modelEngine.getContextSize(session.modelId);
+          final aggressiveBudget = (ctxSize * 0.5).round(); // 使用 50% 预算
+          
+          final truncated = ContextCompressorService.truncateToFit(
+            messages.map((m) => _MessageAdapter(m.role, m.content)).toList(),
+            aggressiveBudget,
+          );
+          messages = truncated.map((m) => ChatMessage(role: m.role, content: m.content)).toList();
+          
+          debugPrint('[DialogueEngine] 🔄 激进截断后: ${messages.length} 条消息, 重新推理...');
+          
+          await for (final token in _modelEngine.generateChatStream(session.modelId, messages)) {
+            responseBuffer.write(token);
+            charCount += token.length;
+            
+            final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
+            double? currentTPS;
+            if (elapsedSeconds > 0) {
+              currentTPS = (charCount / charToTokenRatio) / elapsedSeconds;
+            }
+            
+            yield DialogueResponse(
+              content: token, 
+              isComplete: false,
+              tokenCount: (charCount / charToTokenRatio).round(),
+              tokensPerSecond: currentTPS,
+              webSearchData: webSearchData,
+            );
+          }
+          stopwatch.stop();
+          debugPrint('[DialogueEngine] ✅ 激进截断重试成功');
+          return; // 成功，跳过后续 rethrow
+        } catch (retryError) {
+          debugPrint('[DialogueEngine] ❌ 激进截断重试也失败: $retryError');
+          hasError = true;
+          rethrow;
+        }
+      }
+      
       debugPrint('Stream generation failed: $e');
       hasError = true;
       // 重新抛出，让 session_detail_page 的 catch 处理（显示 SnackBar 提示）
@@ -227,15 +366,32 @@ class DialogueEngine implements IDialogueEngine {
     }
 
     // ✅ 第六步：告知前端生成完毕（只在成功时到达这里）
-    final totalTokens = tokenCount;
+    final totalChars = charCount;
+    final totalTokens = (totalChars / charToTokenRatio).round();
     final avgTPS = stopwatch.elapsedMilliseconds > 0 
         ? totalTokens / (stopwatch.elapsedMilliseconds / 1000.0) 
         : null;
+
+    // ★★★ 修复：检测"模型未产生任何输出"的情况 ★★★
+    // 现象：流式推理正常结束（无异常），但 responseBuffer 为空
+    //      常见于：多轮对话后 KV cache 状态污染、模型静默失败、enableReasoning
+    //      误删了所有内容、prompt 触发模型的特殊 token（如 eos 直返）等
+    // 此前响应为空会让用户看到空白气泡 + 静音无 TTS，体验上无任何反馈
+    String finalContent = responseBuffer.toString();
+    if (finalContent.isEmpty && !hasError) {
+      debugPrint(
+          '[DialogueEngine] ⚠️ 响应为空: sessionId=$sessionId, '
+          'messages=${messages.length}');
+      // 提示用户重试，不写入"空字符串"以避免上层 TTS 调用 _synthesize("") 失败
+      finalContent = '（模型未产生输出，请重试或检查上下文是否超出限制）';
+    }
+
     yield DialogueResponse(
-      content: responseBuffer.toString(),
+      content: finalContent,
       isComplete: true,
       tokenCount: totalTokens,
       tokensPerSecond: avgTPS,
+      webSearchData: webSearchData,
     );
 
     // ✅ 第七步：后台检查并执行 MCP 工具调用（不影响主流程）
@@ -245,6 +401,19 @@ class DialogueEngine implements IDialogueEngine {
         text: responseBuffer.toString(),
         messages: messages,
       );
+    }
+
+    // ★★★ 第八步：对话完成后检查上下文压缩 ★★★
+    // 用户期望：对话完成后，如果上下文超过90%，则真正压缩历史消息到数据库
+    await _performPostConversationCompression(sessionId, session.modelId);
+
+    // 性能监控结束
+    perf.endTimer('dialogue_stream_response', stopwatch);
+    debugPrint('[Performance] 对话响应耗时: ${stopwatch.elapsedMilliseconds}ms, 字符数: $totalChars, 估算Token: $totalTokens, TPS: $avgTPS');
+    } catch (e) {
+      // 性能监控错误记录
+      perf.endTimer('dialogue_stream_response', stopwatch, tags: {'error': 'true'});
+      rethrow;
     }
   }
 
@@ -279,6 +448,37 @@ class DialogueEngine implements IDialogueEngine {
       messages.add(ChatMessage.system(session.systemPrompt!));
     }
 
+    // ✅ Skills 插件系统：注入专家技能的系统提示词
+    if (session.enabledSkill != null && session.enabledSkill!.isNotEmpty) {
+      final skillDispatcher = SkillDispatcher();
+      final skill = skillDispatcher.getSkill(session.enabledSkill!);
+      if (skill != null && skill.type == SkillType.expert && skill.expertPrompt != null) {
+        messages.add(ChatMessage.system(skill.expertPrompt!));
+        debugPrint('[DialogueEngine] 已注入专家技能: ${skill.name}');
+      }
+    }
+
+    // ✅ TTS 控制指令：当启用语音播报时，根据上下文预算注入适当版本的 TTS 提示词
+    if (session.enableVoiceOutput) {
+      int? ttsBudget;
+      try {
+        final ctxSize = await _modelEngine.getContextSize(session.modelId);
+        final usedBySystem = messages.fold<int>(0, (sum, m) =>
+            sum + TTSPromptTemplate.estimateTokenCount(m.content));
+        ttsBudget = (ctxSize * 0.90).round() - usedBySystem - 200;
+      } catch (_) {}
+      final ttsPrompt = TTSPromptTemplate.getPrompt(
+        enableDirectorMode: true,
+        tokenBudget: ttsBudget,
+      );
+      if (ttsPrompt.isNotEmpty) {
+        messages.add(ChatMessage.system(ttsPrompt));
+        debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词 (预算=${ttsBudget ?? "无限制"}tokens)');
+      } else {
+        debugPrint('[DialogueEngine] ⚠️ 上下文预算不足，跳过 TTS 提示词注入');
+      }
+    }
+
     // ✅ 检查是否需要压缩上下文
     List<dynamic> historyMessages;
     if (_compressor.needsCompression(dbMessages)) {
@@ -286,7 +486,7 @@ class DialogueEngine implements IDialogueEngine {
       final compressedMessages = _compressor.compress(dbMessages);
       
       // 通知 UI 压缩事件
-      _compressionController?.add(CompressionEvent(
+      _compressionController.add(CompressionEvent(
         originalCount: dbMessages.length,
         compressedCount: compressedMessages.length,
         strategy: _compressor.strategy,
@@ -299,13 +499,35 @@ class DialogueEngine implements IDialogueEngine {
       historyMessages = dbMessages;
     }
 
-    // 历史消息（过滤 tool 角色）
+    // ✅ 查询模型是否支持多模态：支持则保留历史图片，否则剥离（节省 token）
+    final supportsVision = await _modelEngine.supportsMultimodal(session.modelId);
+
+    // ★★★ V77 修复：提取历史消息中的压缩总结，注入到 system 消息区 ★★★
+    final List<String> compressionSummaries2 = [];
     for (final msg in historyMessages) {
-      if (msg.role == 'tool') continue; // 跳过工具消息
       if (msg.role == 'system') {
-        messages.add(ChatMessage.system(msg.content));
-      } else if (msg.role == 'user') {
-        messages.add(ChatMessage.user(msg.content));
+        final content = msg.content ?? '';
+        if (content.contains('[📝 对话历史总结]') || content.contains('[🗜️ 压缩]')) {
+          compressionSummaries2.add(content);
+        }
+      }
+    }
+    if (compressionSummaries2.isNotEmpty) {
+      final combinedSummary = compressionSummaries2.join('\n\n');
+      messages.add(ChatMessage.system(
+        '以下是之前对话的压缩总结，请结合此总结和系统提示来回答用户的问题：\n\n$combinedSummary',
+      ));
+      debugPrint('[DialogueEngine] 已注入 ${compressionSummaries2.length} 条压缩总结到 system 消息区');
+    }
+
+    // 历史消息（过滤 tool 和 system 角色）
+    // 注意：system 消息已经在开头添加（包括压缩总结），历史消息中的 system 消息需要跳过
+    // llama.cpp 要求所有 system 消息必须在最前面，否则会报错 "System message must be at the beginning"
+    for (final msg in historyMessages) {
+      if (msg.role == 'tool' || msg.role == 'system') continue; // 跳过工具和系统消息
+      if (msg.role == 'user') {
+        // 多模态模型保留图片以获得上下文，纯文本模型剥离以节省 token
+        messages.add(_parseUserMessage(msg.content, stripOnly: !supportsVision));
       } else if (msg.role == 'assistant') {
         messages.add(ChatMessage.assistant(msg.content));
       }
@@ -338,19 +560,55 @@ class DialogueEngine implements IDialogueEngine {
   /// [ragContext] RAG 检索结果，以临时 system 消息形式注入，
   ///             位于会话 systemPrompt 之后、历史对话之前。
   ///             注意：此内容不保存到数据库，仅在当次推理中有效。
+  /// [locationContext] 位置信息上下文，以临时 system 消息形式注入，
+  ///                   位于 RAG 上下文之后、历史对话之前。
   Future<List<ChatMessage>> _buildStructuredMessagesWithContent(
     String sessionId,
     String currentContent, {
     String? ragContext,
+    String? locationContext,
   }) async {
+    debugPrint('[DialogueEngine] _buildStructuredMessagesWithContent 开始: sessionId=$sessionId');
     final dbMessages = await _messageRepository.getSessionMessages(sessionId);
     final session = await _sessionManager.getSession(sessionId);
+    debugPrint('[DialogueEngine] _buildStructuredMessagesWithContent: 会话已获取, systemPrompt=${session.systemPrompt != null ? "有" : "无"}, enabledSkill=${session.enabledSkill}');
 
     final messages = <ChatMessage>[];
 
     // 系统提示词（单独作为第一条 system 消息）
     if (session.systemPrompt != null && session.systemPrompt!.isNotEmpty) {
       messages.add(ChatMessage.system(session.systemPrompt!));
+    }
+
+    // ✅ Skills 插件系统：注入专家技能的系统提示词
+    if (session.enabledSkill != null && session.enabledSkill!.isNotEmpty) {
+      final skillDispatcher = SkillDispatcher();
+      final skill = skillDispatcher.getSkill(session.enabledSkill!);
+      if (skill != null && skill.type == SkillType.expert && skill.expertPrompt != null) {
+        messages.add(ChatMessage.system(skill.expertPrompt!));
+        debugPrint('[DialogueEngine] 已注入专家技能: ${skill.name}');
+      }
+    }
+
+    // ✅ TTS 控制指令：当启用语音播报时，根据上下文预算注入适当版本的 TTS 提示词
+    if (session.enableVoiceOutput) {
+      int? ttsBudget;
+      try {
+        final ctxSize = await _modelEngine.getContextSize(session.modelId);
+        final usedBySystem = messages.fold<int>(0, (sum, m) =>
+            sum + TTSPromptTemplate.estimateTokenCount(m.content));
+        ttsBudget = (ctxSize * 0.90).round() - usedBySystem - 200;
+      } catch (_) {}
+      final ttsPrompt = TTSPromptTemplate.getPrompt(
+        enableDirectorMode: true,
+        tokenBudget: ttsBudget,
+      );
+      if (ttsPrompt.isNotEmpty) {
+        messages.add(ChatMessage.system(ttsPrompt));
+        debugPrint('[DialogueEngine] 已注入 TTS 控制指令提示词 (预算=${ttsBudget ?? "无限制"}tokens)');
+      } else {
+        debugPrint('[DialogueEngine] ⚠️ 上下文预算不足，跳过 TTS 提示词注入');
+      }
     }
 
     // ✅ RAG 知识库上下文：以独立 system 消息注入（标准 RAG 做法）
@@ -367,6 +625,37 @@ class DialogueEngine implements IDialogueEngine {
       debugPrint('[DialogueEngine] RAG 上下文已注入为 system 消息，长度: ${ragSystemPrompt.length}');
     }
 
+    // ✅ 位置上下文：以独立 system 消息注入
+    // 位于 RAG 上下文之后、历史对话之前，AI 会将其作为用户当前位置信息
+    if (locationContext != null && locationContext.isNotEmpty) {
+      final locationSystemPrompt = '你是一个智能助手。用户当前所在位置信息如下，'
+          '请根据用户的位置信息回答相关问题。如果问题与位置无关，请忽略位置信息直接回答。\n\n'
+          '$locationContext\n'
+          '请根据用户的位置提供更准确、更贴心的回答。';
+      messages.add(ChatMessage.system(locationSystemPrompt));
+      debugPrint('[DialogueEngine] 位置上下文已注入为 system 消息');
+    }
+
+    // ✅ 记忆宫殿上下文：检索相关记忆并注入
+    // 位于位置上下文之后、历史对话之前
+    try {
+      final memoryContext = await _memoryPalace.generateMemoryContext(
+        query: currentContent,
+        sessionId: sessionId,
+        maxLength: 1500,
+      );
+      if (memoryContext.isNotEmpty) {
+        final memorySystemPrompt = '你是一个智能助手。以下是用户的记忆背景信息，'
+            '请结合这些记忆来提供更个性化、更连贯的回答。\n\n'
+            '$memoryContext\n'
+            '请根据用户的记忆背景提供更贴心的回答。';
+        messages.add(ChatMessage.system(memorySystemPrompt));
+        debugPrint('[DialogueEngine] 记忆上下文已注入为 system 消息');
+      }
+    } catch (e) {
+      debugPrint('[DialogueEngine] 记忆上下文检索失败: $e');
+    }
+
     // ✅ 检查是否需要压缩上下文
     List<dynamic> historyMessages;
     if (_compressor.needsCompression(dbMessages)) {
@@ -374,7 +663,7 @@ class DialogueEngine implements IDialogueEngine {
       final compressedMessages = _compressor.compress(dbMessages);
       
       // 通知 UI 压缩事件
-      _compressionController?.add(CompressionEvent(
+      _compressionController.add(CompressionEvent(
         originalCount: dbMessages.length,
         compressedCount: compressedMessages.length,
         strategy: _compressor.strategy,
@@ -396,32 +685,366 @@ class DialogueEngine implements IDialogueEngine {
       }
     }
 
-    // 历史消息（过滤 tool 角色）
+    // ✅ 查询模型是否支持多模态：支持则保留历史图片，否则剥离（节省 token）
+    final supportsVision = await _modelEngine.supportsMultimodal(session.modelId);
+
+    // ★★★ V77 修复：提取历史消息中的压缩总结，注入到 system 消息区 ★★★
+    // 旧逻辑：直接跳过所有 system 角色的历史消息
+    // 问题：手动压缩后写入的 [📝 对话历史总结] 也是 system 角色，被跳过后
+    //       后续对话不会带上总结描述，压缩等于白做
+    // 修复：将压缩总结提取出来，作为 system 消息注入到对话开头
+    final List<String> compressionSummaries = [];
     for (int i = 0; i < historyMessages.length; i++) {
       final msg = historyMessages[i];
-      if (msg.role == 'tool') continue;
+      if (msg.role == 'system') {
+        final content = msg.content ?? '';
+        // 提取压缩总结消息（以 [📝 对话历史总结] 开头的 system 消息）
+        if (content.contains('[📝 对话历史总结]') || content.contains('[🗜️ 压缩]')) {
+          compressionSummaries.add(content);
+          debugPrint('[DialogueEngine] 提取到压缩总结: ${content.substring(0, content.length > 50 ? 50 : content.length)}...');
+        }
+      }
+    }
+
+    // 将压缩总结注入到 system 消息区（在 systemPrompt 之后、历史对话之前）
+    if (compressionSummaries.isNotEmpty) {
+      final combinedSummary = compressionSummaries.join('\n\n');
+      messages.add(ChatMessage.system(
+        '以下是之前对话的压缩总结，请结合此总结和系统提示来回答用户的问题：\n\n$combinedSummary',
+      ));
+      debugPrint('[DialogueEngine] 已注入 ${compressionSummaries.length} 条压缩总结到 system 消息区');
+    }
+
+    // 历史消息（过滤 tool 和 system 角色）
+    // 注意：system 消息已经在开头添加（包括压缩总结），历史消息中的 system 消息需要跳过
+    // llama.cpp 要求所有 system 消息必须在最前面，否则会报错 "System message must be at the beginning"
+    for (int i = 0; i < historyMessages.length; i++) {
+      final msg = historyMessages[i];
+      if (msg.role == 'tool' || msg.role == 'system') continue;
       
       // ✅ 跳过最后一条用户消息（因为我们要用 currentContent 替代它）
       if (i == lastUserMessageIndex) continue;
       
-      if (msg.role == 'system') {
-        messages.add(ChatMessage.system(msg.content));
-      } else if (msg.role == 'user') {
-        messages.add(ChatMessage.user(msg.content));
+      if (msg.role == 'user') {
+        // 多模态模型保留图片以获得上下文，纯文本模型剥离以节省 token
+        messages.add(_parseUserMessage(msg.content, stripOnly: !supportsVision));
       } else if (msg.role == 'assistant') {
         messages.add(ChatMessage.assistant(msg.content));
       }
     }
 
-    // 添加当前用户消息（原始用户输入，干净无污染）
-    messages.add(ChatMessage.user(currentContent));
+    // 添加当前用户消息（解析多模态图片标记，如有图片则构建带图片的 ChatMessage）
+    messages.add(_parseUserMessage(currentContent));
 
     return messages;
   }
   
+  /// 从消息内容中去掉多模态图片标记，只保留用户文字部分（用于数据库存储/UI 显示）
+  String _stripImageMarker(String content) {
+    const marker = '[多模态图片数据:';
+    final idx = content.indexOf(marker);
+    if (idx < 0) return content;
+    final text = content.substring(0, idx).trimRight();
+    return text.isEmpty ? '[图片]' : text;
+  }
+
+  /// 解析用户消息：如含 `[多模态图片数据:...]` 标记，提取图片并构建多模态 ChatMessage；
+  /// 否则直接构建纯文本 ChatMessage。
+  ///
+  /// 图片标记格式（由 session_detail_page 注入）：
+  ///   $userText\n\n[多模态图片数据:[{"name":"...","mimeType":"...","data":"base64..."},...]
+  ///
+  /// [stripOnly] 为 true 时只剥离图片标记（用于历史消息，避免重复传图片消耗 token）
+  ChatMessage _parseUserMessage(String content, {bool stripOnly = false}) {
+    const marker = '[多模态图片数据:';
+    final markerIndex = content.indexOf(marker);
+    if (markerIndex < 0) {
+      return ChatMessage.user(content);
+    }
+
+    // 拆分：用户文字 + JSON 数组
+    final userText = content.substring(0, markerIndex).trimRight();
+    final jsonStart = markerIndex + marker.length;
+    final jsonStr = content.substring(jsonStart);
+
+    if (stripOnly) {
+      // 历史消息：只保留文字部分，不重发图片（避免 token 浪费）
+      final text = userText.isEmpty ? '[包含图片的消息]' : userText;
+      return ChatMessage.user(text);
+    }
+
+    // 用 '}' 定位 JSON 数组结束（比找 ']' 更可靠，因为 base64 数据可能含 ']'）
+    final lastBrace = jsonStr.lastIndexOf('}');
+    if (lastBrace < 0) {
+      debugPrint('[DialogueEngine] 多模态 JSON 找不到结束符 \'}\'，降级为纯文本');
+      return ChatMessage.user(userText.isEmpty ? content : userText);
+    }
+
+    // 截取到 '}' 并补全 ']' 得到完整 JSON 数组
+    final cleanJson = '${jsonStr.substring(0, lastBrace + 1)}]';
+    try {
+      final rawList = jsonDecode(cleanJson) as List<dynamic>;
+      final images = rawList.map((item) {
+        final m = item as Map<String, dynamic>;
+        return ChatImageData(
+          base64Data: m['data'] as String,
+          mimeType: m['mimeType'] as String? ?? 'image/jpeg',
+        );
+      }).toList();
+
+      debugPrint('[DialogueEngine] 解析到 ${images.length} 张图片，构建多模态消息');
+      return ChatMessage.user(userText, images: images);
+    } catch (e) {
+      final preview = cleanJson.length > 100 ? '${cleanJson.substring(0, 100)}...' : cleanJson;
+      debugPrint('[DialogueEngine] 多模态 JSON 解析出错: $e，cleanJson: "$preview"');
+      return ChatMessage.user(userText.isEmpty ? content : userText);
+    }
+  }
+
   /// 压缩事件类
   void disposeCompression() {
-    _compressionController?.close();
+    _compressionController.close();
+  }
+
+  /// ★★★ 对话完成后执行上下文压缩 ★★★
+  ///
+  /// 用户期望的逻辑：
+  /// 1. 对话完成后（AI 回复完毕后）检查上下文使用率
+  /// 2. 如果超过 90%，则真正压缩历史消息
+  /// 3. 清空历史消息，保留压缩结果作为对话依据
+  Future<void> _performPostConversationCompression(
+    String sessionId,
+    String modelId,
+  ) async {
+    try {
+      // 获取会话的所有消息
+      final dbMessages = await _messageRepository.getSessionMessages(sessionId);
+      
+      // 至少需要 4 条消息（2 轮对话）才考虑压缩
+      if (dbMessages.length < 4) return;
+      
+      // 检查是否需要压缩（基于 90% 阈值）
+      if (!_compressor.needsCompression(dbMessages)) return;
+      
+      // 获取上下文大小用于计算使用率
+      final ctxSize = await _modelEngine.getContextSize(modelId);
+      final estimatedTokens = ContextCompressorService.estimateTotalTokens(dbMessages);
+      final usageRatio = estimatedTokens / ctxSize;
+      
+      debugPrint('[DialogueEngine] 对话完成，开始检查上下文压缩: '
+          '消息数=${dbMessages.length}, 估算Tokens=$estimatedTokens, '
+          '上下文=$ctxSize, 使用率=${(usageRatio * 100).toStringAsFixed(1)}%');
+      
+      // 如果使用率未达到 90%，跳过压缩
+      if (usageRatio < 0.90) {
+        debugPrint('[DialogueEngine] 上下文使用率未达 90%，跳过压缩');
+        return;
+      }
+      
+      debugPrint('[DialogueEngine] 上下文使用率超过 90%，执行压缩...');
+      
+      // ★★★ 根据上下文大小动态调整压缩策略 ★★★
+      // 移动端小上下文：更激进的压缩
+      final isSmallContext = ctxSize < 8192;
+      final maxMessagesToKeep = isSmallContext ? 6 : 20;
+      
+      // 执行上下文压缩（优先使用 LLM 摘要）
+      List<CompressedMessage> compressedMessages;
+      if (_llmSummaryCallback != null && dbMessages.length > 50) {
+        // 使用 LLM 智能摘要
+        debugPrint('[DialogueEngine] 使用 LLM 摘要压缩...');
+        compressedMessages = await _compressor.compressWithLlmSummary(dbMessages);
+      } else {
+        // 使用规则压缩，移动端更激进
+        compressedMessages = _compressor.compress(dbMessages);
+      }
+      
+      // ★★★ 移动端：进一步裁剪压缩结果 ★★★
+      if (isSmallContext && compressedMessages.length > maxMessagesToKeep) {
+        debugPrint('[DialogueEngine] 移动端：裁剪压缩结果从 ${compressedMessages.length} 到 $maxMessagesToKeep 条');
+        compressedMessages = _trimCompressedMessages(compressedMessages, maxMessagesToKeep);
+      }
+      
+      // ★★★ 关键：清空历史消息，写入压缩结果到数据库 ★★★
+      // 这是用户期望的核心逻辑：清空旧消息，保留压缩后的摘要
+      await _replaceMessagesWithCompression(sessionId, compressedMessages, dbMessages.length);
+      
+      // 通知 UI 压缩事件
+      _compressionController.add(CompressionEvent(
+        originalCount: dbMessages.length,
+        compressedCount: compressedMessages.length,
+        strategy: _compressor.strategy,
+      ));
+      
+      debugPrint('[DialogueEngine] ✅ 上下文压缩完成: ${dbMessages.length} → ${compressedMessages.length} 条消息');
+    } catch (e) {
+      debugPrint('[DialogueEngine] 上下文压缩失败: $e');
+      // 压缩失败不影响对话，默默继续
+    }
+  }
+
+  /// ★★★ 将压缩后的消息写入数据库，清空旧消息 ★★★
+  ///
+  /// 激进压缩策略：
+  /// 1. 先把所有历史消息存到 MemPalace（确保不丢失）
+  /// 2. 清空会话历史
+  /// 3. 写入压缩摘要
+  /// 4. 会话隔离：每个会话的记忆独立
+  Future<void> _replaceMessagesWithCompression(
+    String sessionId,
+    List<CompressedMessage> compressedMessages,
+    int originalCount,
+  ) async {
+    try {
+      // ★★★ 第一步：把历史消息存到 MemPalace（确保不丢失）★★★
+      await _archiveToMemoryPalace(sessionId, compressedMessages, originalCount);
+      
+      // ★★★ 第二步：清空该会话的所有历史消息 ★★★
+      await _messageRepository.deleteSessionMessages(sessionId);
+      
+      // ★★★ 第三步：写入压缩后的消息 ★★★
+      for (final msg in compressedMessages) {
+        // 如果是摘要消息，用特殊标记包裹
+        String content = msg.content;
+        if (msg.isSummary) {
+          content = '[📝 对话摘要]\n$content';
+        }
+        
+        await _messageRepository.createMessage(
+          sessionId: sessionId,
+          role: msg.role,
+          content: content,
+        );
+      }
+      
+      // ★★★ 第四步：添加压缩说明消息（简洁版，节省空间）★★★
+      await _messageRepository.createMessage(
+        sessionId: sessionId,
+        role: 'system',
+        content: '[🗜️ 压缩] $originalCount→${compressedMessages.length}条，已归档记忆宫殿',
+      );
+      
+      // ★★★ 第五步：刷新会话，确保 UI 显示最新数据 ★★★
+      await _sessionManager.refreshCurrentSession();
+    } catch (e) {
+      debugPrint('[DialogueEngine] 写入压缩消息失败: $e');
+      rethrow;
+    }
+  }
+
+  /// ★★★ 裁剪压缩消息（移动端专用）★★★
+  ///
+  /// 保留：
+  /// 1. 所有 system 消息（不含压缩说明）
+  /// 2. 摘要消息
+  /// 3. 最近的 N 条用户/助手消息
+  List<CompressedMessage> _trimCompressedMessages(
+    List<CompressedMessage> messages,
+    int maxCount,
+  ) {
+    if (messages.length <= maxCount) return messages;
+    
+    final result = <CompressedMessage>[];
+    
+    // 1. 保留所有 system 消息（摘要等）
+    final systemMessages = messages.where((m) => m.role == 'system' && m.isSummary).toList();
+    result.addAll(systemMessages);
+    
+    // 2. 保留最近的用户/助手消息
+    final conversationMessages = messages.where((m) => m.role != 'system' || !m.isSummary).toList();
+    final remainingSlots = maxCount - result.length;
+    
+    if (remainingSlots > 0 && conversationMessages.isNotEmpty) {
+      final startIndex = max(0, conversationMessages.length - remainingSlots);
+      result.addAll(conversationMessages.sublist(startIndex));
+    }
+    
+    // 如果还是超过限制，只保留最近的消息
+    if (result.length > maxCount) {
+      return result.sublist(result.length - maxCount);
+    }
+    
+    return result;
+  }
+
+  /// ★★★ 将历史消息归档到记忆宫殿 ★★★
+  ///
+  /// 会话隔离：每条记忆都绑定 sessionId
+  /// 检索时只检索当前会话的相关记忆
+  Future<void> _archiveToMemoryPalace(
+    String sessionId,
+    List<CompressedMessage> compressedMessages,
+    int originalCount,
+  ) async {
+    try {
+      debugPrint('[DialogueEngine] 开始归档历史消息到记忆宫殿，sessionId=$sessionId');
+      
+      // 1. 归档完整对话摘要（作为一条记忆）
+      final summaryBuffer = StringBuffer();
+      summaryBuffer.writeln('## 会话对话归档');
+      summaryBuffer.writeln('会话ID: $sessionId');
+      summaryBuffer.writeln('原始消息数: $originalCount');
+      summaryBuffer.writeln('压缩时间: ${DateTime.now().toString().substring(0, 19)}');
+      summaryBuffer.writeln('');
+      
+      // 按角色分组统计
+      int userCount = 0;
+      int assistantCount = 0;
+      int systemCount = 0;
+      for (final msg in compressedMessages) {
+        if (msg.role == 'user') userCount++;
+        if (msg.role == 'assistant') assistantCount++;
+        if (msg.role == 'system') systemCount++;
+      }
+      summaryBuffer.writeln('统计: 用户消息 $userCount 条，助手回复 $assistantCount 条，系统消息 $systemCount 条');
+      summaryBuffer.writeln('');
+      
+      // 提取对话主题（前几条用户消息）
+      final userMessages = compressedMessages.where((m) => m.role == 'user').take(3).toList();
+      if (userMessages.isNotEmpty) {
+        summaryBuffer.writeln('### 对话主题');
+        for (int i = 0; i < userMessages.length; i++) {
+          final content = userMessages[i].content;
+          final preview = content.length > 100 ? '${content.substring(0, 100)}...' : content;
+          summaryBuffer.writeln('${i + 1}. $preview');
+        }
+        summaryBuffer.writeln('');
+      }
+      
+      // 添加压缩摘要内容
+      final summaryMessages = compressedMessages.where((m) => m.isSummary).toList();
+      if (summaryMessages.isNotEmpty) {
+        summaryBuffer.writeln('### 压缩摘要');
+        for (final msg in summaryMessages) {
+          summaryBuffer.writeln(msg.content);
+        }
+      }
+      
+      // 存储到记忆宫殿（会话隔离）
+      await _memoryPalace.addMemory(
+        content: summaryBuffer.toString(),
+        sessionId: sessionId,  // ★ 会话隔离关键
+        type: 'long_term',
+        isGlobal: false,  // 不是全局记忆，只属于当前会话
+      );
+      
+      // 2. 归档重要消息（系统提示、首条用户消息等）
+      for (final msg in compressedMessages) {
+        if (msg.isImportant && msg.importantType != null) {
+          await _memoryPalace.addMemory(
+            content: '[${msg.importantType!.name}] ${msg.content}',
+            sessionId: sessionId,
+            type: 'long_term',
+            isGlobal: false,
+          );
+        }
+      }
+      
+      debugPrint('[DialogueEngine] ✅ 归档完成：$originalCount 条消息已存入记忆宫殿');
+    } catch (e) {
+      debugPrint('[DialogueEngine] 归档到记忆宫殿失败: $e');
+      // 归档失败不影响压缩流程，继续执行
+    }
   }
 
   /// 搜索模式显示名称
@@ -452,6 +1075,28 @@ class DialogueEngine implements IDialogueEngine {
     _tavilyApiKey = apiKey;
   }
 
+  /// 从用户提问中提取简短关键词（用于 UI 展示搜索标签）
+  List<String> _extractKeywordsFromContent(String content) {
+    // 简单策略：将句子拆分为不超过 4 组关键词短语
+    final cleaned = content.trim();
+    if (cleaned.length <= 20) return [cleaned];
+
+    // 按标点拆分
+    final parts = cleaned
+        .split(RegExp(r'[，。？！,?!、\n]+'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    if (parts.isEmpty) return [cleaned.substring(0, cleaned.length.clamp(0, 30))];
+
+    // 取前 4 个短语，每个限制最多 20 字
+    return parts
+        .take(4)
+        .map((s) => s.length > 20 ? s.substring(0, 20) : s)
+        .toList();
+  }
+
   /// 执行网络搜索（根据用户选择的模式）
   Future<List<Map<String, dynamic>>> _performWebSearch(String query) async {
     List<Map<String, dynamic>>? results;
@@ -469,7 +1114,7 @@ class DialogueEngine implements IDialogueEngine {
           break;
       }
 
-      if (results != null && results.isNotEmpty) {
+      if (results.isNotEmpty) {
         debugPrint('Web search succeeded with ${results.length} results');
         return results;
       }
@@ -482,7 +1127,9 @@ class DialogueEngine implements IDialogueEngine {
       try {
         final ddgResults = await _searchDuckDuckGo(query);
         if (ddgResults.isNotEmpty) return ddgResults;
-      } catch (_) {}
+      } catch (_) {
+        // ignore: non-critical error
+      }
     }
 
     // 所有源都失败，返回提示
@@ -542,10 +1189,33 @@ class DialogueEngine implements IDialogueEngine {
 
   /// Brave Search API (推荐，免费额度)
   Future<List<Map<String, dynamic>>> _searchBraveAPI(String query) async {
-    // TODO: 用户可以配置 Brave API Key
-    // Brave API: https://api.search.brave.com/res/v1/web/search
-    // 免费额度: 2000次/月
-    throw UnimplementedError('Brave API Key not configured');
+    final prefs = await SharedPreferences.getInstance();
+    final apiKey = prefs.getString('brave_api_key') ?? '';
+    if (apiKey.isEmpty) {
+      throw UnimplementedError('Brave API Key not configured. Set brave_api_key in Settings.');
+    }
+    try {
+      final url = Uri.parse('https://api.search.brave.com/res/v1/web/search')
+          .replace(queryParameters: {'q': query, 'count': '5'});
+      final response = await http.get(url, headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': apiKey,
+      }).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final results = data['web']?['results'] as List<dynamic>? ?? [];
+        return results.map((r) => {
+          'title': r['title'] ?? '',
+          'url': r['url'] ?? '',
+          'snippet': r['description'] ?? '',
+          'source': 'brave',
+        }).toList();
+      }
+      throw Exception('Brave API error: ${response.statusCode}');
+    } catch (e) {
+      throw Exception('Brave search failed: $e');
+    }
   }
 
   /// DuckDuckGo Instant Answer API
@@ -671,8 +1341,33 @@ class DialogueEngine implements IDialogueEngine {
 
   /// SerpAPI (需要API Key)
   Future<List<Map<String, dynamic>>> _searchSerpAPI(String query) async {
-    // TODO: 实现 SerpAPI 支持
-    throw UnimplementedError('SerpAPI not configured');
+    final prefs = await SharedPreferences.getInstance();
+    final apiKey = prefs.getString('serpapi_key') ?? '';
+    if (apiKey.isEmpty) {
+      throw UnimplementedError('SerpAPI Key not configured. Set serpapi_key in Settings.');
+    }
+    try {
+      final url = Uri.parse('https://serpapi.com/search').replace(queryParameters: {
+        'q': query,
+        'api_key': apiKey,
+        'engine': 'google',
+        'num': '5',
+      });
+      final response = await http.get(url).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final results = data['organic_results'] as List<dynamic>? ?? [];
+        return results.map((r) => {
+          'title': r['title'] ?? '',
+          'url': r['link'] ?? '',
+          'snippet': r['snippet'] ?? '',
+          'source': 'serpapi',
+        }).toList();
+      }
+      throw Exception('SerpAPI error: ${response.statusCode}');
+    } catch (e) {
+      throw Exception('SerpAPI search failed: $e');
+    }
   }
 
   /// 检查并执行 MCP 工具调用
@@ -693,7 +1388,6 @@ class DialogueEngine implements IDialogueEngine {
       final toolDescriptions = <String>[];
       for (final entry in availableTools.entries) {
         for (final tool in entry.value) {
-          final argsSchema = tool.inputSchema?.toString() ?? '{}';
           toolDescriptions.add('${tool.name}: ${tool.description ?? ""}');
         }
       }
@@ -729,12 +1423,232 @@ class DialogueEngine implements IDialogueEngine {
       debugPrint('[DialogueEngine] MCP 工具调用失败: $e');
     }
   }
+
+  /// 获取当前上下文使用信息（已用 token、总 token、使用率）
+  /// UI 层调用此方法获取上下文占比，用于显示进度条
+  ({int used, int max, double ratio}) getContextUsage() {
+    return _modelEngine.getContextUsage();
+  }
+
+  /// 刷新上下文使用率估算
+  /// 在消息变化后（非推理场景，如手动删除消息）调用
+  void refreshContextUsage() {
+    _modelEngine.refreshContextUsage();
+  }
+
+  /// 基于当前会话消息列表更新上下文使用率
+  /// 传入从数据库加载的完整历史消息（List<Message>）
+  void updateContextUsageFromMessages(List<dynamic> messages) {
+    _modelEngine.updateContextUsageFromMessages(messages);
+  }
+
+  /// 更新上下文使用率（包含 system 消息注入的 token）
+  ///
+  /// 比 [updateContextUsageFromMessages] 更准确，因为会计算
+  /// systemPrompt、TTS 提示词、技能提示词等注入的 token。
+  Future<void> updateContextUsageWithSystemPrompts(
+    String sessionId,
+    List<dynamic> messages,
+  ) async {
+    int systemTokens = 0;
+    try {
+      final session = await _sessionManager.getSession(sessionId);
+
+      if (session.systemPrompt != null && session.systemPrompt!.isNotEmpty) {
+        systemTokens += TTSPromptTemplate.estimateTokenCount(session.systemPrompt!);
+      }
+
+      if (session.enabledSkill != null && session.enabledSkill!.isNotEmpty) {
+        final skillDispatcher = SkillDispatcher();
+        final skill = skillDispatcher.getSkill(session.enabledSkill!);
+        if (skill != null && skill.type == SkillType.expert && skill.expertPrompt != null) {
+          systemTokens += TTSPromptTemplate.estimateTokenCount(skill.expertPrompt!);
+        }
+      }
+
+      if (session.enableVoiceOutput) {
+        int? ttsBudget;
+        try {
+          final ctxSize = await _modelEngine.getContextSize(session.modelId);
+          final usedBySystem = systemTokens;
+          ttsBudget = (ctxSize * 0.90).round() - usedBySystem - 200;
+        } catch (_) {}
+        final ttsPrompt = TTSPromptTemplate.getPrompt(
+          enableDirectorMode: true,
+          tokenBudget: ttsBudget,
+        );
+        if (ttsPrompt.isNotEmpty) {
+          systemTokens += TTSPromptTemplate.estimateTokenCount(ttsPrompt);
+        }
+      }
+    } catch (_) {}
+
+    _modelEngine.updateContextUsageFromMessages(messages, extraTokens: systemTokens);
+  }
+
+  /// 手动触发上下文压缩（UI 调用）
+  /// 用于用户点击进度条时主动压缩上下文
+  /// ★★★ V77 重写：手动压缩将所有消息压缩为一条总结描述 ★★★
+  /// 用户期望：
+  ///   1. 点击压缩按钮后，无论使用率多少，都应该执行压缩
+  ///   2. 所有对话内容变成一条总结描述记录
+  ///   3. 旧消息全部删除
+  ///   4. 后续对话带上总结描述记录和系统描述
+  Future<void> autoCompressContext(String sessionId) async {
+    try {
+      final session = await _sessionManager.getSession(sessionId);
+      final dbMessages = await _messageRepository.getSessionMessages(sessionId);
+
+      // 至少需要 2 条消息才压缩
+      if (dbMessages.length < 2) {
+        debugPrint('[DialogueEngine] 手动压缩：消息数不足，跳过');
+        return;
+      }
+
+      debugPrint('[DialogueEngine] 手动压缩：开始压缩 ${dbMessages.length} 条消息');
+
+      // ★★★ V77 核心改动：将所有消息压缩为一条总结描述 ★★★
+      // 旧逻辑：调用 compress/compressWithLlmSummary，保留最近消息+摘要旧消息
+      // 新逻辑：生成一条包含所有对话内容的总结描述，删除所有旧消息
+      final summaryText = await _generateFullSummary(dbMessages, session);
+
+      debugPrint('[DialogueEngine] 手动压缩：生成总结长度=${summaryText.length}');
+
+      // ★★★ 第一步：把历史消息存到 MemPalace（确保不丢失）★★★
+      await _archiveToMemoryPalace(sessionId,
+        dbMessages.map((m) => CompressedMessage(
+          id: m.id ?? '',
+          role: m.role,
+          content: m.content ?? '',
+          timestamp: m.createdAt ?? DateTime.now(),
+        )).toList(),
+        dbMessages.length,
+      );
+
+      // ★★★ 第二步：清空该会话的所有历史消息 ★★★
+      await _messageRepository.deleteSessionMessages(sessionId);
+
+      // ★★★ 第三步：写入总结描述（作为 system 消息，后续对话会自动带上）★★★
+      await _messageRepository.createMessage(
+        sessionId: sessionId,
+        role: 'system',
+        content: '[📝 对话历史总结]\n$summaryText',
+      );
+
+      // ★★★ 第四步：刷新会话，确保 UI 显示最新数据 ★★★
+      await _sessionManager.refreshCurrentSession();
+
+      // 刷新上下文使用率
+      _modelEngine.refreshContextUsage();
+
+      debugPrint('[DialogueEngine] ✅ 手动压缩完成: ${dbMessages.length} → 1 条总结消息');
+    } catch (e) {
+      debugPrint('[DialogueEngine] 手动上下文压缩失败: $e');
+    }
+  }
+
+  /// ★★★ V77 新增：生成完整的对话总结 ★★★
+  ///
+  /// 将所有消息压缩为一条总结描述，包含：
+  /// - 对话主题
+  /// - 各轮对话的关键内容
+  /// - 重要结论和决策
+  /// - 未解决的问题
+  ///
+  /// 优先使用 LLM 摘要（如果可用），否则使用规则摘要
+  Future<String> _generateFullSummary(List<dynamic> messages, dynamic session) async {
+    // 过滤掉 tool 角色消息
+    final conversationMessages = messages.where((m) => m.role != 'tool').toList();
+
+    if (conversationMessages.isEmpty) return '（无对话内容）';
+
+    // 尝试使用 LLM 生成智能摘要
+    if (_llmSummaryCallback != null) {
+      try {
+        final messageMaps = conversationMessages.map((m) => <String, String>{
+          'role': m.role,
+          'content': m.content ?? '',
+        }).toList();
+
+        debugPrint('[DialogueEngine] 使用 LLM 生成对话总结...');
+        final llmSummary = await _llmSummaryCallback!(messageMaps);
+        if (llmSummary.isNotEmpty) {
+          return llmSummary;
+        }
+      } catch (e) {
+        debugPrint('[DialogueEngine] LLM 摘要生成失败，回退到规则摘要: $e');
+      }
+    }
+
+    // 规则摘要：逐轮提取关键内容
+    return _generateRuleBasedFullSummary(conversationMessages);
+  }
+
+  /// ★★★ V77 新增：基于规则的完整对话总结 ★★★
+  ///
+  /// 逐轮提取用户问题和助手回答的关键内容
+  String _generateRuleBasedFullSummary(List<dynamic> messages) {
+    final buffer = StringBuffer();
+
+    // 统计
+    final userMessages = messages.where((m) => m.role == 'user').toList();
+    final assistantMessages = messages.where((m) => m.role == 'assistant').toList();
+    final systemMessages = messages.where((m) => m.role == 'system').toList();
+
+    buffer.writeln('共 ${userMessages.length} 轮对话');
+    buffer.writeln();
+
+    // 提取对话主题（前几条用户消息）
+    if (userMessages.isNotEmpty) {
+      buffer.writeln('【对话主题】');
+      for (var i = 0; i < userMessages.length && i < 3; i++) {
+        final content = userMessages[i].content ?? '';
+        final truncated = content.length > 100
+            ? '${content.substring(0, 100)}...'
+            : content;
+        buffer.writeln('• $truncated');
+      }
+      buffer.writeln();
+    }
+
+    // 逐轮总结
+    buffer.writeln('【对话详情】');
+    int roundNum = 0;
+    for (int i = 0; i < messages.length; i++) {
+      final msg = messages[i];
+      if (msg.role == 'user') {
+        roundNum++;
+        final content = msg.content ?? '';
+        final truncated = content.length > 150
+            ? '${content.substring(0, 150)}...'
+            : content;
+        buffer.writeln('第$roundNum轮 - 用户: $truncated');
+      } else if (msg.role == 'assistant') {
+        final content = msg.content ?? '';
+        final truncated = content.length > 200
+            ? '${content.substring(0, 200)}...'
+            : content;
+        buffer.writeln('第${roundNum}轮 - 助手: $truncated');
+        buffer.writeln();
+      }
+    }
+
+    // 提取关键结论（最后一条助手消息）
+    if (assistantMessages.isNotEmpty) {
+      final lastReply = assistantMessages.last.content ?? '';
+      final truncated = lastReply.length > 200
+          ? '${lastReply.substring(0, 200)}...'
+          : lastReply;
+      buffer.writeln('【最新结论】$truncated');
+    }
+
+    return buffer.toString();
+  }
 }
 
 /// MCP 工具调用通知器
 class MCPToolCallNotifier {
   final List<void Function(MCPToolCall)> _listeners = [];
-  MCPToolCall? _lastCall;
 
   bool get hasListeners => _listeners.isNotEmpty;
 
@@ -747,7 +1661,6 @@ class MCPToolCallNotifier {
   }
 
   void notify(MCPToolCall call) {
-    _lastCall = call;
     for (final listener in _listeners) {
       try {
         listener(call);
@@ -798,6 +1711,13 @@ abstract class DynamicMessage {
   DateTime get createdAt;
   String? get toolCallInfo;
   String? get modelId;
+}
+
+/// 消息适配器 - 轻量级，用于 truncateToFit 接口
+class _MessageAdapter {
+  final String role;
+  final String content;
+  _MessageAdapter(this.role, this.content);
 }
 
 /// 压缩消息适配器 - 将 CompressedMessage 适配为 DynamicMessage

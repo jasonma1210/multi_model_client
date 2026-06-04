@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/database.dart';
@@ -176,7 +177,7 @@ class PromptTemplateNotifier extends StateNotifier<AsyncValue<void>> {
       _ref.invalidate(promptTemplatesProvider);
       _ref.invalidate(builtinPromptTemplatesProvider);
     } catch (e) {
-      // Ignore errors during initialization
+      debugPrint('[prompt_providers] Error: $e');
     }
   }
 }

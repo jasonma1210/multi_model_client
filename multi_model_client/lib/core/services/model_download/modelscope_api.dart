@@ -30,7 +30,7 @@ class ModelScopeApi {
           'keyword': query,
           'page': page,
           'size': pageSize,
-          if (task != null) 'task': task,
+          'task': ?task,
         },
         options: Options(
           headers: {
@@ -58,17 +58,6 @@ class ModelScopeApi {
 
     // 使用正则匹配模型卡片
     // ModelScope 搜索结果通常包含 data-model-id 属性
-    final modelIdPattern = RegExp(r'data-model-id="([^"]+)"');
-    final namePattern = RegExp(r'<span[^>]*class="[^"]*name[^"]*"[^>]*>([^<]+)</span>');
-    final descPattern = RegExp(r'<p[^>]*class="[^"]*desc[^"]*"[^>]*>([^<]*)<');
-    final authorPattern = RegExp(r'<span[^>]*class="[^"]*author[^"]*"[^>]*>([^<]+)</span>');
-
-    // 尝试多种选择器模式
-    final cardPattern = RegExp(
-      r'<a[^>]+href="/models/([^"]+)"[^>]*>.*?<span[^>]*class="[^"]*model-card[^"]*"[^>]*>([\s\S]*?)</span>',
-      multiLine: true,
-    );
-
     // 简化解析：从 HTML 中提取模型信息
     // 匹配模型链接和名称
     final linkPattern = RegExp(r'<a[^>]+href="/models/([^"]+)"[^>]*>([^<]+)</a>');
@@ -347,6 +336,17 @@ class ModelFile {
   bool get isFile => type == 'file';
   bool get isDirectory => type == 'directory';
   bool get isGguf => path.toLowerCase().endsWith('.gguf');
+  /// 是否为 mmproj 多模态投影仪文件
+  bool get isMmproj {
+    final lower = path.toLowerCase();
+    // mmproj 文件通常包含 "mmproj" 关键词
+    // 或者是 .gguf 文件且包含 "mmproj"
+    final isMmprojFile = lower.contains('mmproj') || 
+           lower.contains('multimodal') ||
+           (lower.endsWith('.bin') && lower.contains('vision')) ||
+           (lower.endsWith('.gguf') && lower.contains('mmproj'));
+    return isMmprojFile;
+  }
 
   String get extension {
     final parts = path.split('.');

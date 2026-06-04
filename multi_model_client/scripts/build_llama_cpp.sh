@@ -32,7 +32,11 @@ mkdir -p "$BUILD_DIR"
 # 检查是否需要克隆 llama.cpp
 if [ ! -d "$SRC_DIR" ]; then
     echo -e "${GREEN}正在克隆 llama.cpp 仓库...${NC}"
-    git clone --depth 1 https://github.com/ggml-org/llama.cpp.git "$SRC_DIR"
+    git clone https://github.com/ggml-org/llama.cpp.git "$SRC_DIR"
+    # 切换到与 llama_cpp_dart 0.2.2 兼容的版本 (b3690 左右)
+    cd "$SRC_DIR"
+    echo -e "${GREEN}切换到兼容版本 b3690...${NC}"
+    git checkout b3690
 else
     echo -e "${GREEN}llama.cpp 已存在，跳过克隆${NC}"
 fi

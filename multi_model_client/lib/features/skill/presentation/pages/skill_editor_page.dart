@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../domain/skill.dart';
-import '../../domain/skill_providers.dart';
 
 /// Skill 编辑器页面
 /// 支持创建和编辑自定义技能
@@ -22,11 +20,11 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
   final _descriptionController = TextEditingController();
   final _promptController = TextEditingController();
   final _implementationController = TextEditingController();
-  
+
   String _selectedType = 'expert'; // expert 或 tool
   String _selectedDomain = '通用';
   String _emoji = '🤖';
-  
+
   bool _isLoading = false;
   bool get _isEditMode => widget.skillId != null;
 
@@ -44,8 +42,26 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
   ];
 
   final List<String> _commonEmojis = [
-    '🤖', '👨‍💻', '👩‍💻', '🧠', '💡', '🎯', '📊', '📝', '🔧', '🚀',
-    '🎨', '📚', '💼', '🌟', '⚡', '🔍', '💬', '🎓', '🏠', '🎮',
+    '🤖',
+    '👨‍💻',
+    '👩‍💻',
+    '🧠',
+    '💡',
+    '🎯',
+    '📊',
+    '📝',
+    '🔧',
+    '🚀',
+    '🎨',
+    '📚',
+    '💼',
+    '🌟',
+    '⚡',
+    '🔍',
+    '💬',
+    '🎓',
+    '🏠',
+    '🎮',
   ];
 
   @override
@@ -71,52 +87,56 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/settings/skills'),
-        ),
-        title: Text(_isEditMode ? '编辑技能' : '创建技能'),
-        actions: [
-          TextButton.icon(
-            onPressed: _isLoading ? null : _saveSkill,
-            icon: const Icon(Icons.save),
-            label: const Text('保存'),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.go('/settings/skills'),
           ),
-        ],
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(AppTheme.spacingM),
-          children: [
-            // 技能类型选择
-            _buildSectionTitle('技能类型'),
-            _buildTypeSelector(),
-            const SizedBox(height: AppTheme.spacingL),
-
-            // 基本信息
-            _buildSectionTitle('基本信息'),
-            _buildBasicInfoSection(),
-            const SizedBox(height: AppTheme.spacingL),
-
-            // 技能提示词
-            _buildSectionTitle('技能提示词'),
-            _buildPromptSection(),
-            const SizedBox(height: AppTheme.spacingL),
-
-            // 自定义实现（高级）
-            _buildSectionTitle('自定义实现（高级）'),
-            _buildImplementationSection(),
-            const SizedBox(height: AppTheme.spacingXXL),
-
-            // 预览
-            _buildSectionTitle('预览'),
-            _buildPreviewSection(),
+          title: Text(_isEditMode ? '编辑技能' : '创建技能'),
+          actions: [
+            TextButton.icon(
+              onPressed: _isLoading ? null : _saveSkill,
+              icon: const Icon(Icons.save),
+              label: const Text('保存'),
+            ),
           ],
+        ),
+        body: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.all(AppTheme.spacingM),
+            children: [
+              // 技能类型选择
+              _buildSectionTitle('技能类型'),
+              _buildTypeSelector(),
+              const SizedBox(height: AppTheme.spacingL),
+
+              // 基本信息
+              _buildSectionTitle('基本信息'),
+              _buildBasicInfoSection(),
+              const SizedBox(height: AppTheme.spacingL),
+
+              // 技能提示词
+              _buildSectionTitle('技能提示词'),
+              _buildPromptSection(),
+              const SizedBox(height: AppTheme.spacingL),
+
+              // 自定义实现（高级）
+              _buildSectionTitle('自定义实现（高级）'),
+              _buildImplementationSection(),
+              const SizedBox(height: AppTheme.spacingXXL),
+
+              // 预览
+              _buildSectionTitle('预览'),
+              _buildPreviewSection(),
+            ],
+          ),
         ),
       ),
     );
@@ -127,9 +147,9 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
       padding: const EdgeInsets.only(bottom: AppTheme.spacingS),
       child: Text(
         title,
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -164,8 +184,8 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
                   ? '专家技能：AI 扮演特定角色，提供专业建议和指导'
                   : '工具技能：执行特定任务，需要自定义实现代码',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
+                color: Theme.of(context).colorScheme.outline,
+              ),
             ),
           ],
         ),
@@ -182,10 +202,7 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
             // Emoji 选择
             Row(
               children: [
-                Text(
-                  '图标',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+                Text('图标', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(width: AppTheme.spacingM),
                 Expanded(
                   child: Wrap(
@@ -202,17 +219,24 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
                           decoration: BoxDecoration(
                             color: isSelected
                                 ? Theme.of(context).colorScheme.primaryContainer
-                                : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                : Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(8),
                             border: isSelected
                                 ? Border.all(
-                                    color: Theme.of(context).colorScheme.primary,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
                                     width: 2,
                                   )
                                 : null,
                           ),
                           child: Center(
-                            child: Text(emoji, style: const TextStyle(fontSize: 20)),
+                            child: Text(
+                              emoji,
+                              style: const TextStyle(fontSize: 20),
+                            ),
                           ),
                         ),
                       );
@@ -260,16 +284,14 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
 
             // 领域选择
             DropdownButtonFormField<String>(
+              // ignore: deprecated_member_use
               value: _selectedDomain,
               decoration: const InputDecoration(
                 labelText: '所属领域',
                 prefixIcon: Icon(Icons.category_outlined),
               ),
               items: _domains.map((domain) {
-                return DropdownMenuItem(
-                  value: domain,
-                  child: Text(domain),
-                );
+                return DropdownMenuItem(value: domain, child: Text(domain));
               }).toList(),
               onChanged: (value) {
                 if (value != null) {
@@ -290,16 +312,13 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '系统提示词',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text('系统提示词', style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: AppTheme.spacingS),
             Text(
               '定义 AI 在使用此技能时的角色和行为方式。支持使用 {{变量}} 格式定义变量。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
+                color: Theme.of(context).colorScheme.outline,
+              ),
             ),
             const SizedBox(height: AppTheme.spacingM),
             TextFormField(
@@ -314,11 +333,14 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
 请用专业但易懂的方式回答用户的问题。''',
                 border: const OutlineInputBorder(),
                 filled: true,
-                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                fillColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest,
               ),
               maxLines: 10,
               validator: (value) {
-                if (_selectedType == 'expert' && (value == null || value.isEmpty)) {
+                if (_selectedType == 'expert' &&
+                    (value == null || value.isEmpty)) {
                   return '专家技能必须提供系统提示词';
                 }
                 return null;
@@ -355,8 +377,8 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
             Text(
               '对于工具技能，可以提供 Dart 代码来实现具体功能。代码需要包含 execute 方法。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
+                color: Theme.of(context).colorScheme.outline,
+              ),
             ),
             const SizedBox(height: AppTheme.spacingM),
             Container(
@@ -377,7 +399,9 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
                       vertical: AppTheme.spacingS,
                     ),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
                       borderRadius: const BorderRadius.vertical(
                         top: Radius.circular(AppTheme.radiusS),
                       ),
@@ -436,20 +460,25 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _nameController.text.isEmpty ? '技能名称' : _nameController.text,
+                        _nameController.text.isEmpty
+                            ? '技能名称'
+                            : _nameController.text,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       Text(
                         _selectedDomain,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.outline,
-                            ),
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: _selectedType == 'expert'
                         ? Colors.purple.withValues(alpha: 0.1)
@@ -460,7 +489,9 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
                     _selectedType == 'expert' ? '👨‍💼 专家' : '🧰 工具',
                     style: TextStyle(
                       fontSize: 12,
-                      color: _selectedType == 'expert' ? Colors.purple : Colors.green,
+                      color: _selectedType == 'expert'
+                          ? Colors.purple
+                          : Colors.green,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -473,8 +504,8 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
                   ? '技能描述将显示在这里...'
                   : _descriptionController.text,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -492,9 +523,7 @@ class _SkillEditorPageState extends ConsumerState<SkillEditorPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildTemplateButton(
-                '基础模板',
-                '''// Skill 实现模板
+              _buildTemplateButton('基础模板', '''// Skill 实现模板
 // 参数通过 params Map 传入
 // 返回 SkillResult
 
@@ -514,12 +543,9 @@ Future<SkillResult> execute(Map<String, dynamic> params) async {
   } catch (e) {
     return SkillResult.error('执行失败: \$e');
   }
-}''',
-              ),
+}'''),
               const SizedBox(height: 8),
-              _buildTemplateButton(
-                '网络请求模板',
-                '''// 网络请求模板
+              _buildTemplateButton('网络请求模板', '''// 网络请求模板
 import 'package:dio/dio.dart';
 
 Future<SkillResult> execute(Map<String, dynamic> params) async {
@@ -540,12 +566,9 @@ Future<SkillResult> execute(Map<String, dynamic> params) async {
   } catch (e) {
     return SkillResult.error('网络错误: \$e');
   }
-}''',
-              ),
+}'''),
               const SizedBox(height: 8),
-              _buildTemplateButton(
-                '数据处理模板',
-                '''// 数据处理模板
+              _buildTemplateButton('数据处理模板', '''// 数据处理模板
 Future<SkillResult> execute(Map<String, dynamic> params) async {
   try {
     final data = params['data'];
@@ -571,8 +594,7 @@ Future<SkillResult> execute(Map<String, dynamic> params) async {
   } catch (e) {
     return SkillResult.error('处理失败: \$e');
   }
-}''',
-              ),
+}'''),
             ],
           ),
         ),
@@ -611,7 +633,7 @@ Future<SkillResult> execute(Map<String, dynamic> params) async {
     try {
       // TODO: 保存到数据库
       // 创建 CustomSkill 对象并保存
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

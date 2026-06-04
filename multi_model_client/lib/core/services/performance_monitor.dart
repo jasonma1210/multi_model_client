@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:collection';
-import 'package:flutter/foundation.dart';
 
 /// 性能指标类型
 enum MetricType {

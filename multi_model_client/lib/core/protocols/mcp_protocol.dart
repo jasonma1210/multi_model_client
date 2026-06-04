@@ -1,5 +1,6 @@
 /// MCP (Model Context Protocol) 协议定义
 /// 参考: https://modelcontextprotocol.io/
+library;
 
 /// MCP版本
 const mcpVersion = '2024-11-05';

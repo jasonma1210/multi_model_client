@@ -43,73 +43,83 @@ class _SkillMarketPageState extends ConsumerState<SkillMarketPage>
         : ref.read(skillSearchProvider(_searchQuery));
 
     // 分类
-    final toolSkills = filteredSkills.where((s) => s.type == SkillType.native).toList();
-    final expertSkills = filteredSkills.where((s) => s.type == SkillType.expert).toList();
+    final toolSkills = filteredSkills
+        .where((s) => s.type == SkillType.native)
+        .toList();
+    final expertSkills = filteredSkills
+        .where((s) => s.type == SkillType.expert)
+        .toList();
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/settings'),
-        ),
-        title: Text('技能中心', style: theme.textTheme.headlineMedium),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => context.go('/settings/skills/editor'),
-            tooltip: '创建自定义技能',
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.go('/settings'),
           ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: [
-            Tab(text: '🧰 工具技能 (${toolSkills.length})'),
-            Tab(text: '👨‍💼 专家技能 (${expertSkills.length})'),
+          title: Text('技能中心', style: theme.textTheme.headlineMedium),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => context.go('/settings/skills/editor'),
+              tooltip: '创建自定义技能',
+            ),
+          ],
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: [
+              Tab(text: '🧰 工具技能 (${toolSkills.length})'),
+              Tab(text: '👨‍💼 专家技能 (${expertSkills.length})'),
+            ],
+          ),
+        ),
+        body: Column(
+          children: [
+            // 搜索栏
+            Padding(
+              padding: const EdgeInsets.all(AppTheme.spacingM),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: '搜索技能或专家...',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      : null,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                  ),
+                ),
+                onChanged: (value) => setState(() => _searchQuery = value),
+              ),
+            ),
+            // 技能列表
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildToolSkillsTab(toolSkills, theme),
+                  _buildExpertSkillsTab(expertSkills, theme),
+                ],
+              ),
+            ),
           ],
         ),
-      ),
-      body: Column(
-        children: [
-          // 搜索栏
-          Padding(
-            padding: const EdgeInsets.all(AppTheme.spacingM),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: '搜索技能或专家...',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : null,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                ),
-              ),
-              onChanged: (value) => setState(() => _searchQuery = value),
-            ),
-          ),
-          // 技能列表
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildToolSkillsTab(toolSkills, theme),
-                _buildExpertSkillsTab(expertSkills, theme),
-              ],
-            ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.go('/settings/skills/editor'),
-        icon: const Icon(Icons.add),
-        label: const Text('创建技能'),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => context.go('/settings/skills/editor'),
+          icon: const Icon(Icons.add),
+          label: const Text('创建技能'),
+        ),
       ),
     );
   }
@@ -169,7 +179,10 @@ class _SkillMarketPageState extends ConsumerState<SkillMarketPage>
         children: [
           Icon(icon, size: 64, color: Colors.grey[400]),
           const SizedBox(height: AppTheme.spacingM),
-          Text(message, style: TextStyle(color: Colors.grey[600], fontSize: 16)),
+          Text(
+            message,
+            style: TextStyle(color: Colors.grey[600], fontSize: 16),
+          ),
         ],
       ),
     );
@@ -180,17 +193,17 @@ class _SkillMarketPageState extends ConsumerState<SkillMarketPage>
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.radiusL)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppTheme.radiusL),
+        ),
       ),
       builder: (context) => DraggableScrollableSheet(
         initialChildSize: 0.7,
         minChildSize: 0.3,
         maxChildSize: 0.95,
         expand: false,
-        builder: (context, scrollController) => _SkillDetailSheet(
-          skill: skill,
-          scrollController: scrollController,
-        ),
+        builder: (context, scrollController) =>
+            _SkillDetailSheet(skill: skill, scrollController: scrollController),
       ),
     );
   }
@@ -202,7 +215,11 @@ class _ToolSkillCard extends StatelessWidget {
   final ThemeData theme;
   final VoidCallback onTap;
 
-  const _ToolSkillCard({required this.skill, required this.theme, required this.onTap});
+  const _ToolSkillCard({
+    required this.skill,
+    required this.theme,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -233,11 +250,18 @@ class _ToolSkillCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(skill.name, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                    Text(
+                      skill.name,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       skill.description,
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -254,10 +278,14 @@ class _ToolSkillCard extends StatelessWidget {
 
   IconData _getIconData(String? iconName) {
     switch (iconName) {
-      case 'calculate': return Icons.calculate;
-      case 'schedule': return Icons.schedule;
-      case 'search': return Icons.search;
-      default: return Icons.extension;
+      case 'calculate':
+        return Icons.calculate;
+      case 'schedule':
+        return Icons.schedule;
+      case 'search':
+        return Icons.search;
+      default:
+        return Icons.extension;
     }
   }
 }
@@ -294,11 +322,15 @@ class _ExpertDomainSection extends StatelessWidget {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: experts.map((expert) => _ExpertChip(
-            expert: expert,
-            theme: theme,
-            onTap: () => onExpertTap(expert),
-          )).toList(),
+          children: experts
+              .map(
+                (expert) => _ExpertChip(
+                  expert: expert,
+                  theme: theme,
+                  onTap: () => onExpertTap(expert),
+                ),
+              )
+              .toList(),
         ),
         const Divider(height: 24),
       ],
@@ -312,7 +344,11 @@ class _ExpertChip extends StatelessWidget {
   final ThemeData theme;
   final VoidCallback onTap;
 
-  const _ExpertChip({required this.expert, required this.theme, required this.onTap});
+  const _ExpertChip({
+    required this.expert,
+    required this.theme,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -333,7 +369,9 @@ class _ExpertChip extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               expert.name,
-              style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ],
         ),
@@ -347,7 +385,10 @@ class _SkillDetailSheet extends StatelessWidget {
   final Skill skill;
   final ScrollController scrollController;
 
-  const _SkillDetailSheet({required this.skill, required this.scrollController});
+  const _SkillDetailSheet({
+    required this.skill,
+    required this.scrollController,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -383,7 +424,11 @@ class _SkillDetailSheet extends StatelessWidget {
                   color: theme.colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(Icons.extension, color: theme.colorScheme.onPrimaryContainer, size: 28),
+                child: Icon(
+                  Icons.extension,
+                  color: theme.colorScheme.onPrimaryContainer,
+                  size: 28,
+                ),
               ),
             const SizedBox(width: 16),
             Expanded(
@@ -393,14 +438,23 @@ class _SkillDetailSheet extends StatelessWidget {
                   Text(skill.name, style: theme.textTheme.headlineSmall),
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
-                      color: isExpert ? Colors.purple.withValues(alpha: 0.1) : Colors.green.withValues(alpha: 0.1),
+                      color: isExpert
+                          ? Colors.purple.withValues(alpha: 0.1)
+                          : Colors.green.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       isExpert ? '👨‍💼 专家' : '🧰 工具',
-                      style: TextStyle(fontSize: 12, color: isExpert ? Colors.purple : Colors.green, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isExpert ? Colors.purple : Colors.green,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -410,7 +464,12 @@ class _SkillDetailSheet extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         // 描述
-        Text(skill.description, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        Text(
+          skill.description,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
         // 领域
         if (skill.domain != null) ...[
           const SizedBox(height: 12),
@@ -420,13 +479,23 @@ class _SkillDetailSheet extends StatelessWidget {
               color: theme.colorScheme.secondaryContainer,
               borderRadius: BorderRadius.circular(6),
             ),
-            child: Text('领域: ${skill.domain}', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSecondaryContainer)),
+            child: Text(
+              '领域: ${skill.domain}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+            ),
           ),
         ],
         // 专家提示词预览
         if (isExpert && skill.expertPrompt != null) ...[
           const SizedBox(height: 20),
-          Text('专家能力描述', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+          Text(
+            '专家能力描述',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(12),
@@ -434,39 +503,64 @@ class _SkillDetailSheet extends StatelessWidget {
               color: theme.colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(
-              skill.expertPrompt!,
-              style: theme.textTheme.bodySmall,
-            ),
+            child: Text(skill.expertPrompt!, style: theme.textTheme.bodySmall),
           ),
         ],
         // 工具参数
         if (!isExpert && skill.parameters.isNotEmpty) ...[
           const SizedBox(height: 20),
-          Text('参数说明', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          ...skill.parameters.map((p) => Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              children: [
-                Text('${p.name}', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                Text(' (${p.type.name}${p.required ? ", 必需" : ""}): ', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                Expanded(child: Text(p.description, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
-              ],
+          Text(
+            '参数说明',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
             ),
-          )),
+          ),
+          const SizedBox(height: 8),
+          ...skill.parameters.map(
+            (p) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Text(
+                    p.name,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    ' (${p.type.name}${p.required ? ", 必需" : ""}): ',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      p.description,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
         // 标签
         if (skill.tags != null && skill.tags!.isNotEmpty) ...[
           const SizedBox(height: 16),
           Wrap(
             spacing: 6,
-            children: skill.tags!.map((tag) => Chip(
-              label: Text(tag, style: const TextStyle(fontSize: 11)),
-              padding: EdgeInsets.zero,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-            )).toList(),
+            children: skill.tags!
+                .map(
+                  (tag) => Chip(
+                    label: Text(tag, style: const TextStyle(fontSize: 11)),
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                )
+                .toList(),
           ),
         ],
         const SizedBox(height: 30),

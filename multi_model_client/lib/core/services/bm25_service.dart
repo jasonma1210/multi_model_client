@@ -145,16 +145,16 @@ class BM25Service {
   }
 
   /// 获取排序后的文档列表（按 BM25 分数降序），同时返回分数
-  List<_ScoredDocument> getRankedDocumentsWithScores(String query) {
+  List<ScoredDocument> getRankedDocumentsWithScores(String query) {
     if (documents.isEmpty) return [];
     
     final queryWords = ChineseSegmenterService.extractKeywords(query);
     if (queryWords.isEmpty) {
-      return documents.map((doc) => _ScoredDocument(doc: doc, score: 0)).toList();
+      return documents.map((doc) => ScoredDocument(doc: doc, score: 0)).toList();
     }
 
     // 计算每个文档的分数
-    final scoredDocs = <_ScoredDocument>[];
+    final scoredDocs = <ScoredDocument>[];
     
     for (final doc in documents) {
       final tf = _termFrequencyCache[doc.id] ?? {};
@@ -173,7 +173,7 @@ class BM25Service {
         }
       }
       
-      scoredDocs.add(_ScoredDocument(doc: doc, score: score));
+      scoredDocs.add(ScoredDocument(doc: doc, score: score));
     }
     
     // 按分数降序排序
@@ -236,9 +236,10 @@ class BM25Document {
 }
 
 /// 带分数的文档
-class _ScoredDocument {
+/// 文档评分结果
+class ScoredDocument {
   final BM25Document doc;
   final double score;
 
-  _ScoredDocument({required this.doc, required this.score});
+  ScoredDocument({required this.doc, required this.score});
 }

@@ -1,3 +1,4 @@
+// ignore_for_file: unnecessary_underscores
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -35,45 +36,49 @@ class _PromptTemplatesPageState extends ConsumerState<PromptTemplatesPage> {
     final selectedCategory = ref.watch(selectedCategoryProvider);
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/settings'),
-        ),
-        title: const Text('提示词模板'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _navigateToEditor(context),
-            tooltip: '创建模板',
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.go('/settings'),
           ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Category filter chips
-          _buildCategoryChips(selectedCategory),
-          // Templates list
-          Expanded(
-            child: templatesAsync.when(
-              data: (templates) {
-                if (templates.isEmpty) {
-                  return _buildEmptyState();
-                }
-                return _buildTemplatesList(templates, theme);
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, stack) => Center(
-                child: Text('加载失败: $error'),
+          title: const Text('提示词模板'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => _navigateToEditor(context),
+              tooltip: '创建模板',
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            // Category filter chips
+            _buildCategoryChips(selectedCategory),
+            // Templates list
+            Expanded(
+              child: templatesAsync.when(
+                data: (templates) {
+                  if (templates.isEmpty) {
+                    return _buildEmptyState();
+                  }
+                  return _buildTemplatesList(templates, theme);
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stack) => Center(child: Text('加载失败: $error')),
               ),
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _navigateToEditor(context),
-        child: const Icon(Icons.add),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () => _navigateToEditor(context),
+          child: const Icon(Icons.add),
+        ),
       ),
     );
   }
@@ -120,24 +125,20 @@ class _PromptTemplatesPageState extends ConsumerState<PromptTemplatesPage> {
             color: Theme.of(context).colorScheme.outline,
           ),
           const SizedBox(height: AppTheme.spacingL),
-          Text(
-            '暂无模板',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('暂无模板', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: AppTheme.spacingS),
           Text(
             '点击下方按钮创建第一个提示词模板',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
+              color: Theme.of(context).colorScheme.outline,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTemplatesList(
-      List<PromptTemplate> templates, ThemeData theme) {
+  Widget _buildTemplatesList(List<PromptTemplate> templates, ThemeData theme) {
     return ListView.builder(
       padding: const EdgeInsets.all(AppTheme.spacingM),
       itemCount: templates.length,
@@ -156,11 +157,14 @@ class _PromptTemplatesPageState extends ConsumerState<PromptTemplatesPage> {
     context.push('/settings/prompts/editor', extra: template);
   }
 
-  Future<void> _confirmDelete(BuildContext context, PromptTemplate template) async {
+  Future<void> _confirmDelete(
+    BuildContext context,
+    PromptTemplate template,
+  ) async {
     if (template.isBuiltin) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('内置模板无法删除')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('内置模板无法删除')));
       return;
     }
 
@@ -187,9 +191,9 @@ class _PromptTemplatesPageState extends ConsumerState<PromptTemplatesPage> {
           .read(promptTemplateNotifierProvider.notifier)
           .deleteTemplate(template.id);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('模板已删除')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('模板已删除')));
       }
     }
   }

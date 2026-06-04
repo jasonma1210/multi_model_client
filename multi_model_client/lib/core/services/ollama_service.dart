@@ -16,8 +16,8 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../platform/platform_utils.dart';
 
@@ -27,6 +27,7 @@ class OllamaService {
   // Ollama 服务器地址
   final String baseUrl;
   final Dio _dio;
+  static const String _tag = 'OllamaService';
 
   OllamaService({
     String? baseUrl,
@@ -48,7 +49,7 @@ class OllamaService {
       }
       return [];
     } catch (e) {
-      print('Failed to list models: $e');
+      debugPrint('[$_tag] 获取模型列表失败: $e');
       return [];
     }
   }
@@ -80,16 +81,16 @@ class OllamaService {
           'messages': [
             {'role': 'user', 'content': prompt}
           ],
-          if (system != null) 'system': system,
-          if (images != null) 'images': images,
-          if (seed != null) 'seed': seed,
+          'system': ?system,
+          'images': ?images,
+          'seed': ?seed,
           if (options != null && options.isNotEmpty) 'options': options,
-          if (numCtx != null) 'num_ctx': numCtx,
-          if (numKeep != null) 'num_keep': numKeep,
-          if (numPredict != null) 'num_predict': numPredict,
-          if (temperature != null) 'temperature': temperature,
-          if (topP != null) 'top_p': topP,
-          if (topK != null) 'top_k': topK,
+          'num_ctx': ?numCtx,
+          'num_keep': ?numKeep,
+          'num_predict': ?numPredict,
+          'temperature': ?temperature,
+          'top_p': ?topP,
+          'top_k': ?topK,
           'stream': false,
         },
       );
@@ -125,15 +126,15 @@ class OllamaService {
           'messages': [
             {'role': 'user', 'content': prompt}
           ],
-          if (system != null) 'system': system,
-          if (images != null) 'images': images,
-          if (seed != null) 'seed': seed,
+          'system': ?system,
+          'images': ?images,
+          'seed': ?seed,
           if (options != null && options.isNotEmpty) 'options': options,
-          if (numCtx != null) 'num_ctx': numCtx,
-          if (numPredict != null) 'num_predict': numPredict,
-          if (temperature != null) 'temperature': temperature,
-          if (topP != null) 'top_p': topP,
-          if (topK != null) 'top_k': topK,
+          'num_ctx': ?numCtx,
+          'num_predict': ?numPredict,
+          'temperature': ?temperature,
+          'top_p': ?topP,
+          'top_k': ?topK,
           'stream': true,
         },
         options: Options(responseType: ResponseType.stream),
@@ -188,13 +189,13 @@ class OllamaService {
         data: {
           'model': model,
           'messages': messages.map((m) => m.toJson()).toList(),
-          if (system != null) 'system': system,
-          if (seed != null) 'seed': seed,
-          if (numCtx != null) 'num_ctx': numCtx,
-          if (numPredict != null) 'num_predict': numPredict,
-          if (temperature != null) 'temperature': temperature,
-          if (topP != null) 'top_p': topP,
-          if (topK != null) 'top_k': topK,
+          'system': ?system,
+          'seed': ?seed,
+          'num_ctx': ?numCtx,
+          'num_predict': ?numPredict,
+          'temperature': ?temperature,
+          'top_p': ?topP,
+          'top_k': ?topK,
           'stream': false,
         },
       );
@@ -226,13 +227,13 @@ class OllamaService {
         data: {
           'model': model,
           'messages': messages.map((m) => m.toJson()).toList(),
-          if (system != null) 'system': system,
-          if (seed != null) 'seed': seed,
-          if (numCtx != null) 'num_ctx': numCtx,
-          if (numPredict != null) 'num_predict': numPredict,
-          if (temperature != null) 'temperature': temperature,
-          if (topP != null) 'top_p': topP,
-          if (topK != null) 'top_k': topK,
+          'system': ?system,
+          'seed': ?seed,
+          'num_ctx': ?numCtx,
+          'num_predict': ?numPredict,
+          'temperature': ?temperature,
+          'top_p': ?topP,
+          'top_k': ?topK,
           'stream': true,
         },
         options: Options(responseType: ResponseType.stream),
@@ -263,7 +264,7 @@ class OllamaService {
                 return;
               }
             } catch (e) {
-              // Skip invalid JSON
+              debugPrint('[ollama_service] Error: $e');
             }
           }
         }
@@ -296,7 +297,7 @@ class OllamaService {
       }
       return null;
     } catch (e) {
-      print('Failed to get model info: $e');
+      debugPrint('[$_tag] 获取模型信息失败: $e');
       return null;
     }
   }
@@ -331,7 +332,7 @@ class OllamaService {
                 }
               }
             } catch (e) {
-              // Skip invalid JSON
+              debugPrint('[ollama_service] Error: $e');
             }
           }
         }

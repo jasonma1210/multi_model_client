@@ -1,3 +1,4 @@
+// ignore_for_file: unnecessary_underscores, use_build_context_synchronously
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -7,13 +8,20 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/storage/database_connection.dart';
+import '../../../../core/services/memory_palace_service.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../../../l10n/app_localizations.dart';
+import '../../../../generated/app_localizations.dart';
+
+/// 记忆宫殿服务 Provider（用于清理共享/全局记忆）
+final memoryPalaceServiceProvider = Provider<MemoryPalaceService>((ref) {
+  return MemoryPalaceService();
+});
 
 // 记忆设置 Provider
-final memorySettingsProvider = StateNotifierProvider<MemorySettingsNotifier, MemorySettings>((ref) {
-  return MemorySettingsNotifier();
-});
+final memorySettingsProvider =
+    StateNotifierProvider<MemorySettingsNotifier, MemorySettings>((ref) {
+      return MemorySettingsNotifier();
+    });
 
 class MemorySettings {
   final int maxMemories;
@@ -24,10 +32,7 @@ class MemorySettings {
     this.similarityThreshold = 0.7,
   });
 
-  MemorySettings copyWith({
-    int? maxMemories,
-    double? similarityThreshold,
-  }) {
+  MemorySettings copyWith({int? maxMemories, double? similarityThreshold}) {
     return MemorySettings(
       maxMemories: maxMemories ?? this.maxMemories,
       similarityThreshold: similarityThreshold ?? this.similarityThreshold,
@@ -72,31 +77,36 @@ class MemorySettingsNotifier extends StateNotifier<MemorySettings> {
 final memoryStatsProvider = FutureProvider<MemoryStats>((ref) async {
   final db = database;
   final memoryCount = await db.getMemoryCount();
-  
+  final messageCount = await db.getMessageCount();
+
   // 计算数据库文件大小
-  final dbFolder = await Directory.systemTemp.parent.createTemp();
-  final dbFile = File('${dbFolder.path}/multi_model_client.db');
   int dbSize = 0;
   try {
     final appDocDir = await getApplicationDocumentsDirectory();
-    final realDbFile = File('${appDocDir.path}/multi_model_client.db');
-    if (await realDbFile.exists()) {
-      dbSize = await realDbFile.length();
+    final dbPath = '${appDocDir.path}/multi_model_client.db';
+    final dbFile = File(dbPath);
+    if (await dbFile.exists()) {
+      dbSize = await dbFile.length();
     }
-  } catch (_) {}
-  
+  } catch (_) {
+    // ignore: non-critical error
+  }
+
   return MemoryStats(
     memoryCount: memoryCount,
+    messageCount: messageCount,
     storageBytes: dbSize,
   );
 });
 
 class MemoryStats {
   final int memoryCount;
+  final int messageCount;
   final int storageBytes;
 
   MemoryStats({
     required this.memoryCount,
+    required this.messageCount,
     required this.storageBytes,
   });
 
@@ -128,93 +138,142 @@ class _MemorySettingsPageState extends ConsumerState<MemorySettingsPage> {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/settings'),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.go('/settings'),
+          ),
+          title: Text(l10n.memorySettings),
         ),
-        title: Text(l10n.memorySettings),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppTheme.spacingM),
-        children: [
-          // 存储设置
-          _SettingsSection(
-            title: '存储设置',
-            children: [
-              ListTile(
-                title: const Text('最大记忆数量'),
-                subtitle: Text('当前: ${settings.maxMemories} 条'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _showMaxMemoriesDialog(context, ref, settings.maxMemories),
-              ),
-              ListTile(
-                title: const Text('相似度阈值'),
-                subtitle: Text('当前: ${(settings.similarityThreshold * 100).toInt()}%'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _showSimilarityThresholdDialog(context, ref, settings.similarityThreshold),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: AppTheme.spacingM),
-
-          // 数据管理
-          _SettingsSection(
-            title: '数据管理',
-            children: [
-              ListTile(
-                leading: Icon(Icons.delete_outline, color: theme.colorScheme.error),
-                title: Text('清除所有记忆', style: TextStyle(color: theme.colorScheme.error)),
-                subtitle: const Text('删除所有会话的聊天内容和记忆数据，不可恢复'),
-                onTap: () => _showClearMemoryDialog(context, ref),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: AppTheme.spacingM),
-
-          // 统计信息
-          _SettingsSection(
-            title: '统计信息',
-            children: [
-              ListTile(
-                title: const Text('当前记忆数量'),
-                trailing: statsAsync.when(
-                  data: (stats) => Text('${stats.memoryCount} 条'),
-                  loading: () => const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+        body: ListView(
+          padding: const EdgeInsets.all(AppTheme.spacingM),
+          children: [
+            // 存储设置
+            _SettingsSection(
+              title: '存储设置',
+              children: [
+                ListTile(
+                  title: const Text('最大记忆数量'),
+                  subtitle: Text('当前: ${settings.maxMemories} 条'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showMaxMemoriesDialog(
+                    context,
+                    ref,
+                    settings.maxMemories,
                   ),
-                  error: (_, __) => const Text('-'),
                 ),
-              ),
-              ListTile(
-                title: const Text('占用存储空间'),
-                trailing: statsAsync.when(
-                  data: (stats) => Text(stats.storageFormatted),
-                  loading: () => const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                ListTile(
+                  title: const Text('相似度阈值'),
+                  subtitle: Text(
+                    '当前: ${(settings.similarityThreshold * 100).toInt()}%',
                   ),
-                  error: (_, __) => const Text('-'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showSimilarityThresholdDialog(
+                    context,
+                    ref,
+                    settings.similarityThreshold,
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
 
-          const SizedBox(height: AppTheme.spacingXXL),
-        ],
+            const SizedBox(height: AppTheme.spacingM),
+
+            // 数据管理
+            _SettingsSection(
+              title: '数据管理',
+              children: [
+                ListTile(
+                  leading: Icon(
+                    Icons.cleaning_services_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  title: const Text('清理共享/全局记忆'),
+                  subtitle: const Text(
+                      '仅删除 isGlobal=true 的共享记忆（脏数据清理），不影响当前会话的记忆'),
+                  onTap: () => _showClearGlobalMemoriesDialog(context, ref),
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.delete_outline,
+                    color: theme.colorScheme.error,
+                  ),
+                  title: Text(
+                    '清除所有记忆',
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
+                  subtitle: const Text('删除所有会话的聊天内容和记忆数据，不可恢复'),
+                  onTap: () => _showClearMemoryDialog(context, ref),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: AppTheme.spacingM),
+
+            // 统计信息
+            _SettingsSection(
+              title: '统计信息',
+              children: [
+                ListTile(
+                  title: const Text('总会话消息数'),
+                  subtitle: const Text('用户提问 + AI 回复'),
+                  trailing: statsAsync.when(
+                    data: (stats) => Text('${stats.messageCount} 条'),
+                    loading: () => const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    error: (_, __) => const Text('-'),
+                  ),
+                ),
+                ListTile(
+                  title: const Text('当前记忆数量'),
+                  trailing: statsAsync.when(
+                    data: (stats) => Text('${stats.memoryCount} 条'),
+                    loading: () => const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    error: (_, __) => const Text('-'),
+                  ),
+                ),
+                ListTile(
+                  title: const Text('占用存储空间'),
+                  trailing: statsAsync.when(
+                    data: (stats) => Text(stats.storageFormatted),
+                    loading: () => const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    error: (_, __) => const Text('-'),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: AppTheme.spacingXXL),
+          ],
+        ),
       ),
     );
   }
 
-  void _showMaxMemoriesDialog(BuildContext context, WidgetRef ref, int currentValue) {
+  void _showMaxMemoriesDialog(
+    BuildContext context,
+    WidgetRef ref,
+    int currentValue,
+  ) {
     int selectedValue = currentValue;
-    
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -249,7 +308,9 @@ class _MemorySettingsPageState extends ConsumerState<MemorySettingsPage> {
           ),
           FilledButton(
             onPressed: () {
-              ref.read(memorySettingsProvider.notifier).setMaxMemories(selectedValue);
+              ref
+                  .read(memorySettingsProvider.notifier)
+                  .setMaxMemories(selectedValue);
               Navigator.pop(ctx);
             },
             child: const Text('确定'),
@@ -259,9 +320,13 @@ class _MemorySettingsPageState extends ConsumerState<MemorySettingsPage> {
     );
   }
 
-  void _showSimilarityThresholdDialog(BuildContext context, WidgetRef ref, double currentValue) {
+  void _showSimilarityThresholdDialog(
+    BuildContext context,
+    WidgetRef ref,
+    double currentValue,
+  ) {
     double selectedValue = currentValue;
-    
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -296,7 +361,9 @@ class _MemorySettingsPageState extends ConsumerState<MemorySettingsPage> {
           ),
           FilledButton(
             onPressed: () {
-              ref.read(memorySettingsProvider.notifier).setSimilarityThreshold(selectedValue);
+              ref
+                  .read(memorySettingsProvider.notifier)
+                  .setSimilarityThreshold(selectedValue);
               Navigator.pop(ctx);
             },
             child: const Text('确定'),
@@ -312,15 +379,53 @@ class _MemorySettingsPageState extends ConsumerState<MemorySettingsPage> {
       barrierDismissible: false,
       builder: (ctx) => _ClearMemoryDialog(
         onConfirm: () async {
-          await ref.read(memorySettingsProvider.notifier).clearAllMemoriesAndMessages();
+          await ref
+              .read(memorySettingsProvider.notifier)
+              .clearAllMemoriesAndMessages();
           // 刷新统计信息
           ref.invalidate(memoryStatsProvider);
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('已清除所有记忆和聊天记录')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('已清除所有记忆和聊天记录')));
           }
         },
+      ),
+    );
+  }
+
+  /// 【修复 V72】清理"共享/全局"记忆（isGlobal=true 的脏数据）
+  ///
+  /// 一次轻量级确认，不带 5 秒倒计时（删除仅限 isGlobal 字段为 true 的少量行）
+  void _showClearGlobalMemoriesDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清理共享/全局记忆'),
+        content: const Text(
+          '此操作将删除所有 isGlobal=true 的共享记忆（属于脏数据），'
+          '不影响任何会话的会话级记忆。是否继续？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final deleted =
+                  await ref.read(memoryPalaceServiceProvider).clearGlobalMemories();
+              ref.invalidate(memoryStatsProvider);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('已清理 $deleted 条共享记忆')),
+                );
+              }
+            },
+            child: const Text('确认清理'),
+          ),
+        ],
       ),
     );
   }
@@ -370,9 +475,9 @@ class _ClearMemoryDialogState extends State<_ClearMemoryDialog> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('清除失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('清除失败: $e')));
         Navigator.pop(context);
       }
     }
@@ -395,20 +500,14 @@ class _ClearMemoryDialogState extends State<_ClearMemoryDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '此操作将删除：',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
+          Text('此操作将删除：', style: TextStyle(fontWeight: FontWeight.bold)),
           SizedBox(height: 8),
           Text('• 所有会话的聊天记录'),
           Text('• 所有记忆数据'),
           SizedBox(height: 16),
           Text(
             '⚠️ 此操作不可恢复！',
-            style: TextStyle(
-              color: Colors.red,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -419,7 +518,9 @@ class _ClearMemoryDialogState extends State<_ClearMemoryDialog> {
         ),
         FilledButton(
           style: FilledButton.styleFrom(
-            backgroundColor: canConfirm ? theme.colorScheme.error : theme.colorScheme.error.withOpacity(0.5),
+            backgroundColor: canConfirm
+                ? theme.colorScheme.error
+                : theme.colorScheme.error.withValues(alpha: 0.5),
           ),
           onPressed: canConfirm ? _handleConfirm : null,
           child: _isDeleting
@@ -443,10 +544,7 @@ class _SettingsSection extends StatelessWidget {
   final String title;
   final List<Widget> children;
 
-  const _SettingsSection({
-    required this.title,
-    required this.children,
-  });
+  const _SettingsSection({required this.title, required this.children});
 
   @override
   Widget build(BuildContext context) {
@@ -470,9 +568,7 @@ class _SettingsSection extends StatelessWidget {
         ),
         Card(
           margin: EdgeInsets.zero,
-          child: Column(
-            children: children,
-          ),
+          child: Column(children: children),
         ),
       ],
     );

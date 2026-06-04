@@ -65,7 +65,7 @@ class _SkillDetailPageState extends ConsumerState<SkillDetailPage> {
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withOpacity(0.1),
+                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(AppTheme.radiusM),
                 ),
                 child: Icon(
@@ -109,7 +109,7 @@ class _SkillDetailPageState extends ConsumerState<SkillDetailPage> {
                   .map((tag) => Chip(
                         label: Text(tag),
                         backgroundColor:
-                            theme.colorScheme.primary.withOpacity(0.1),
+                            theme.colorScheme.primary.withValues(alpha: 0.1),
                         side: BorderSide.none,
                       ))
                   .toList(),
@@ -274,8 +274,8 @@ class _SkillDetailPageState extends ConsumerState<SkillDetailPage> {
                     ),
                     decoration: BoxDecoration(
                       color: param.required
-                          ? Colors.red.withOpacity(0.1)
-                          : Colors.green.withOpacity(0.1),
+                          ? Colors.red.withValues(alpha: 0.1)
+                          : Colors.green.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -376,8 +376,8 @@ class _SkillDetailPageState extends ConsumerState<SkillDetailPage> {
                     padding: const EdgeInsets.all(AppTheme.spacingM),
                     decoration: BoxDecoration(
                       color: _lastResult!.success
-                          ? Colors.green.withOpacity(0.1)
-                          : Colors.red.withOpacity(0.1),
+                          ? Colors.green.withValues(alpha: 0.1)
+                          : Colors.red.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(AppTheme.radiusS),
                     ),
                     child: Column(
@@ -447,8 +447,6 @@ class _SkillDetailPageState extends ConsumerState<SkillDetailPage> {
   }
 
   Widget _buildParamInput(SkillParameter param) {
-    final theme = Theme.of(context);
-
     switch (param.type) {
       case SkillParameterType.boolean:
         return SwitchListTile(
@@ -509,7 +507,6 @@ class _SkillDetailPageState extends ConsumerState<SkillDetailPage> {
         );
 
       case SkillParameterType.string:
-      default:
         if (param.enumValues != null) {
           return DropdownButtonFormField<dynamic>(
             decoration: InputDecoration(
@@ -517,6 +514,7 @@ class _SkillDetailPageState extends ConsumerState<SkillDetailPage> {
               helperText: param.description,
               border: const OutlineInputBorder(),
             ),
+            // ignore: deprecated_member_use
             value: _paramValues[param.name] ?? param.defaultValue,
             items: param.enumValues!
                 .map((value) => DropdownMenuItem(

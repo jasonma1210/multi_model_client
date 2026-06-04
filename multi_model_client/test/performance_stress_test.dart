@@ -1,6 +1,5 @@
+// ignore_for_file: avoid_print
 import 'dart:async';
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 
 /// 性能压力测试套件
 class PerformanceStressTest {
@@ -15,9 +14,9 @@ class PerformanceStressTest {
 
   /// 运行所有性能测试
   Future<Map<String, dynamic>> runAllTests() async {
-    debugPrint('🚀 开始性能压力测试...');
-    debugPrint('测试时长: ${testDuration.inMinutes}分钟');
-    debugPrint('并发用户数: $concurrentUsers');
+    print('🚀 开始性能压力测试...');
+    print('测试时长: ${testDuration.inMinutes}分钟');
+    print('并发用户数: $concurrentUsers');
 
     try {
       // 1. API响应性能测试
@@ -41,14 +40,14 @@ class PerformanceStressTest {
       // 生成报告
       return generateReport();
     } catch (e) {
-      debugPrint('❌ 测试执行失败: $e');
+      print('❌ 测试执行失败: $e');
       rethrow;
     }
   }
 
   /// API响应性能测试
   Future<void> testAPIPerformance() async {
-    debugPrint('\n📊 测试1: API响应性能');
+    print('\n📊 测试1: API响应性能');
 
     final testResults = <String, dynamic>{
       'openai': await _testOpenAIResponse(),
@@ -57,8 +56,8 @@ class PerformanceStressTest {
 
     results['api_performance'] = testResults;
 
-    debugPrint('  OpenAI平均响应: ${testResults['openai']['avg_latency_ms']}ms');
-    debugPrint('  Anthropic平均响应: ${testResults['anthropic']['avg_latency_ms']}ms');
+    print('  OpenAI平均响应: ${testResults['openai']['avg_latency_ms']}ms');
+    print('  Anthropic平均响应: ${testResults['anthropic']['avg_latency_ms']}ms');
   }
 
   Future<Map<String, dynamic>> _testOpenAIResponse() async {
@@ -120,7 +119,7 @@ class PerformanceStressTest {
 
   /// 模型推理性能测试
   Future<void> testModelInferencePerformance() async {
-    debugPrint('\n📊 测试2: 模型推理性能');
+    print('\n📊 测试2: 模型推理性能');
 
     final testResults = <String, dynamic>{
       'local_model': await _testLocalModelInference(),
@@ -129,8 +128,8 @@ class PerformanceStressTest {
 
     results['model_inference'] = testResults;
 
-    debugPrint('  本地模型TPS: ${testResults['local_model']['tokens_per_second']}');
-    debugPrint('  流式推理延迟: ${testResults['streaming']['first_token_latency_ms']}ms');
+    print('  本地模型TPS: ${testResults['local_model']['tokens_per_second']}');
+    print('  流式推理延迟: ${testResults['streaming']['first_token_latency_ms']}ms');
   }
 
   Future<Map<String, dynamic>> _testLocalModelInference() async {
@@ -180,7 +179,7 @@ class PerformanceStressTest {
 
   /// 内存压力测试
   Future<void> testMemoryPressure() async {
-    debugPrint('\n📊 测试3: 内存压力');
+    print('\n📊 测试3: 内存压力');
 
     final memorySnapshots = <Map<String, dynamic>>[];
     final testCount = 100;
@@ -211,12 +210,12 @@ class PerformanceStressTest {
       'memory_leak_detected': false,
     };
 
-    debugPrint('  峰值内存: ${peakMemory}MB');
+    print('  峰值内存: ${peakMemory}MB');
   }
 
   /// 数据库性能测试
   Future<void> testDatabasePerformance() async {
-    debugPrint('\n📊 测试4: 数据库性能');
+    print('\n📊 测试4: 数据库性能');
 
     final insertResults = await _testDatabaseInserts();
     final queryResults = await _testDatabaseQueries();
@@ -226,8 +225,8 @@ class PerformanceStressTest {
       'query': queryResults,
     };
 
-    debugPrint('  插入速度: ${insertResults['ops_per_second']} ops/s');
-    debugPrint('  查询速度: ${queryResults['ops_per_second']} ops/s');
+    print('  插入速度: ${insertResults['ops_per_second']} ops/s');
+    print('  查询速度: ${queryResults['ops_per_second']} ops/s');
   }
 
   Future<Map<String, dynamic>> _testDatabaseInserts() async {
@@ -280,7 +279,7 @@ class PerformanceStressTest {
 
   /// 并发用户测试
   Future<void> testConcurrentUsers() async {
-    debugPrint('\n📊 测试5: 并发用户（$concurrentUsers个）');
+    print('\n📊 测试5: 并发用户（$concurrentUsers个）');
 
     final userResults = <Future<Map<String, dynamic>>>[];
 
@@ -308,8 +307,8 @@ class PerformanceStressTest {
           .reduce((a, b) => a + b),
     };
 
-    debugPrint('  平均响应时间: ${avgResponseTime.toInt()}ms');
-    debugPrint('  成功率: ${(successRate * 100).toStringAsFixed(1)}%');
+    print('  平均响应时间: ${avgResponseTime.toInt()}ms');
+    print('  成功率: ${(successRate * 100).toStringAsFixed(1)}%');
   }
 
   Future<Map<String, dynamic>> _simulateUserSession(int userId) async {
@@ -343,7 +342,7 @@ class PerformanceStressTest {
 
   /// 长时间稳定性测试
   Future<void> testLongRunningStability() async {
-    debugPrint('\n📊 测试6: 长时间稳定性（${testDuration.inMinutes}分钟）');
+    print('\n📊 测试6: 长时间稳定性（${testDuration.inMinutes}分钟）');
 
     final memoryUsage = <double>[];
     final responseTimes = <int>[];
@@ -386,13 +385,13 @@ class PerformanceStressTest {
       'stability_score': iteration > 0 ? (iteration - errorCount) / iteration : 0,
     };
 
-    debugPrint('  稳定性评分: ${results['long_running']['stability_score']}');
-    debugPrint('  错误次数: $errorCount');
+    print('  稳定性评分: ${results['long_running']['stability_score']}');
+    print('  错误次数: $errorCount');
   }
 
   /// 生成测试报告
   Map<String, dynamic> generateReport() {
-    debugPrint('\n📄 生成测试报告...');
+    print('\n📄 生成测试报告...');
 
     final report = {
       'test_info': {
@@ -520,8 +519,8 @@ class PerformanceTestConfig {
 
 /// 性能测试运行器
 void main() async {
-  debugPrint('🧪 Multi-Model Client 性能压力测试');
-  debugPrint('=' * 50);
+  print('🧪 Multi-Model Client 性能压力测试');
+  print('=' * 50);
 
   final config = PerformanceTestConfig.quick();
   final test = PerformanceStressTest(
@@ -532,9 +531,9 @@ void main() async {
   try {
     final report = await test.runAllTests();
 
-    debugPrint('\n' + '=' * 50);
-    debugPrint('✅ 测试完成！');
-    debugPrint('\n📊 测试摘要:');
+    print('\n${'=' * 50}');
+    print('✅ 测试完成！');
+    print('\n📊 测试摘要:');
     final summary = report['summary'] as Map<String, dynamic>;
 
     for (final entry in summary.entries) {
@@ -542,15 +541,15 @@ void main() async {
       final testResult = entry.value as Map<String, dynamic>;
       final status = testResult['status'];
 
-      debugPrint('  $testName: $status');
+      print('  $testName: $status');
     }
 
-    debugPrint('\n💡 优化建议:');
+    print('\n💡 优化建议:');
     final recommendations = report['recommendations'] as List<String>;
     for (final recommendation in recommendations) {
-      debugPrint('  - $recommendation');
+      print('  - $recommendation');
     }
   } catch (e) {
-    debugPrint('❌ 测试失败: $e');
+    print('❌ 测试失败: $e');
   }
 }

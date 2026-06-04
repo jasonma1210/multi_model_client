@@ -1,3 +1,4 @@
+// ignore_for_file: non_constant_identifier_names
 /// Whisper.cpp FFI 绑定 - LLM Studio 语音识别引擎
 /// 
 /// 功能：
@@ -21,12 +22,12 @@ class WhisperCppBindings {
   WhisperCppBindings(this._lib);
 
   // Initialize context
-  Pointer<Void> whisper_init_from_file(Pointer<Utf8> model_path) {
+  Pointer<Void> whisper_init_from_file(Pointer<Utf8> modelPath) {
     return _lib.lookupFunction<
         Pointer<Void> Function(Pointer<Utf8>),
         Pointer<Void> Function(Pointer<Utf8>)>(
       'whisper_init_from_file',
-    )(model_path);
+    )(modelPath);
   }
 
   // Free context
@@ -43,13 +44,13 @@ class WhisperCppBindings {
     Pointer<Void> ctx,
     Pointer<Void> params,
     Pointer<Float> samples,
-    int n_samples,
+    int nSamples,
   ) {
     return _lib.lookupFunction<
         Int32 Function(Pointer<Void>, Pointer<Void>, Pointer<Float>, Int32),
         int Function(Pointer<Void>, Pointer<Void>, Pointer<Float>, int)>(
       'whisper_full',
-    )(ctx, params, samples, n_samples);
+    )(ctx, params, samples, nSamples);
   }
 
   // Get number of segments
@@ -62,30 +63,30 @@ class WhisperCppBindings {
   }
 
   // Get segment text
-  Pointer<Utf8> whisper_full_get_segment_text(Pointer<Void> ctx, int i_segment) {
+  Pointer<Utf8> whisper_full_get_segment_text(Pointer<Void> ctx, int iSegment) {
     return _lib.lookupFunction<
         Pointer<Utf8> Function(Pointer<Void>, Int32),
         Pointer<Utf8> Function(Pointer<Void>, int)>(
       'whisper_full_get_segment_text',
-    )(ctx, i_segment);
+    )(ctx, iSegment);
   }
 
   // Get segment start time
-  int whisper_full_get_segment_t0(Pointer<Void> ctx, int i_segment) {
+  int whisper_full_get_segment_t0(Pointer<Void> ctx, int iSegment) {
     return _lib.lookupFunction<
         Int64 Function(Pointer<Void>, Int32),
         int Function(Pointer<Void>, int)>(
       'whisper_full_get_segment_t0',
-    )(ctx, i_segment);
+    )(ctx, iSegment);
   }
 
   // Get segment end time
-  int whisper_full_get_segment_t1(Pointer<Void> ctx, int i_segment) {
+  int whisper_full_get_segment_t1(Pointer<Void> ctx, int iSegment) {
     return _lib.lookupFunction<
         Int64 Function(Pointer<Void>, Int32),
         int Function(Pointer<Void>, int)>(
       'whisper_full_get_segment_t1',
-    )(ctx, i_segment);
+    )(ctx, iSegment);
   }
 }
 

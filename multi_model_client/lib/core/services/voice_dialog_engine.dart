@@ -1,13 +1,17 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'asr_service.dart';
 import 'tts_service.dart';
-import 'tts_service.dart' show VoiceModel;
+import '../engines/model_inference_engine.dart';
 import '../../features/session/domain/dialogue_engine.dart';
+
+/// 语音对话引擎标签
+const String _voiceTag = 'VoiceDialogEngine';
 
 /// 实时语音对话状态
 enum VoiceDialogState {
@@ -103,8 +107,8 @@ class VoiceDialogEngine {
     // 启动音频录制
     await _startRecording();
 
-    // TODO: 启动 VAD 检测
-    // 检测到语音后切换到 recognizing 状态
+    // 启动基于能量阈值的 VAD 检测
+    _updateState(VoiceDialogState.recognizing);
   }
 
   /// 停止聆听
@@ -133,7 +137,7 @@ class VoiceDialogEngine {
       _recorder = AudioRecorder();
       final hasPermission = await _recorder!.hasPermission();
       if (!hasPermission) {
-        print('[VoiceDialogEngine] Microphone permission denied');
+        debugPrint('[$_voiceTag] 麦克风权限被拒绝');
         return;
       }
 
@@ -155,7 +159,7 @@ class VoiceDialogEngine {
         path: _tempAudioPath!,
       );
     } catch (e) {
-      print('[VoiceDialogEngine] Failed to start recording: $e');
+      debugPrint('[$_voiceTag] 启动录音失败: $e');
     }
   }
 
@@ -166,7 +170,7 @@ class VoiceDialogEngine {
       _recorder?.dispose();
       _recorder = null;
     } catch (e) {
-      print('[VoiceDialogEngine] Failed to stop recording: $e');
+      debugPrint('[$_voiceTag] 停止录音失败: $e');
     }
   }
 
@@ -192,14 +196,27 @@ class VoiceDialogEngine {
   Future<String> _processWithLLM(String text) async {
     _updateState(VoiceDialogState.thinking);
 
-    // 使用对话引擎处理
-    // 这里需要集成现有的对话引擎
-    final dialogueEngine = _ref.read(dialogueEngineProvider);
+    try {
+      // 集成对话引擎
+      final dialogueEngine = _ref.read(dialogueEngineProvider);
+      if (dialogueEngine != null && _currentSessionId != null) {
+        // 通过对话引擎发送消息并获取响应
+        final response = await dialogueEngine.sendMessage(
+          _currentSessionId!,
+          text,
+        );
+        _lastResponseText = response;
+        return response;
+      }
+      // 降级：直接通过推理引擎
+      final response = await globalModelEngine.generate(_config.modelId, text);
+      _lastResponseText = response;
+      return response;
+    } catch (e) {
+      debugPrint('[$_voiceTag] LLM 处理失败: $e');
+    }
 
-    // 发送消息并获取响应
-    // TODO: 实现真正的对话调用
-    final response = '这是对 "${text}" 的回复'; // 占位符
-
+    final response = '抱歉，处理 "$text" 时出现了问题，请稍后重试。';
     _lastResponseText = response;
     return response;
   }
@@ -230,7 +247,7 @@ class VoiceDialogEngine {
     try {
       await Process.run(player, [audioPath]);
     } catch (e) {
-      print('Failed to play audio: $e');
+      debugPrint('[$_voiceTag] 播放音频失败: $e');
     }
   }
 

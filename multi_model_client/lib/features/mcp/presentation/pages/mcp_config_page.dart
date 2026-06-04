@@ -1,8 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/services/mcp_config_manager.dart';
-import '../../../../core/services/mcp_service_manager.dart';
+import '../../../../core/protocols/mcp_server_manager.dart';
 
 /// MCP 配置管理页面
 /// 提供完整的 MCP 服务配置功能
@@ -13,17 +14,18 @@ class McpConfigPage extends ConsumerStatefulWidget {
   ConsumerState<McpConfigPage> createState() => _McpConfigPageState();
 }
 
-class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTickerProviderStateMixin {
+class _McpConfigPageState extends ConsumerState<McpConfigPage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _searchController = TextEditingController();
   String _searchQuery = '';
-  
+
   // JSON 编辑器相关
   late TextEditingController _jsonController;
   bool _isJsonValid = true;
   String? _jsonError;
   bool _isSaving = false;
-  
+
   // 已配置的服务器
   Map<String, dynamic> _configuredServers = {};
   bool _isLoading = true;
@@ -50,7 +52,9 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
     final configManager = McpConfigManager();
     final content = await configManager.loadConfig();
     setState(() {
-      _jsonController.text = const JsonEncoder.withIndent('  ').convert(content);
+      _jsonController.text = const JsonEncoder.withIndent(
+        '  ',
+      ).convert(content);
       _isJsonValid = true;
       _jsonError = null;
     });
@@ -67,24 +71,27 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('MCP 服务配置'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '配置 MCP', icon: Icon(Icons.settings)),
-            Tab(text: '远程 MCP 服务', icon: Icon(Icons.cloud)),
-          ],
+
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('MCP 服务配置'),
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: '配置 MCP', icon: Icon(Icons.settings)),
+              Tab(text: '远程 MCP 服务', icon: Icon(Icons.cloud)),
+            ],
+          ),
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildConfigMcpTab(theme),
-          _buildRemoteMcpTab(theme),
-        ],
+        body: TabBarView(
+          controller: _tabController,
+          children: [_buildConfigMcpTab(theme), _buildRemoteMcpTab(theme)],
+        ),
       ),
     );
   }
@@ -96,10 +103,14 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
         // JSON 编辑器说明
         Container(
           padding: const EdgeInsets.all(16),
-          color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
+          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
           child: Row(
             children: [
-              Icon(Icons.info_outline, color: theme.colorScheme.primary, size: 20),
+              Icon(
+                Icons.info_outline,
+                color: theme.colorScheme.primary,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -112,7 +123,7 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
             ],
           ),
         ),
-        
+
         // JSON 编辑器
         Expanded(
           child: Padding(
@@ -131,8 +142,8 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
                   child: Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: _isJsonValid 
-                            ? theme.colorScheme.outline 
+                        color: _isJsonValid
+                            ? theme.colorScheme.outline
                             : theme.colorScheme.error,
                       ),
                       borderRadius: BorderRadius.circular(8),
@@ -162,14 +173,18 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
                     ),
                   ),
                 ),
-                
+
                 // JSON 验证提示
                 if (_jsonError != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Row(
                       children: [
-                        Icon(Icons.error_outline, color: theme.colorScheme.error, size: 16),
+                        Icon(
+                          Icons.error_outline,
+                          color: theme.colorScheme.error,
+                          size: 16,
+                        ),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -182,14 +197,14 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
                       ],
                     ),
                   ),
-                
+
                 // 保存按钮
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: _isJsonValid && !_isSaving ? _saveJson : null,
-                    icon: _isSaving 
+                    icon: _isSaving
                         ? const SizedBox(
                             width: 18,
                             height: 18,
@@ -218,7 +233,7 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
       });
       return;
     }
-    
+
     try {
       final parsed = jsonDecode(value);
       if (parsed is! Map) {
@@ -228,7 +243,7 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
         });
         return;
       }
-      
+
       setState(() {
         _isJsonValid = true;
         _jsonError = null;
@@ -236,30 +251,96 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
     } catch (e) {
       setState(() {
         _isJsonValid = false;
-        _jsonError = 'JSON 格式错误: ${e.toString().replaceAll('FormatException:', '')}';
+        _jsonError =
+            'JSON 格式错误: ${e.toString().replaceAll('FormatException:', '')}';
       });
     }
   }
 
   Future<void> _saveJson() async {
     if (!_isJsonValid) return;
-    
+
     setState(() => _isSaving = true);
-    
+
     try {
       final configManager = McpConfigManager();
       final config = jsonDecode(_jsonController.text) as Map<String, dynamic>;
       await configManager.saveConfig(config);
-      
+
       // 刷新已配置的服务器列表
       await _loadConfiguredServers();
+
+      // ★★★ 同步所有服务器到数据库 ★★★
+      final serverManager = McpServerManager();
+      final servers = config['mcpServers'] as Map<String, dynamic>? ?? {};
       
+      for (final entry in servers.entries) {
+        final serverId = entry.key;
+        final serverConfig = entry.value as Map<String, dynamic>;
+        final command = serverConfig['command'] as String? ?? '';
+        
+        List<String> args = [];
+        final argsRaw = serverConfig['args'];
+        if (argsRaw is List) {
+          args = argsRaw.map((e) => e.toString()).toList();
+        }
+        
+        Map<String, String> envMap = {};
+        final envRaw = serverConfig['env'];
+        if (envRaw is Map) {
+          envMap = envRaw.map((k, v) => MapEntry(k.toString(), v.toString()));
+        }
+        
+        try {
+          await serverManager.addOrUpdateServer(
+            serverId: serverId,
+            name: serverConfig['name'] as String? ?? serverId,
+            type: serverConfig['type'] as String? ?? (command.contains('python') ? 'python' : 'stdio'),
+            command: command,
+            args: args,
+            env: envMap,
+            isEnabled: true,
+            isAutoStart: true,
+          );
+          debugPrint('[McpConfig] ✅ DB 同步完成: $serverId');
+        } catch (e) {
+          debugPrint('[McpConfig] ⚠️ DB 同步失败: $serverId - $e');
+        }
+      }
+
+      // 自动测试所有服务器连接
+      final results = <String, bool>{};
+      
+      for (final entry in servers.entries) {
+        final serverId = entry.key;
+        try {
+          debugPrint('[McpConfig] 测试服务器: $serverId');
+          final client = await serverManager.startServer(serverId);
+          results[serverId] = client != null;
+          if (client != null) {
+            debugPrint('[McpConfig] ✅ 服务器可��: $serverId');
+          }
+        } catch (e) {
+          results[serverId] = false;
+          debugPrint('[McpConfig] ❌ 服务器连接失败: $serverId - $e');
+        }
+      }
+      
+      final successCount = results.values.where((v) => v).length;
+      final totalCount = servers.length;
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('配置已保存'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            duration: const Duration(milliseconds: 1500),
+            content: Text(totalCount > 0 
+                ? '配置已保存，$successCount/$totalCount 个服务连接成功'
+                : '配置已保存'),
+            backgroundColor: successCount == totalCount && totalCount > 0
+                ? Colors.green
+                : successCount > 0 
+                    ? Colors.orange 
+                    : Theme.of(context).colorScheme.primary,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -280,79 +361,124 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
 
   /// 第二个选项卡：远程 MCP 服务
   Widget _buildRemoteMcpTab(ThemeData theme) {
-    final filteredServers = _searchQuery.isEmpty
+    final isMobile = Platform.isAndroid || Platform.isIOS;
+    var filteredServers = _searchQuery.isEmpty
         ? FeaturedMcpServers.servers
         : FeaturedMcpServers.search(_searchQuery);
+
+    // ★ 移动端隐藏 npx/node 命令的 MCP 服务（移动端不支持 npx/node/uvx）
+    if (isMobile) {
+      filteredServers = filteredServers.where((s) {
+        final cmd = (s['command'] as String? ?? '').toLowerCase();
+        return cmd != 'npx' && cmd != 'node' && cmd != 'uvx' && cmd != 'python';
+      }).toList();
+    }
 
     return Column(
       children: [
         // 搜索框
         Padding(
           padding: const EdgeInsets.all(16),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: '搜索 MCP 服务...',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() => _searchQuery = '');
-                      },
-                    )
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: '搜索 MCP 服务（支持 mcp.so）...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                  ),
+                  onChanged: (value) => setState(() => _searchQuery = value),
+                  onSubmitted: (value) => _searchRemoteMcp(value),
+                ),
               ),
-              filled: true,
-              fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
-            ),
-            onChanged: (value) => setState(() => _searchQuery = value),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.search),
+                tooltip: '从 mcp.so 搜索',
+                onPressed: () => _searchRemoteMcp(_searchQuery),
+              ),
+            ],
           ),
         ),
-        
+
+        // Mobile warning
+        if (isMobile)
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.phone_android, size: 16, color: Colors.orange.shade700),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('移动端仅支持内置类型服务，npx/node 命令不可用', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+
         // 服务器列表
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : filteredServers.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.search_off,
-                            size: 64,
-                            color: theme.colorScheme.outline,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            '未找到匹配的 MCP 服务',
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              color: theme.colorScheme.outline,
-                            ),
-                          ),
-                        ],
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.search_off,
+                        size: 64,
+                        color: theme.colorScheme.outline,
                       ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: filteredServers.length,
-                      itemBuilder: (context, index) {
-                        final server = filteredServers[index];
-                        final serverId = server['id'] as String;
-                        final isConfigured = _configuredServers.containsKey(serverId);
-                        
-                        return _buildServerCard(
-                          serverId: serverId,
-                          server: server,
-                          theme: theme,
-                          isConfigured: isConfigured,
-                        );
-                      },
-                    ),
+                      const SizedBox(height: 16),
+                      Text(
+                        '未找到匹配的 MCP 服务',
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: filteredServers.length,
+                  itemBuilder: (context, index) {
+                    final server = filteredServers[index];
+                    final serverId = server['id'] as String;
+                    final isConfigured = _configuredServers.containsKey(
+                      serverId,
+                    );
+
+                    return _buildServerCard(
+                      serverId: serverId,
+                      server: server,
+                      theme: theme,
+                      isConfigured: isConfigured,
+                    );
+                  },
+                ),
         ),
       ],
     );
@@ -427,20 +553,24 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
                 _buildActionButton(serverId, server, isConfigured, theme),
               ],
             ),
-            
+
             // 环境变量提示
             if (needsEnv) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.errorContainer.withOpacity(0.3),
+                  color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.vpn_key, size: 14, color: theme.colorScheme.error),
+                    Icon(
+                      Icons.vpn_key,
+                      size: 14,
+                      color: theme.colorScheme.error,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       '需要配置环境变量',
@@ -459,7 +589,12 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
   }
 
   /// 构建添加/移除按钮
-  Widget _buildActionButton(String serverId, Map<String, dynamic> server, bool isConfigured, ThemeData theme) {
+  Widget _buildActionButton(
+    String serverId,
+    Map<String, dynamic> server,
+    bool isConfigured,
+    ThemeData theme,
+  ) {
     if (isConfigured) {
       // 已配置：显示红色移除按钮
       return ElevatedButton.icon(
@@ -486,16 +621,20 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
   }
 
   /// 添加服务器到 mcp.json
-  Future<void> _addServer(String serverId, Map<String, dynamic> server, ThemeData theme) async {
+  Future<void> _addServer(
+    String serverId,
+    Map<String, dynamic> server,
+    ThemeData theme,
+  ) async {
     try {
       final configManager = McpConfigManager();
-      
+
       // 构建服务器配置
       final serverEntry = <String, dynamic>{
         'command': server['command'] ?? 'npx',
         'args': server['args'] ?? <String>[],
       };
-      
+
       // 添加环境变量（空值，用户需要自行配置）
       if (server['env'] != null && (server['env'] as Map).isNotEmpty) {
         final env = <String, String>{};
@@ -504,18 +643,19 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
         }
         serverEntry['env'] = env;
       }
-      
+
       // 如果需要工作目录
-      if (server['workingDirectory'] != null && server['workingDirectory'].toString().isNotEmpty) {
+      if (server['workingDirectory'] != null &&
+          server['workingDirectory'].toString().isNotEmpty) {
         serverEntry['workingDirectory'] = server['workingDirectory'];
       }
-      
+
       await configManager.addServer(serverId, serverEntry);
-      
+
       // 刷新列表和 JSON 编辑器
       await _loadConfiguredServers();
       await _loadJsonContent();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -543,11 +683,11 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
     try {
       final configManager = McpConfigManager();
       await configManager.removeServer(serverId);
-      
+
       // 刷新列表和 JSON 编辑器
       await _loadConfiguredServers();
       await _loadJsonContent();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -587,6 +727,33 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage> with SingleTicker
         return Icons.api;
       default:
         return Icons.extension;
+    }
+  }
+
+  /// 从 mcp.so 搜索远程 MCP 服务
+  Future<void> _searchRemoteMcp(String query) async {
+    if (query.trim().isEmpty) return;
+    
+    try {
+      final results = await FeaturedMcpServers.searchMcpSo(query.trim());
+      
+      if (mounted && results.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('从 mcp.so 找到 ${results.length} 个结果'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('mcp.so 未找到匹配结果'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[McpConfig] mcp.so 搜索失败: $e');
     }
   }
 }

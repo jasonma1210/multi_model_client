@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -14,9 +15,10 @@ class McpServersPage extends ConsumerStatefulWidget {
   ConsumerState<McpServersPage> createState() => _McpServersPageState();
 }
 
-class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTickerProviderStateMixin {
+class _McpServersPageState extends ConsumerState<McpServersPage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  
+
   // 配置 MCP 选项卡
   final _jsonController = TextEditingController();
   final _configManager = McpConfigManager();
@@ -50,15 +52,17 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
     try {
       final config = await _configManager.loadConfig();
       setState(() {
-        _jsonController.text = const JsonEncoder.withIndent('  ').convert(config);
+        _jsonController.text = const JsonEncoder.withIndent(
+          '  ',
+        ).convert(config);
         _isLoadingConfig = false;
       });
       _parseJson();
     } catch (e) {
       setState(() {
-        _jsonController.text = const JsonEncoder.withIndent('  ').convert({
-          'mcpServers': {},
-        });
+        _jsonController.text = const JsonEncoder.withIndent(
+          '  ',
+        ).convert({'mcpServers': {}});
         _isLoadingConfig = false;
       });
       _parseJson();
@@ -110,7 +114,7 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
     setState(() => _isSaving = true);
     try {
       await _configManager.saveConfig(_parsedConfig!);
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -135,22 +139,25 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
     }
   }
 
-  Future<void> _addServer(String serverId, Map<String, dynamic> serverConfig) async {
+  Future<void> _addServer(
+    String serverId,
+    Map<String, dynamic> serverConfig,
+  ) async {
     try {
       final serverEntry = {
         'command': serverConfig['command'] ?? 'npx',
         'args': serverConfig['args'] ?? [],
         'env': serverConfig['env'] ?? {},
       };
-      
-      if (serverConfig['workingDirectory'] != null && 
+
+      if (serverConfig['workingDirectory'] != null &&
           serverConfig['workingDirectory'].toString().isNotEmpty) {
         serverEntry['workingDirectory'] = serverConfig['workingDirectory'];
       }
-      
+
       await _configManager.addServer(serverId, serverEntry);
       await _loadConfiguredServers();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -177,7 +184,7 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
     try {
       await _configManager.removeServer(serverId);
       await _loadConfiguredServers();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -211,31 +218,31 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/settings'),
+
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // 右滑返回上一页，与返回按钮行为一致
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.go('/settings'),
+          ),
+          title: Text('MCP 服务器', style: theme.textTheme.headlineMedium),
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: '配置 MCP', icon: Icon(Icons.settings)),
+              Tab(text: '远程 MCP 服务', icon: Icon(Icons.cloud)),
+            ],
+          ),
         ),
-        title: Text(
-          'MCP 服务器',
-          style: theme.textTheme.headlineMedium,
-        ),
-        bottom: TabBar(
+        body: TabBarView(
           controller: _tabController,
-          tabs: const [
-            Tab(text: '配置 MCP', icon: Icon(Icons.settings)),
-            Tab(text: '远程 MCP 服务', icon: Icon(Icons.cloud)),
-          ],
+          children: [_buildConfigTab(theme), _buildRemoteTab(theme)],
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildConfigTab(theme),
-          _buildRemoteTab(theme),
-        ],
       ),
     );
   }
@@ -260,7 +267,11 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
             ),
             child: Row(
               children: [
-                Icon(Icons.info_outline, color: theme.colorScheme.primary, size: 20),
+                Icon(
+                  Icons.info_outline,
+                  color: theme.colorScheme.primary,
+                  size: 20,
+                ),
                 const SizedBox(width: AppTheme.spacingS),
                 Expanded(
                   child: Text(
@@ -272,14 +283,16 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
             ),
           ),
           const SizedBox(height: AppTheme.spacingM),
-          
+
           // JSON 编辑器
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                border: Border.all(color: _jsonError != null 
-                    ? theme.colorScheme.error 
-                    : theme.dividerColor),
+                border: Border.all(
+                  color: _jsonError != null
+                      ? theme.colorScheme.error
+                      : theme.dividerColor,
+                ),
                 borderRadius: BorderRadius.circular(AppTheme.radiusM),
               ),
               child: TextField(
@@ -287,12 +300,10 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                ),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
                 decoration: InputDecoration(
-                  hintText: '{\n  "mcpServers": {\n    "server-name": {\n      "command": "npx",\n      "args": ["-y", "@package/name"]\n    }\n  }\n}',
+                  hintText:
+                      '{\n  "mcpServers": {\n    "server-name": {\n      "command": "npx",\n      "args": ["-y", "@package/name"]\n    }\n  }\n}',
                   border: InputBorder.none,
                   contentPadding: const EdgeInsets.all(AppTheme.spacingM),
                   errorText: _jsonError,
@@ -302,7 +313,7 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
             ),
           ),
           const SizedBox(height: AppTheme.spacingM),
-          
+
           // 解析结果
           if (_parsedConfig != null)
             Container(
@@ -311,29 +322,40 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
                 vertical: AppTheme.spacingS,
               ),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+                color: theme.colorScheme.primaryContainer.withValues(
+                  alpha: 0.3,
+                ),
                 borderRadius: BorderRadius.circular(AppTheme.radiusS),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.check_circle, color: theme.colorScheme.primary, size: 16),
+                  Icon(
+                    Icons.check_circle,
+                    color: theme.colorScheme.primary,
+                    size: 16,
+                  ),
                   const SizedBox(width: AppTheme.spacingXS),
                   Text(
                     '${_parsedConfig!['mcpServers'].keys.length} 个服务器已配置',
-                    style: TextStyle(color: theme.colorScheme.primary, fontSize: 12),
+                    style: TextStyle(
+                      color: theme.colorScheme.primary,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
             ),
           const SizedBox(height: AppTheme.spacingM),
-          
+
           // 保存按钮
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _parsedConfig != null && !_isSaving ? _saveConfig : null,
-              icon: _isSaving 
+              onPressed: _parsedConfig != null && !_isSaving
+                  ? _saveConfig
+                  : null,
+              icon: _isSaving
                   ? const SizedBox(
                       width: 16,
                       height: 16,
@@ -350,9 +372,18 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
 
   /// 远程 MCP 服务选项卡 - Featured 服务器
   Widget _buildRemoteTab(ThemeData theme) {
-    final filteredServers = _searchQuery.isEmpty
+    final isMobile = Platform.isAndroid || Platform.isIOS;
+    var filteredServers = _searchQuery.isEmpty
         ? FeaturedMcpServers.servers
         : FeaturedMcpServers.search(_searchQuery);
+
+    // ★ 移动端隐藏 npx/node 命令的 MCP 服务（移动端不支持 npx/node/uvx）
+    if (isMobile) {
+      filteredServers = filteredServers.where((s) {
+        final cmd = (s['command'] as String? ?? '').toLowerCase();
+        return cmd != 'npx' && cmd != 'node' && cmd != 'uvx' && cmd != 'python';
+      }).toList();
+    }
 
     if (_isLoadingRemote) {
       return const Center(child: CircularProgressIndicator());
@@ -385,7 +416,7 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
             onChanged: (value) => setState(() => _searchQuery = value),
           ),
         ),
-        
+
         // 服务列表
         Expanded(
           child: ListView.builder(
@@ -394,9 +425,15 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
             itemBuilder: (context, index) {
               final server = filteredServers[index];
               final serverId = server['id'] as String;
-              final isConfigured = _configuredServers?.containsKey(serverId) ?? false;
+              final isConfigured =
+                  _configuredServers?.containsKey(serverId) ?? false;
 
-              return _buildRemoteServerCard(server, serverId, isConfigured, theme);
+              return _buildRemoteServerCard(
+                server,
+                serverId,
+                isConfigured,
+                theme,
+              );
             },
           ),
         ),
@@ -464,20 +501,26 @@ class _McpServersPageState extends ConsumerState<McpServersPage> with SingleTick
                 _buildActionButton(serverId, server, isConfigured, theme),
               ],
             ),
-            
+
             // 环境变量提示
             if (needsEnv) ...[
               const SizedBox(height: AppTheme.spacingS),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
+                  color: theme.colorScheme.errorContainer.withValues(
+                    alpha: 0.3,
+                  ),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.vpn_key, size: 14, color: theme.colorScheme.error),
+                    Icon(
+                      Icons.vpn_key,
+                      size: 14,
+                      color: theme.colorScheme.error,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       '需要配置环境变量',

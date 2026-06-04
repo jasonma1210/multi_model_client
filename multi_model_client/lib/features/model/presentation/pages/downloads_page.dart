@@ -3,11 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:dio/dio.dart';
 
 import '../../../../core/services/model_download/download_task_manager.dart';
-import '../../../../core/services/hardware_compatibility_checker.dart';
 import '../../../../core/storage/database.dart';
+import '../../../../core/providers/model_provider.dart';
 
 /// 下载管理页面
 /// 显示所有下载任务、进度，支持断点续传
@@ -20,15 +19,13 @@ class DownloadsPage extends ConsumerStatefulWidget {
 
 class _DownloadsPageState extends ConsumerState<DownloadsPage> {
   late final DownloadTaskManager _taskManager;
-  final HardwareCompatibilityChecker _hardwareChecker = HardwareCompatibilityChecker();
-  
   List<DownloadTask> _tasks = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _taskManager = DownloadTaskManager(Dio());
+    _taskManager = DownloadTaskManager.instance;
     _loadTasks();
     // 监听进度通知器，实时更新 UI
     _taskManager.progressNotifier.addListener(_onProgressUpdate);
@@ -55,7 +52,7 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
         setState(() => _tasks = tasks);
       }
     } catch (e) {
-      // 静默处理刷新错误
+      debugPrint('[downloads_page] Error: $e');
     }
   }
 
@@ -213,28 +210,31 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                _buildStatusIcon(status),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(task.modelId, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 2),
-                      Text(task.source, style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                    ],
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: status == 'completed' ? () => _navigateToModelLoad(task) : null,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _buildStatusIcon(status),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(task.modelId, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 2),
+                        Text(task.source, style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                      ],
+                    ),
                   ),
-                ),
-                _buildActionButtons(theme, task, status),
-              ],
-            ),
+                  _buildActionButtons(theme, task, status),
+                ],
+              ),
             if (status == 'downloading' || status == 'paused') ...[
               const SizedBox(height: 12),
               _buildProgressBar(theme, displayDownloaded, displayTotal, progress),
@@ -258,8 +258,78 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
             ],
           ],
         ),
+        ),
       ),
     );
+  }
+
+  /// 跳转到模型加载页面
+  ///
+  /// 关键修复：下载任务的 modelId 是 HuggingFace 模型 ID（可能含 `/`），
+  /// 而 modelProvider 中的模型使用 UUID 作为 ID。
+  /// 需要通过 savePath（文件路径）匹配到正确的模型 ID，再用 UUID 路由。
+  void _navigateToModelLoad(DownloadTask task) {
+    final modelState = ref.read(modelProvider);
+    
+    // 通过 savePath 匹配 modelProvider 中的模型
+    // 下载任务的 savePath 格式: /path/to/dir/filename.gguf
+    // 模型的 filePath 也是同一个文件路径
+    final matchedModel = modelState.models.where((m) {
+      if (m.filePath == null) return false;
+      // 精确匹配
+      if (m.filePath == task.savePath) return true;
+      // 兼容：task.savePath 可能是目录下的文件，model.filePath 也可能是
+      if (task.savePath.isNotEmpty && m.filePath!.contains(task.savePath)) return true;
+      return false;
+    }).firstOrNull;
+    
+    if (matchedModel != null) {
+      // 找到已注册模型，使用 UUID 路由
+      debugPrint('[downloads_page] 找到匹配模型: ${matchedModel.id} (${matchedModel.displayName})');
+      context.go('/model/${matchedModel.id}/load');
+    } else {
+      // 模型未在 provider 中注册（下载完成时用户不在市场页）
+      // 尝试从文件路径推断并注册模型
+      debugPrint('[downloads_page] 模型未在 provider 中注册，尝试自动注册: ${task.modelId}');
+      _autoRegisterAndNavigate(task);
+    }
+  }
+
+  /// 自动注册已下载模型并跳转
+  Future<void> _autoRegisterAndNavigate(DownloadTask task) async {
+    try {
+      final filePath = task.savePath;
+      if (filePath.isEmpty || !await File(filePath).exists()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('模型文件未找到，请重新下载'), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+
+      // 从 task.modelId 提取显示名（去掉路径前缀）
+      final displayName = task.modelId.split('/').last;
+      
+      // 自动注册到 modelProvider
+      final addedModel = await ref.read(modelProvider.notifier).addLocalModel(
+        displayName: displayName,
+        filePath: filePath,
+      );
+
+      debugPrint('[downloads_page] 自动注册模型成功: ${addedModel.id}');
+      
+      if (mounted) {
+        context.go('/model/${addedModel.id}/load');
+      }
+    } catch (e) {
+      debugPrint('[downloads_page] 自动注册模型失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('加载模型失败: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Widget _buildStatusIcon(String status) {
@@ -318,7 +388,18 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
           ],
         );
       case 'completed':
-        return IconButton(icon: const Icon(Icons.folder_open), onPressed: () => _openFolder(task.savePath), tooltip: '打开文件夹');
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.play_circle_outline, color: Colors.green),
+              onPressed: () => _navigateToModelLoad(task),
+              tooltip: '加载模型',
+            ),
+            IconButton(icon: const Icon(Icons.folder_open), onPressed: () => _openFolder(task.savePath), tooltip: '打开文件夹'),
+            IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => _deleteTask(task.id), tooltip: '删除'),
+          ],
+        );
       case 'error':
         return Row(
           mainAxisSize: MainAxisSize.min,
@@ -328,7 +409,13 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
           ],
         );
       default:
-        return IconButton(icon: const Icon(Icons.close), onPressed: () => _cancelTask(task.id), tooltip: '取消');
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(icon: const Icon(Icons.close), onPressed: () => _cancelTask(task.id), tooltip: '取消'),
+            IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => _deleteTask(task.id), tooltip: '删除'),
+          ],
+        );
     }
   }
 
@@ -379,6 +466,81 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
     }
   }
 
+  Future<void> _deleteTask(String taskId) async {
+    // 获取任务信息
+    final tasks = await _taskManager.getAllTasks();
+    final task = tasks.where((t) => t.id == taskId).firstOrNull;
+
+    // 确认对话框（级联删除提示）
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除模型'),
+        content: Text(
+          '确定要删除「${task?.modelId ?? "此模型"}」吗？\n\n'
+          '删除后以下内容将全部清除，此操作不可恢复：\n'
+          '• 模型文件\n'
+          '• 模型列表中的记录\n'
+          '• 所有基于该模型的会话及聊天记录',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // 1. 删除已下载的文件
+      if (task != null && task.savePath.isNotEmpty) {
+        final file = File(task.savePath);
+        if (await file.exists()) {
+          await file.delete();
+        }
+        // 也删除目录中的其他文件（如 mmproj 等）
+        final dirPath = task.savePath.substring(0, task.savePath.lastIndexOf('/'));
+        final dir = Directory(dirPath);
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+        }
+      }
+
+      // 2. 级联删除：模型列表中的记录 + 所有关联会话
+      if (task != null && task.modelId.isNotEmpty) {
+        final modelId = task.modelId;
+        try {
+          await ref.read(modelProvider.notifier).deleteModel(modelId);
+          debugPrint('[DownloadsPage] 已级联删除模型及关联会话: $modelId');
+        } catch (e) {
+          debugPrint('[DownloadsPage] 级联删除模型失败: $e');
+        }
+      }
+
+      // 3. 删除数据库中的下载任务记录
+      await _taskManager.deleteTask(taskId);
+      await _loadTasks();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('模型及关联会话已删除'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      debugPrint('删除任务失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _retryTask(String taskId) async {
     try {
       await _taskManager.retryTask(taskId);
@@ -389,38 +551,6 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('重试失败: $e'), backgroundColor: Colors.red),
         );
-      }
-    }
-  }
-
-  Future<void> _deleteTask(String taskId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除任务'),
-        content: const Text('确定要删除这个下载任务吗？这将同时删除已下载的文件。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      try {
-        await _taskManager.deleteTask(taskId);
-        await _loadTasks();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('任务已删除')),
-          );
-        }
-      } catch (e) {
-        debugPrint('删除任务失败: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
-          );
-        }
       }
     }
   }

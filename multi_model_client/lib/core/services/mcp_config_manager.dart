@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 /// MCP 配置文件管理器
@@ -261,5 +262,41 @@ class FeaturedMcpServers {
       return (s['name'] as String).toLowerCase().contains(lowerQuery) ||
              (s['description'] as String).toLowerCase().contains(lowerQuery);
     }).toList();
+  }
+
+  /// 从 mcp.so 搜索远程 MCP 服务
+  /// API: https://mcp.so/api/servers?q=query
+  static Future<List<Map<String, dynamic>>> searchMcpSo(String query) async {
+    try {
+      final url = Uri.https('mcp.so', '/api/servers', {'q': query, 'limit': '20'});
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is Map && data['servers'] is List) {
+          return (data['servers'] as List).map((s) => {
+            'id': s['slug'] ?? s['id'] ?? '',
+            'name': s['name'] ?? '',
+            'description': s['description'] ?? '',
+            'category': s['category'] ?? 'remote',
+            'command': s['command'] ?? 'npx',
+            'args': s['args'] is List ? s['args'] : [],
+            'env': s['env'] is Map ? s['env'] : {},
+            'source': 'mcp.so',
+            'url': 'https://mcp.so/server/${s['slug'] ?? ''}',
+          }).toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('[FeaturedMcpServers] mcp.so 搜索失败: $e');
+    }
+    return [];
+  }
+
+  /// 判断服务是否在移动端可用
+  static bool isMobileCompatible(Map<String, dynamic> server) {
+    final command = (server['command'] as String?) ?? '';
+    return !(command == 'npx' || command == 'npx.cmd' || 
+             command == 'node' || command == 'node.exe' ||
+             command == 'uvx' || command == 'uvx.exe');
   }
 }

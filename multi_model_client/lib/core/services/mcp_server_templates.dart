@@ -1,11 +1,9 @@
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
 /// MCP 服务器预设模板
 /// 提供常用 MCP 服务器的配置模板
 class McpServerTemplates {
-  static const _uuid = Uuid();
 
   /// 获取所有可用的服务器模板
   static List<McpServerTemplate> getAllTemplates() {

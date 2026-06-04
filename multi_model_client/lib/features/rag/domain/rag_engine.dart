@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -16,9 +17,10 @@ class RAGEngine implements IRAGEngine {
   final ModelInferenceEngine? _modelEngine;
   final EmbeddingService _embeddingService;
   final _uuid = const Uuid();
+  static const String _tag = 'RAGEngine';
 
   // 是否启用语义搜索
-  bool _semanticSearchEnabled = true;
+  final bool _semanticSearchEnabled = true;
 
   RAGEngine({
     ModelInferenceEngine? modelEngine,
@@ -78,7 +80,7 @@ class RAGEngine implements IRAGEngine {
                 .go();
           }
         } catch (e) {
-          // Skip chunks with invalid metadata
+          debugPrint('[rag_engine] Error: $e');
         }
       }
     }
@@ -98,12 +100,14 @@ class RAGEngine implements IRAGEngine {
       rankedChunks = _keywordSearch(chunks, query);
     }
 
-    // Return top K results
+    // Return top K results with computed relevance scores
     return rankedChunks.take(topK).map((chunk) {
       final metadataJson = chunk.metadata ?? '{}';
+      // 计算实际相关性分数
+      final score = _computeRelevanceScore(chunk, query);
       return RetrievalResult(
         content: chunk.content,
-        score: 1.0, // TODO: Add actual relevance scores
+        score: score,
         metadata: jsonDecode(metadataJson) as Map<String, dynamic>,
       );
     }).toList();
@@ -126,7 +130,7 @@ class RAGEngine implements IRAGEngine {
             final chunkEmbedding = _embeddingService.jsonToVector(chunk.vector!);
             score = _embeddingService.cosineSimilarity(queryEmbedding, chunkEmbedding);
           } catch (e) {
-            print('Failed to parse vector for chunk ${chunk.id}: $e');
+            debugPrint('[$_tag] 解析分块向量失败 ${chunk.id}: $e');
           }
         }
 
@@ -143,9 +147,48 @@ class RAGEngine implements IRAGEngine {
 
       return scoredChunks.map((entry) => entry.key).toList();
     } catch (e) {
-      print('Semantic search failed: $e');
+      debugPrint('[$_tag] 语义搜索失败: $e');
       return _keywordSearch(chunks, query);
     }
+  }
+
+  /// 计算文档分块与查询的相关性分数
+  double _computeRelevanceScore(DocumentChunk chunk, String query) {
+    final content = chunk.content.toLowerCase();
+    final queryLower = query.toLowerCase();
+    final queryWords = queryLower.split(RegExp(r'\s+'));
+
+    // 基础关键词匹配分数
+    int matchCount = 0;
+    int totalWords = 0;
+    for (final word in queryWords) {
+      if (word.length > 1) {
+        totalWords++;
+        if (content.contains(word)) {
+          matchCount++;
+        }
+      }
+    }
+    if (totalWords == 0) return 0.5;
+
+    final keywordScore = matchCount / totalWords;
+
+    // 短文本精确匹配加分
+    final exactMatchBonus = content.contains(queryLower) ? 0.3 : 0.0;
+
+    // 语义向量分数（如果有预计算的向量）
+    double semanticScore = 0.0;
+    if (chunk.vector != null && chunk.vector!.isNotEmpty) {
+      try {
+        final chunkEmbedding = _embeddingService.jsonToVector(chunk.vector!);
+        final queryEmbedding = _embeddingService.generatePseudoEmbedding(query);
+        semanticScore = _embeddingService.cosineSimilarity(queryEmbedding, chunkEmbedding);
+      } catch (_) {}
+    }
+
+    // 综合分数：关键词 40% + 精确匹配 20% + 语义 40%
+    final combined = keywordScore * 0.4 + exactMatchBonus * 0.2 + semanticScore * 0.4;
+    return combined.clamp(0.0, 1.0);
   }
 
   // 计算关键词匹配分数
@@ -196,7 +239,7 @@ class RAGEngine implements IRAGEngine {
       try {
         embedding = await _embeddingService.generateEmbedding(chunk);
       } catch (e) {
-        print('Failed to generate embedding for chunk: $e');
+        debugPrint('[$_tag] 生成分块嵌入失败: $e');
         embedding = _embeddingService.generatePseudoEmbedding(chunk);
       }
 
@@ -238,7 +281,7 @@ class RAGEngine implements IRAGEngine {
     final chunks = await _db.getKnowledgeBaseChunks(kbId);
 
     if (_modelEngine == null) {
-      print('No model engine available for embedding generation');
+      debugPrint('[$_tag] 无模型引擎可用于嵌入生成');
       return;
     }
 
@@ -253,9 +296,9 @@ class RAGEngine implements IRAGEngine {
         // 2. Use a local embedding model (sentence-transformers, etc.)
         // 3. Store the embedding vector in the database
 
-        print('Embedding generation not yet implemented for chunk ${chunk.id}');
+        debugPrint('[$_tag] 嵌入生成未实现 for chunk ${chunk.id}');
       } catch (e) {
-        print('Failed to generate embedding for chunk ${chunk.id}: $e');
+        debugPrint('[$_tag] 生成分块嵌入失败 ${chunk.id}: $e');
       }
     }
   }

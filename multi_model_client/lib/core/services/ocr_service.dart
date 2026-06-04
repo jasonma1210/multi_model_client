@@ -1,94 +1,70 @@
-/// OCR 服务 - LLM Studio 文字识别模块
+/// OCR 服务 - LLM Studio 文字识别模块（跨平台版本）
 ///
 /// 功能：
-/// - Tesseract OCR 引擎集成
+/// - 使用 textify 纯 Dart OCR 库
+/// - 支持：Android、iOS、macOS、Windows、Linux、Web
+/// - 100% 离线，无需网络
 /// - PDF 页面渲染为图片后 OCR 识别
 /// - 图片 OCR 识别
-/// - 多语言支持（中英文）
 ///
 /// @author Jianma
-/// @version 1.0.0
+/// @version 4.1.0 (修复 dart:ui Image 类型兼容)
 library;
 
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_tesseract_ocr/flutter_tesseract_ocr.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+import 'package:textify/textify.dart';
 
-/// OCR 识别服务
+/// OCR 识别服务（跨平台版本 - 使用 textify）
 class OcrService {
   /// 单例
   static final OcrService _instance = OcrService._internal();
   factory OcrService() => _instance;
   OcrService._internal();
 
+  /// Textify OCR 实例
+  Textify? _textify;
+
   /// 是否已初始化
   bool _initialized = false;
 
-  /// Tesseract 语言数据文件列表
-  static const List<String> _languageFiles = [
-    'chi_sim.traineddata',  // 简体中文
-    'eng.traineddata',      // 英文
-  ];
-
   /// 初始化 OCR 引擎
-  /// 将 assets 中的语言数据复制到本地沙盒目录
   Future<void> initialize() async {
     if (_initialized) return;
 
     try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final tessDataDir = Directory(p.join(appDir.path, 'tessdata'));
-      
-      if (!await tessDataDir.exists()) {
-        await tessDataDir.create(recursive: true);
-        debugPrint('[OcrService] 创建 tessdata 目录: ${tessDataDir.path}');
-      }
-
-      // 检查语言数据是否已存在，不存在则从 assets 复制
-      for (final langFile in _languageFiles) {
-        final destFile = File(p.join(tessDataDir.path, langFile));
-        
-        if (!await destFile.exists()) {
-          try {
-            // 从 assets 读取并复制到沙盒
-            final ByteData assetData = await rootBundle.load('assets/ocr/tessdata/$langFile');
-            final Uint8List bytes = assetData.buffer.asUint8List();
-            await destFile.writeAsBytes(bytes);
-            debugPrint('[OcrService] 已复制语言数据: $langFile (${bytes.length} bytes)');
-          } catch (e) {
-            debugPrint('[OcrService] 复制语言数据失败: $langFile, 错误: $e');
-          }
-        } else {
-          debugPrint('[OcrService] 语言数据已存在: $langFile');
-        }
-      }
-
-      // 验证语言数据是否就绪
-      final chiSimFile = File(p.join(tessDataDir.path, 'chi_sim.traineddata'));
-      final engFile = File(p.join(tessDataDir.path, 'eng.traineddata'));
-
-      if (await chiSimFile.exists() && await engFile.exists()) {
-        debugPrint('[OcrService] Tesseract 语言数据已就绪: ${tessDataDir.path}');
-      } else {
-        debugPrint('[OcrService] 警告: 部分语言数据文件缺失');
-      }
-
+      // 初始化 textify
+      _textify = Textify();
+      await _textify!.init();
+      debugPrint('[OcrService] Textify OCR 已初始化（跨平台）');
       _initialized = true;
     } catch (e) {
       debugPrint('[OcrService] 初始化失败: $e');
     }
   }
 
+  /// 将字节数据转换为 ui.Image
+  Future<ui.Image?> _bytesToUiImage(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frameInfo = await codec.getNextFrame();
+      // 获取 image 后立即释放 codec 资源
+      final image = frameInfo.image;
+      codec.dispose();
+      return image;
+    } catch (e) {
+      debugPrint('[OcrService] 图像转换失败: $e');
+      return null;
+    }
+  }
+
   /// 识别图片中的文字
-  /// 
+  ///
   /// 参数：
   /// - imagePath: 图片文件路径
-  /// - language: 语言代码，默认 chi_sim+eng（中文简体+英文）
-  Future<String> recognizeImage(String imagePath, {String language = 'chi_sim+eng'}) async {
+  /// - language: 语言代码（textify 自动检测）
+  Future<String> recognizeImage(String imagePath, {String language = 'auto'}) async {
     try {
       // 确保已初始化
       await initialize();
@@ -99,18 +75,26 @@ class OcrService {
         throw Exception('图片文件不存在: $imagePath');
       }
 
-      debugPrint('[OcrService] 开始识别图片: $imagePath, 语言: $language');
+      debugPrint('[OcrService] 开始识别图片: $imagePath');
 
-      final result = await FlutterTesseractOcr.extractText(
-        imagePath,
-        language: language,
-        args: {
-          '--psm': '6',  // 假设统一文本块
-          '--oem': '3',  // LSTM + 传统 OCR
-        },
+      // 读取图片文件
+      final bytes = await file.readAsBytes();
+
+      // 转换为 ui.Image
+      final uiImage = await _bytesToUiImage(bytes);
+      if (uiImage == null) {
+        throw Exception('无法解码图片: $imagePath');
+      }
+
+      // 使用 textify 识别 - 使用 dart:ui Image
+      final result = await _textify!.getTextFromImage(
+        image: uiImage,
       );
 
-      debugPrint('[OcrService] OCR 识别完成，结果长度: ${result.length}');
+      // 识别完成后释放 ui.Image GPU 资源
+      uiImage.dispose();
+
+      debugPrint('[OcrService] OCR 识别完成，字符数: ${result.length}');
       return result.trim();
     } catch (e) {
       debugPrint('[OcrService] OCR 识别失败: $e');
@@ -119,27 +103,29 @@ class OcrService {
   }
 
   /// 识别图片字节数据中的文字
-  /// 
+  ///
   /// 参数：
   /// - imageBytes: 图片字节数据
   /// - language: 语言代码
-  Future<String> recognizeBytes(Uint8List imageBytes, {String language = 'chi_sim+eng'}) async {
+  Future<String> recognizeBytes(Uint8List imageBytes, {String language = 'auto'}) async {
     try {
       await initialize();
 
-      // 将字节写入临时文件（Tesseract 需要文件路径）
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File(p.join(tempDir.path, 'ocr_temp_${DateTime.now().millisecondsSinceEpoch}.png'));
-      await tempFile.writeAsBytes(imageBytes);
+      // 转换为 ui.Image
+      final uiImage = await _bytesToUiImage(imageBytes);
+      if (uiImage == null) {
+        throw Exception('无法解码图片数据');
+      }
 
-      final result = await recognizeImage(tempFile.path, language: language);
+      // 使用 textify 识别
+      final result = await _textify!.getTextFromImage(
+        image: uiImage,
+      );
 
-      // 清理临时文件
-      try {
-        await tempFile.delete();
-      } catch (_) {}
+      // 识别完成后释放 ui.Image GPU 资源
+      uiImage.dispose();
 
-      return result;
+      return result.trim();
     } catch (e) {
       debugPrint('[OcrService] 字节 OCR 识别失败: $e');
       return '';
@@ -147,44 +133,34 @@ class OcrService {
   }
 
   /// 识别 PDF 某一页的图片数据
-  /// 
+  ///
   /// 参数：
   /// - pageImageBytes: PDF 页面渲染的图片字节数据
   /// - pageNumber: 页码（用于日志）
   Future<String> recognizePdfPage(Uint8List pageImageBytes, int pageNumber) async {
     debugPrint('[OcrService] 开始 OCR 识别第 $pageNumber 页');
-    
+
     final result = await recognizeBytes(pageImageBytes);
-    
+
     if (result.isEmpty) {
       debugPrint('[OcrService] 第 $pageNumber 页 OCR 无结果（可能是空白页或图片无法识别）');
     } else {
       debugPrint('[OcrService] 第 $pageNumber 页 OCR 识别完成，字符数: ${result.length}');
     }
-    
+
     return result;
   }
 
-  /// 检查 OCR 是否可用（语言数据是否已配置）
+  /// 检查 OCR 是否可用
   Future<bool> isAvailable() async {
-    try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final tessDataDir = Directory(p.join(appDir.path, 'tessdata'));
-      
-      if (!await tessDataDir.exists()) return false;
-      
-      final chiSimFile = File(p.join(tessDataDir.path, 'chi_sim.traineddata'));
-      final engFile = File(p.join(tessDataDir.path, 'eng.traineddata'));
-      
-      return await chiSimFile.exists() && await engFile.exists();
-    } catch (e) {
-      return false;
-    }
+    return _initialized && _textify != null;
   }
 
-  /// 获取语言数据目录路径
-  Future<String> getTessDataPath() async {
-    final appDir = await getApplicationDocumentsDirectory();
-    return p.join(appDir.path, 'tessdata');
+  /// 释放资源
+  void dispose() {
+    _textify?.clear();
+    _textify = null;
+    _initialized = false;
+    debugPrint('[OcrService] 资源已释放');
   }
 }

@@ -25,9 +25,7 @@ class SessionRepository {
       modelId: Value(modelId),
       folderId: Value(folderId),
       systemPrompt: Value(systemPrompt),
-      inferenceParams: Value(inferenceParams != null
-          ? inferenceParams.toString()
-          : null),
+      inferenceParams: Value(inferenceParams?.toString()),
       createdAt: Value(now),
       updatedAt: Value(now),
     );

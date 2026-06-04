@@ -12,9 +12,9 @@ library;
 
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -128,6 +128,7 @@ class EncryptionService {
 class SecurityAuditService {
   final List<SecurityEvent> _events = [];
   static const int _maxEvents = 1000;
+  static const String _tag = 'SecurityAudit';
 
   /// 记录安全事件
   void logEvent(SecurityEvent event) {
@@ -139,7 +140,7 @@ class SecurityAuditService {
     }
 
     // 打印调试信息
-    print('[SecurityAudit] ${event.eventType.name}: ${event.description}');
+    debugPrint('[$_tag] ${event.eventType.name}: ${event.description}');
   }
 
   /// 获取所有事件

@@ -1,9 +1,13 @@
+// ignore_for_file: use_build_context_synchronously
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
 
+import 'package:mj_nexus/generated/app_localizations.dart';
 import '../../../../core/models/model_entry.dart';
 import '../../../../core/providers/model_provider.dart';
 import '../../../../core/engines/model_inference_engine.dart';
@@ -46,11 +50,23 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
   /// llama.cpp 是否可用
   bool _llamaCppAvailable = false;
 
+  /// 参数是否已保存（本地模型需要先保存参数才能加载）
+  bool _paramsSaved = false;
+
+  /// 加载超时 Timer（提升为类成员，dispose 时取消）
+  Timer? _loadTimeoutTimer;
+
+  /// 加载状态 StreamSubscription（提升为类成员，dispose 时取消）
+  StreamSubscription<ModelLoadingState>? _loadStateSub;
+
   /// 是否为远程 Ollama 模型
   bool get _isRemoteOllama {
     final modelState = ref.read(modelProvider);
-    final model = modelState.models.where((m) => m.id == widget.modelId).firstOrNull;
-    return model?.isRemote == true && model?.remoteConfig?.protocol == RemoteProtocol.ollama;
+    final model = modelState.models
+        .where((m) => m.id == widget.modelId)
+        .firstOrNull;
+    return model?.isRemote == true &&
+        model?.remoteConfig?.protocol == RemoteProtocol.ollama;
   }
 
   @override
@@ -67,13 +83,25 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
       final model = models.where((m) => m.id == widget.modelId).firstOrNull;
       if (model != null) {
         if (model.isLocal && model.localParams != null) {
-          setState(() => _params = model.localParams!);
+          setState(() {
+            _params = model.localParams!;
+            // 如果已有保存的参数，标记为已保存状态
+            _paramsSaved = true;
+          });
           // 同步系统提示词到文本控制器
           if (model.localParams!.systemPrompt != null) {
             _systemPromptController.text = model.localParams!.systemPrompt!;
           }
         } else if (model.isRemote && model.remoteConfig != null) {
-          setState(() => _remoteConfig = model.remoteConfig);
+          setState(() {
+            _remoteConfig = model.remoteConfig;
+            // ★★★ 远程模型：从顶级 enableReasoning 字段恢复开关状态 ★★★
+            if (model.enableReasoning != null) {
+              _params = _params.copyWith(
+                enableReasoning: model.enableReasoning!,
+              );
+            }
+          });
           // 同步 Ollama API Key 到文本控制器
           if (model.remoteConfig!.apiKey.isNotEmpty) {
             _ollamaApiKeyController.text = model.remoteConfig!.apiKey;
@@ -90,6 +118,8 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
 
   @override
   void dispose() {
+    _loadTimeoutTimer?.cancel();
+    _loadStateSub?.cancel();
     _tabController.dispose();
     _systemPromptController.dispose();
     _ollamaApiKeyController.dispose();
@@ -100,56 +130,66 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final modelState = ref.watch(modelProvider);
-    final model = modelState.models.where((m) => m.id == widget.modelId).firstOrNull;
+    final model = modelState.models
+        .where((m) => m.id == widget.modelId)
+        .firstOrNull;
 
     if (model == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('模型不存在')),
-        body: const Center(child: Text('找不到指定模型')),
+      return PopScope(
+        canPop: true,
+        onPopInvokedWithResult: (didPop, result) {},
+        child: Scaffold(
+          appBar: AppBar(title: const Text('模型不存在')),
+          body: const Center(child: Text('找不到指定模型')),
+        ),
       );
     }
 
-    return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
-      appBar: AppBar(
-        title: Text(model.displayName),
-        centerTitle: false,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/');
-            }
-          },
-        ),
-        actions: [
-          // 保存参数
-          TextButton.icon(
-            onPressed: _saveParams,
-            icon: const Icon(Icons.save_outlined, size: 18),
-            label: const Text('保存'),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {},
+      child: Scaffold(
+        backgroundColor: theme.colorScheme.surface,
+        appBar: AppBar(
+          title: Text(model.displayName),
+          centerTitle: false,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
           ),
-          const SizedBox(width: 8),
-        ],
-        bottom: TabBar(
+          actions: [
+            // 保存参数
+            TextButton.icon(
+              onPressed: _saveParams,
+              icon: const Icon(Icons.save_outlined, size: 18),
+              label: const Text('保存'),
+            ),
+            const SizedBox(width: 8),
+          ],
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: 'Model Parameters'),
+              Tab(text: '模型信息'),
+            ],
+          ),
+        ),
+        body: TabBarView(
           controller: _tabController,
-          tabs: const [
-            Tab(text: 'Model Parameters'),
-            Tab(text: '模型信息'),
+          children: [
+            _buildParamsTab(theme, model),
+            _buildInfoTab(theme, model),
           ],
         ),
+        // 底部加载/卸载按钮
+        bottomNavigationBar: _buildBottomBar(theme, model),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildParamsTab(theme, model),
-          _buildInfoTab(theme, model),
-        ],
-      ),
-      // 底部加载/卸载按钮
-      bottomNavigationBar: _buildBottomBar(theme, model),
     );
   }
 
@@ -157,7 +197,8 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
 
   Widget _buildParamsTab(ThemeData theme, ModelEntry model) {
     // 根据模型类型显示不同的参数配置
-    if (model.isRemote && model.remoteConfig?.protocol == RemoteProtocol.ollama) {
+    if (model.isRemote &&
+        model.remoteConfig?.protocol == RemoteProtocol.ollama) {
       return _buildOllamaParamsTab(theme, model);
     }
     return _buildLocalParamsTab(theme, model);
@@ -166,18 +207,32 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
   // 本地模型参数配置
   Widget _buildLocalParamsTab(ThemeData theme, ModelEntry model) {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
       children: [
         // ── 系统提示词区域 ──
         _SectionCard(
           children: [
             Row(
               children: [
-                Icon(Icons.person_outline, size: 18, color: theme.colorScheme.secondary),
+                Icon(
+                  Icons.person_outline,
+                  size: 18,
+                  color: theme.colorScheme.secondary,
+                ),
                 const SizedBox(width: 8),
-                Text('系统提示词', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                Text(
+                  '系统提示词',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(width: 8),
-                Text('(不设定则使用默认)', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                Text(
+                  '(不设定则使用默认)',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -191,15 +246,21 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
                 ),
                 contentPadding: const EdgeInsets.all(12),
               ),
-              onChanged: (v) => setState(() =>
-                  _params = _params.copyWith(systemPrompt: v.isEmpty ? null : v)),
+              onChanged: (v) => setState(
+                () => _params = _params.copyWith(
+                  systemPrompt: v.isEmpty ? null : v,
+                ),
+              ),
             ),
             const SizedBox(height: 8),
-            if (_params.systemPrompt != null && _params.systemPrompt!.isNotEmpty)
+            if (_params.systemPrompt != null &&
+                _params.systemPrompt!.isNotEmpty)
               TextButton.icon(
                 onPressed: () {
                   _systemPromptController.clear();
-                  setState(() => _params = _params.copyWith(systemPrompt: null));
+                  setState(
+                    () => _params = _params.copyWith(systemPrompt: null),
+                  );
                 },
                 icon: const Icon(Icons.clear, size: 16),
                 label: const Text('清除系统提示词'),
@@ -213,19 +274,21 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
 
         // ── 设置区域 ──
         _CollapsibleSection(
-          title: '设置',
+          title: AppLocalizations.of(context)!.settings,
           icon: Icons.settings_outlined,
           defaultExpanded: true,
           children: [
             // 温度
             _SliderParam(
               label: '温度',
-              tooltip: '控制生成文本的随机性。值越低(0.0)输出越确定性，值越高(2.0)输出越随机多样。推荐：创意写作 0.8-1.2，代码生成 0.1-0.3',
+              tooltip:
+                  '控制生成文本的随机性。值越低(0.0)输出越确定性，值越高(2.0)输出越随机多样。推荐：创意写作 0.8-1.2，代码生成 0.1-0.3',
               value: _params.temperature,
               min: 0.0,
               max: 2.0,
               divisions: 200,
-              onChanged: (v) => setState(() => _params = _params.copyWith(temperature: v)),
+              onChanged: (v) =>
+                  setState(() => _params = _params.copyWith(temperature: v)),
             ),
             const SizedBox(height: 8),
             // 限制响应长度
@@ -233,7 +296,9 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               label: '限制响应长度',
               tooltip: '启用后，模型生成的回答将受到最大 token 数限制，防止生成过长内容',
               value: _params.limitResponseLength,
-              onChanged: (v) => setState(() => _params = _params.copyWith(limitResponseLength: v)),
+              onChanged: (v) => setState(
+                () => _params = _params.copyWith(limitResponseLength: v),
+              ),
             ),
             const SizedBox(height: 8),
             // 上下文溢出
@@ -246,7 +311,20 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
                 'truncate_start': '截断开头',
                 'truncate_end': '截断末尾',
               },
-              onChanged: (v) => setState(() => _params = _params.copyWith(contextOverflow: v!)),
+              onChanged: (v) => setState(
+                () => _params = _params.copyWith(contextOverflow: v!),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // 上下文大小
+            _StepperParam(
+              label: '上下文大小',
+              tooltip: '设置模型的上下文窗口大小（token 数）。更大的上下文可处理更长对话，但需要更多内存。48GB 内存可设 65536-131072',
+              value: _params.contextSize,
+              min: 2048,
+              max: 131072,
+              onChanged: (v) =>
+                  setState(() => _params = _params.copyWith(contextSize: v)),
             ),
             const SizedBox(height: 8),
             // 停止字符串
@@ -255,8 +333,11 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               tooltip: '设置自定义停止词，模型遇到此字符串时立即停止生成。例如设置 "END" 可在特定位置停止输出',
               hint: '输入一个字符串并按 ↵',
               value: _params.stopString,
-              onChanged: (v) => setState(() => _params = _params.copyWith(
-                  stopString: v.isEmpty ? null : v)),
+              onChanged: (v) => setState(
+                () => _params = _params.copyWith(
+                  stopString: v.isEmpty ? null : v,
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             // CPU 线程数
@@ -266,7 +347,8 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               value: _params.cpuThreads,
               min: 1,
               max: 32,
-              onChanged: (v) => setState(() => _params = _params.copyWith(cpuThreads: v)),
+              onChanged: (v) =>
+                  setState(() => _params = _params.copyWith(cpuThreads: v)),
             ),
           ],
         ),
@@ -281,11 +363,13 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
             // Top K
             _StepperParam(
               label: 'Top K 采样',
-              tooltip: '限制模型只从概率最高的 K 个词中选择。K=1 时完全确定性输出，K 越大输出越随机。推荐：精确任务 1-10，创意任务 40-100',
+              tooltip:
+                  '限制模型只从概率最高的 K 个词中选择。K=1 时完全确定性输出，K 越大输出越随机。推荐：精确任务 1-10，创意任务 40-100',
               value: _params.topK,
               min: 1,
               max: 200,
-              onChanged: (v) => setState(() => _params = _params.copyWith(topK: v)),
+              onChanged: (v) =>
+                  setState(() => _params = _params.copyWith(topK: v)),
             ),
             const SizedBox(height: 8),
             // 重复惩罚
@@ -298,7 +382,8 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               max: 2.0,
               divisions: 100,
               onEnabledChanged: (v) => setState(
-                  () => _params = _params.copyWith(repeatPenaltyEnabled: v)),
+                () => _params = _params.copyWith(repeatPenaltyEnabled: v),
+              ),
               onValueChanged: (v) =>
                   setState(() => _params = _params.copyWith(repeatPenalty: v)),
             ),
@@ -309,13 +394,15 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               tooltip: '启用后，模型会倾向于引入对话中未出现过的新词汇和概念，有助于增加输出的多样性和新颖性',
               value: _params.presencePenaltyEnabled,
               onChanged: (v) => setState(
-                  () => _params = _params.copyWith(presencePenaltyEnabled: v)),
+                () => _params = _params.copyWith(presencePenaltyEnabled: v),
+              ),
             ),
             const SizedBox(height: 8),
             // Top P
             _SwitchSliderParam(
               label: 'Top P 采样',
-              tooltip: '核采样：只从累积概率达到 P 的高概率词中选择。P=0.9 表示从概率最高的词中选择，直到累计概率达到 90%',
+              tooltip:
+                  '核采样：只从累积概率达到 P 的高概率词中选择。P=0.9 表示从概率最高的词中选择，直到累计概率达到 90%',
               enabled: _params.topPEnabled,
               value: _params.topP,
               min: 0.0,
@@ -355,7 +442,28 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               label: '启用结构化输出（JSON Schema）',
               tooltip: '启用后，模型输出将遵循 JSON Schema 规范，适合需要结构化数据的场景（如 API 响应、数据提取）',
               value: _params.structuredOutput,
-              onChanged: (v) => setState(() => _params = _params.copyWith(structuredOutput: v)),
+              onChanged: (v) => setState(
+                () => _params = _params.copyWith(structuredOutput: v),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // ── 快速模式 ──
+        _CollapsibleSection(
+          title: '快速模式',
+          icon: Icons.bolt_outlined,
+          defaultExpanded: false,
+          children: [
+            _SwitchParam(
+              label: '启用思考模式（Reasoning）',
+              tooltip:
+                  '启用后，模型将输出思考过程（Chain-of-Thought），适合数学、逻辑推理等复杂问题。关闭则为快速模式，直接给出答案',
+              value: _params.enableReasoning,
+              onChanged: (v) => setState(
+                () => _params = _params.copyWith(enableReasoning: v),
+              ),
             ),
           ],
         ),
@@ -371,8 +479,9 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               label: '启用投机解码（加速推理）',
               tooltip: '使用小型模型预测后续 token，主模型验证并修正。可显著提升推理速度，但会增加内存占用',
               value: _params.speculativeDecoding,
-              onChanged: (v) =>
-                  setState(() => _params = _params.copyWith(speculativeDecoding: v)),
+              onChanged: (v) => setState(
+                () => _params = _params.copyWith(speculativeDecoding: v),
+              ),
             ),
           ],
         ),
@@ -385,16 +494,25 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
   Widget _buildOllamaParamsTab(ThemeData theme, ModelEntry model) {
     final config = _remoteConfig ?? model.remoteConfig!;
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
       children: [
         // ── 连接信息 ──
         _SectionCard(
           children: [
             Row(
               children: [
-                Icon(Icons.link_rounded, size: 18, color: theme.colorScheme.secondary),
+                Icon(
+                  Icons.link_rounded,
+                  size: 18,
+                  color: theme.colorScheme.secondary,
+                ),
                 const SizedBox(width: 8),
-                Text('连接信息', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                Text(
+                  '连接信息',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -431,9 +549,18 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
           children: [
             Row(
               children: [
-                Icon(Icons.tune_rounded, size: 18, color: theme.colorScheme.secondary),
+                Icon(
+                  Icons.tune_rounded,
+                  size: 18,
+                  color: theme.colorScheme.secondary,
+                ),
                 const SizedBox(width: 8),
-                Text('推理参数', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                Text(
+                  '推理参数',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -445,8 +572,9 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               min: 0.0,
               max: 2.0,
               divisions: 200,
-              onChanged: (v) => setState(() =>
-                  _remoteConfig = config.copyWith(temperature: v)),
+              onChanged: (v) => setState(
+                () => _remoteConfig = config.copyWith(temperature: v),
+              ),
             ),
             const SizedBox(height: 8),
             // Top P
@@ -457,8 +585,8 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               min: 0.0,
               max: 1.0,
               divisions: 100,
-              onChanged: (v) => setState(() =>
-                  _remoteConfig = config.copyWith(topP: v)),
+              onChanged: (v) =>
+                  setState(() => _remoteConfig = config.copyWith(topP: v)),
             ),
             const SizedBox(height: 8),
             // Max Tokens
@@ -468,19 +596,19 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               value: config.maxTokens,
               min: 256,
               max: 32768,
-              onChanged: (v) => setState(() =>
-                  _remoteConfig = config.copyWith(maxTokens: v)),
+              onChanged: (v) =>
+                  setState(() => _remoteConfig = config.copyWith(maxTokens: v)),
             ),
             const SizedBox(height: 8),
             // 上下文大小
             _StepperParam(
               label: '上下文大小',
-              tooltip: '设置模型处理的上下文窗口大小',
-              value: config.numCtx ?? 4096,
-              min: 512,
-              max: 32768,
-              onChanged: (v) => setState(() =>
-                  _remoteConfig = config.copyWith(numCtx: v)),
+              tooltip: '设置模型处理的上下文窗口大小（最小8192，最大65536）',
+              value: config.numCtx ?? 32768,
+              min: 8192,
+              max: 65536,
+              onChanged: (v) =>
+                  setState(() => _remoteConfig = config.copyWith(numCtx: v)),
             ),
             const SizedBox(height: 8),
             // Stream 开关
@@ -488,8 +616,9 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               label: '流式输出',
               tooltip: '启用后，模型将实时流式返回生成内容',
               value: config.streamEnabled,
-              onChanged: (v) => setState(() =>
-                  _remoteConfig = config.copyWith(streamEnabled: v)),
+              onChanged: (v) => setState(
+                () => _remoteConfig = config.copyWith(streamEnabled: v),
+              ),
             ),
           ],
         ),
@@ -502,12 +631,13 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
 
   Widget _buildInfoTab(ThemeData theme, ModelEntry model) {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
       children: [
         _SectionCard(
           children: [
             _InfoRow(label: '模型名称', value: model.displayName),
-            if (model.filePath != null) _InfoRow(label: '文件路径', value: model.filePath!),
+            if (model.filePath != null)
+              _InfoRow(label: '文件路径', value: model.filePath!),
             if (model.parameterSize != null)
               _InfoRow(label: '参数量', value: '${model.parameterSize}B'),
             if (model.quantLevel != null)
@@ -522,12 +652,18 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+                  color: theme.colorScheme.primaryContainer.withValues(
+                    alpha: 0.3,
+                  ),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.memory_rounded, size: 18, color: theme.colorScheme.primary),
+                    Icon(
+                      Icons.memory_rounded,
+                      size: 18,
+                      color: theme.colorScheme.primary,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -542,7 +678,10 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
               ),
             ],
             if (model.isRemote && model.remoteConfig != null) ...[
-              _InfoRow(label: '协议', value: model.remoteConfig!.protocol.name.toUpperCase()),
+              _InfoRow(
+                label: '协议',
+                value: model.remoteConfig!.protocol.name.toUpperCase(),
+              ),
               _InfoRow(label: 'Base URL', value: model.remoteConfig!.baseUrl),
               _InfoRow(label: '模型 ID', value: model.remoteConfig!.modelId),
             ],
@@ -560,7 +699,10 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
 
     return Container(
       padding: EdgeInsets.fromLTRB(
-        16, 12, 16, MediaQuery.paddingOf(context).bottom + 12,
+        16,
+        42,
+        16,
+        MediaQuery.paddingOf(context).bottom + 12,
       ),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
@@ -576,7 +718,9 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
                   // 先验证连通性
                   try {
                     await _engine.loadModel(model.id);
-                    ref.read(modelProvider.notifier).setModelLoaded(model.id, true);
+                    ref
+                        .read(modelProvider.notifier)
+                        .setModelLoaded(model.id, true);
                     if (context.mounted) context.go('/');
                   } catch (e) {
                     if (context.mounted) {
@@ -632,19 +776,26 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
                       decoration: BoxDecoration(
                         color: Colors.orange.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                        border: Border.all(
+                          color: Colors.orange.withValues(alpha: 0.3),
+                        ),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+                          const Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.orange,
+                            size: 20,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               'llama.cpp 引擎未就绪',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Colors.orange.shade800,
-                                fontWeight: FontWeight.w500,
-                              ),
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: Colors.orange.shade800,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                             ),
                           ),
                         ],
@@ -660,18 +811,72 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
                       ),
                     ),
                   ] else ...[
-                    // llama.cpp 可用，显示加载按钮
-                    FilledButton.icon(
-                      onPressed: _loadModel,
-                      icon: const Icon(Icons.rocket_launch_outlined),
-                      label: const Text('通过 llama.cpp 加载模型'),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    // llama.cpp 可用，根据参数是否已保存显示不同按钮
+                    if (!_paramsSaved) ...[
+                      // 参数未保存：显示保存按钮
+                      OutlinedButton.icon(
+                        onPressed: _saveParams,
+                        icon: const Icon(Icons.save_outlined),
+                        label: const Text('保存参数'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '请先保存模型参数，然后点击加载按钮',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ] else ...[
+                      // 参数已保存：显示返回按钮和加载按钮
+                      Row(
+                        children: [
+                          IconButton(
+                            onPressed: () {
+                              if (context.canPop()) {
+                                context.pop();
+                              } else {
+                                context.go('/');
+                              }
+                            },
+                            icon: const Icon(Icons.arrow_back_rounded),
+                            tooltip: '返回上一页',
+                            style: IconButton.styleFrom(
+                              backgroundColor:
+                                  theme.colorScheme.surfaceContainerHigh,
+                              padding: const EdgeInsets.all(12),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: _loadModel,
+                              icon: const Icon(Icons.rocket_launch_outlined),
+                              label: const Text('加载并开始对话'),
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '参数已保存，点击上方按钮加载模型',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ],
                 ],
               ),
@@ -686,43 +891,229 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
 
   Future<void> _saveParams() async {
     final modelState = ref.read(modelProvider);
-    final model = modelState.models.where((m) => m.id == widget.modelId).firstOrNull;
+    final model = modelState.models
+        .where((m) => m.id == widget.modelId)
+        .firstOrNull;
 
     if (model == null) return;
 
     if (model.isLocal) {
-      // 本地模型：保存本地参数
-      await ref.read(modelProvider.notifier).updateLocalParams(widget.modelId, _params);
-    } else if (model.isRemote && model.remoteConfig?.protocol == RemoteProtocol.ollama && _remoteConfig != null) {
+      // 本地模型：保存本地参数（含 enableReasoning）
+      await ref
+          .read(modelProvider.notifier)
+          .updateLocalParams(widget.modelId, _params);
+    } else if (model.isRemote &&
+        model.remoteConfig?.protocol == RemoteProtocol.ollama &&
+        _remoteConfig != null) {
       // 远程 Ollama 模型：保存远程配置
-      await ref.read(modelProvider.notifier).updateRemoteConfig(widget.modelId, _remoteConfig!);
+      await ref
+          .read(modelProvider.notifier)
+          .updateRemoteConfig(widget.modelId, _remoteConfig!);
+      // ★★★ 同时保存 reasoning 开关（顶级字段，不依赖 remoteConfig）★★★
+      await ref
+          .read(modelProvider.notifier)
+          .updateEnableReasoning(widget.modelId, _params.enableReasoning);
+    } else {
+      // ★★★ 其他远程模型（OpenAI / Anthropic）：仅保存 reasoning 开关 ★★★
+      await ref
+          .read(modelProvider.notifier)
+          .updateEnableReasoning(widget.modelId, _params.enableReasoning);
+    }
+
+    // 标记参数已保存
+    if (model.isLocal) {
+      setState(() => _paramsSaved = true);
     }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('参数已保存'), behavior: SnackBarBehavior.floating),
+        const SnackBar(
+          content: Text('参数已保存'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     }
+  }
+
+  /// 查找匹配的 mmproj 文件
+  /// 匹配规则：文件名以 "mmproj" 开头且包含主模型文件名（去掉扩展名）
+  Future<String?> _findMatchingMmprojFile(ModelEntry model) async {
+    if (!model.isLocal || model.filePath == null) return null;
+    if (model.mmprojFileName != null) return model.mmprojFileName;
+
+    try {
+      // 收集要搜索的目录：应用内部目录 + 模型文件所在目录
+      final dirs = <Directory>[];
+      final appDir = await getApplicationDocumentsDirectory();
+      dirs.add(Directory('${appDir.path}/models'));
+
+      // 添加模型文件所在的目录（支持外部路径模型）
+      final modelFile = File(model.filePath!);
+      if (await modelFile.exists()) {
+        final modelParentDir = modelFile.parent;
+        if (!dirs.any((d) => d.path == modelParentDir.path)) {
+          dirs.add(modelParentDir);
+        }
+      }
+
+      // 主模型文件名（去掉 .gguf 扩展名）
+      final modelFileName = model.filePath!.split('/').last;
+      final modelBaseName = modelFileName.endsWith('.gguf')
+          ? modelFileName.substring(0, modelFileName.length - 5)
+          : modelFileName;
+
+      // 收集所有 mmproj 文件
+      final mmprojFiles = <String>[];
+      for (final modelsDir in dirs) {
+        if (!await modelsDir.exists()) continue;
+        await for (final entity in modelsDir.list(recursive: true)) {
+          if (entity is File) {
+            final name = entity.path.split('/').last;
+            if (name.toLowerCase().startsWith('mmproj') && name.endsWith('.gguf')) {
+              if (!mmprojFiles.contains(name)) {
+                mmprojFiles.add(name);
+              }
+            }
+          }
+        }
+      }
+
+      if (mmprojFiles.isEmpty) return null;
+
+      // 规则匹配：mmproj 文件名包含主模型文件名
+      final modelBaseLower = modelBaseName.toLowerCase();
+      for (final f in mmprojFiles) {
+        if (f.toLowerCase().contains(modelBaseLower)) {
+          return f;
+        }
+      }
+
+      // Fallback: 如果只有一个 mmproj 文件，就关联它
+      if (mmprojFiles.length == 1) {
+        return mmprojFiles.first;
+      }
+    } catch (e) {
+      debugPrint('查找 mmproj 文件失败: $e');
+    }
+
+    return null;
   }
 
   Future<void> _loadModel() async {
     if (!mounted) return;
 
-    final model = ref
-        .read(modelProvider)
-        .models
+    final modelState = ref.read(modelProvider);
+    final model = modelState.models
         .where((m) => m.id == widget.modelId)
         .firstOrNull;
 
     if (model == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('模型不存在'), backgroundColor: Colors.red),
-      );
+      _showErrorSnackBar('模型不存在');
       return;
     }
 
-    // 加载状态监听器
-    StreamSubscription<ModelLoadingState>? loadingSub;
+    // ─── 检测 mmproj 多模态投影仪 ───
+    bool enableMultimodal = false;
+    String? mmprojFileName = model.mmprojFileName;
+
+    // 如果模型没有关联 mmprojFileName，尝试查找匹配的 mmproj 文件
+    if (model.isLocal && mmprojFileName == null) {
+      mmprojFileName = await _findMatchingMmprojFile(model);
+    }
+
+    if (model.isLocal && mmprojFileName != null) {
+      // 模型有关联的 mmproj 文件，弹出确认对话框
+      // 默认加载 mmproj（与 LM Studio 行为一致）
+      final choice = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(
+            Icons.view_in_ar_rounded,
+            size: 48,
+            color: Colors.purple.shade400,
+          ),
+          title: const Text('检测到多模态投影仪'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('该模型已包含多模态支持：'),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.purple.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.purple.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.description_outlined,
+                      size: 16,
+                      color: Colors.purple.shade600,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        mmprojFileName!,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.purple.shade700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'mmproj: 图文理解投影仪',
+                style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '加载后可识别和分析图片内容',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(ctx, 'skip'),
+              child: const Text('不加载'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'confirm'),
+              child: const Text('确认加载'),
+            ),
+          ],
+        ),
+      );
+
+      if (choice == null) {
+        // 用户点击外部关闭，默认加载 mmproj
+        enableMultimodal = true;
+      } else {
+        enableMultimodal = (choice == 'confirm');
+      }
+    }
+
+    // ─── 开始加载模型 ───
+    _startModelLoading(model, enableMultimodal, mmprojFileName);
+  }
+
+  void _startModelLoading(
+    ModelEntry model,
+    bool enableMultimodal,
+    String? mmprojFileName,
+  ) {
     String? lastError;
     bool loadCompleted = false;
 
@@ -739,88 +1130,132 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
       ),
     );
 
-    // 创建超时控制器
-    Timer? timeoutController;
+    Future<void> doLoad() async {
+      bool isTimedOut = false; // 超时标志
 
-    try {
-      // 设置60秒超时
-      timeoutController = Timer(const Duration(seconds: 60), () {
-        if (!loadCompleted) {
-          lastError = '模型加载超时（60秒），请检查 Ollama 服务是否正常运行';
-          loadCompleted = true;
-          loadingSub?.cancel();
-          if (mounted) {
-            Navigator.of(context, rootNavigator: true).pop();
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(lastError!),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 5),
-              ),
+      try {
+        // 设置60秒超时（使用类成员变量，dispose 时可取消）
+        _loadTimeoutTimer = Timer(const Duration(seconds: 60), () {
+          if (!loadCompleted && !isTimedOut) {
+            isTimedOut = true; // 标记超时
+            lastError = '模型加载超时（60秒），请检查 Ollama 服务是否正常运行';
+            loadCompleted = true; // 标记完成以阻止后续执行
+            _loadStateSub?.cancel();
+            _loadTimeoutTimer?.cancel();
+            if (mounted) {
+              Navigator.of(context, rootNavigator: true).pop();
+              _showErrorSnackBar(lastError!);
+            }
+          }
+        });
+
+        // 监听加载状态（使用类成员变量，dispose 时可取消）
+        _loadStateSub = _engine.loadingStateStream.listen((state) {
+          if (state.modelId == widget.modelId) {
+            if (state.status == LoadingStatus.error && state.error != null) {
+              lastError = state.error;
+            }
+          }
+        });
+
+        // 用全局单例加载模型，传递多模态配置
+        await _engine
+            .loadModel(
+              widget.modelId,
+              mmprojPath: enableMultimodal ? mmprojFileName : null,
+            )
+            .timeout(
+              const Duration(seconds: 60),
+              onTimeout: () {
+                throw TimeoutException('模型加载超时，请检查网络连接和 Ollama 服务');
+              },
             );
-          }
+
+        // 如果已超时，直接返回
+        if (isTimedOut) {
+          _loadTimeoutTimer?.cancel();
+          _loadStateSub?.cancel();
+          return;
         }
-      });
 
-      // 监听加载状态
-      loadingSub = _engine.loadingStateStream.listen((state) {
-        if (state.modelId == widget.modelId) {
-          if (state.status == LoadingStatus.error && state.error != null) {
-            lastError = state.error;
-          }
-        }
-      });
+        loadCompleted = true;
+        _loadTimeoutTimer?.cancel();
+        _loadStateSub?.cancel();
 
-      // 用全局单例加载模型（Ollama 验证连通性 / 远程 API 验证）
-      await _engine.loadModel(widget.modelId).timeout(
-        const Duration(seconds: 60),
-        onTimeout: () {
-          throw TimeoutException('模型加载超时，请检查网络连接和 Ollama 服务');
-        },
-      );
+        // 更新模型状态为已加载
+        ref.read(modelProvider.notifier).setModelLoaded(widget.modelId, true);
 
-      loadCompleted = true;
-      timeoutController?.cancel();
-      loadingSub?.cancel();
-
-      // 更新模型状态为已加载
-      ref.read(modelProvider.notifier).setModelLoaded(widget.modelId, true);
-
-      // 关闭加载对话框
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        
-        // 创建新会话并跳转
-        final sessionManager = ref.read(sessionManagerProvider);
-        final session = await sessionManager.createSession(
-          SessionConfig(
-            modelId: model.id,
-            name: '${model.displayName} 对话',
-            systemPrompt: _params.systemPrompt,
-          ),
-        );
-        
+        // 安全关闭加载对话框
         if (mounted) {
-          context.go('/session/${session.id}');
-        }
-      }
-    } catch (e) {
-      debugPrint('模型加载失败: $e');
-      timeoutController?.cancel();
-      loadingSub?.cancel();
+          // 先关闭对话框
+          Navigator.of(context, rootNavigator: true).pop();
 
-      // 关闭加载对话框
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('模型加载失败: ${lastError ?? e}'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
+          // 显示简短成功提示
+          await Future.delayed(const Duration(milliseconds: 100));
+
+          if (!mounted) return;
+
+          // 显示成功 SnackBar（自动消失，不阻塞用户）
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.green[300], size: 20),
+                  const SizedBox(width: 8),
+                  Text('${model.displayName} 加载成功'),
+                ],
+              ),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(milliseconds: 1500),
+            ),
+          );
+
+          // 直接创建会话并跳转（无需用户手动选择）
+          final sessionManager = ref.read(sessionManagerProvider);
+          final session = await sessionManager.createSession(
+            SessionConfig(
+              modelId: model.id,
+              name: '${model.displayName} 对话',
+              systemPrompt: _params.systemPrompt,
+            ),
+          );
+
+          if (mounted) {
+            context.go('/session/${session.id}');
+          }
+        }
+      } catch (e) {
+        debugPrint('模型加载失败: $e');
+        _loadTimeoutTimer?.cancel();
+        _loadStateSub?.cancel();
+
+        // 安全关闭加载对话框
+        if (mounted) {
+          try {
+            // 安全地关闭加载对话框
+            Navigator.of(context, rootNavigator: true).maybePop();
+          } catch (err) {
+            debugPrint('关闭对话框失败（可能已关闭）: $err');
+          }
+
+          _showErrorSnackBar('模型加载失败: ${lastError ?? e}');
+        }
       }
     }
+
+    doLoad();
+  }
+
+  /// 显示错误提示，1.5秒后自动消失
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(milliseconds: 1500), // 1.5秒后消失
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _unloadModel() async {
@@ -833,7 +1268,10 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('模型已卸载'), behavior: SnackBarBehavior.floating),
+          const SnackBar(
+            content: Text('模型已卸载'),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } catch (e) {
@@ -858,12 +1296,10 @@ class _ModelLoadPageState extends ConsumerState<ModelLoadPage>
 class _ModelLoadingDialog extends StatefulWidget {
   final String modelName;
   final VoidCallback onCompleted;
-  final void Function(String state)? onStateChanged;
 
   const _ModelLoadingDialog({
     required this.modelName,
     required this.onCompleted,
-    this.onStateChanged,
   });
 
   @override
@@ -893,24 +1329,28 @@ class _ModelLoadingDialogState extends State<_ModelLoadingDialog>
   @override
   void initState() {
     super.initState();
-    _progressController = AnimationController(vsync: this, duration: const Duration(seconds: 5))
-      ..addListener(() {
-        // 只有在没有错误且未完成时才更新步骤
-        if (!_isCompleted && _errorMessage == null) {
-          _updateStep(_progressController.value);
-        }
-      })
-      ..addStatusListener((status) {
-        if (status == AnimationStatus.completed && !_isCompleted) {
-          _isCompleted = true;
-          setState(() {
-            _progress = 1.0;
-            _currentStep = '模型加载完成 ✓';
-          });
-          Future.delayed(const Duration(milliseconds: 500), widget.onCompleted);
-        }
-      })
-      ..forward();
+    _progressController =
+        AnimationController(vsync: this, duration: const Duration(seconds: 5))
+          ..addListener(() {
+            // 只有在没有错误且未完成时才更新步骤
+            if (!_isCompleted && _errorMessage == null) {
+              _updateStep(_progressController.value);
+            }
+          })
+          ..addStatusListener((status) {
+            if (status == AnimationStatus.completed && !_isCompleted) {
+              _isCompleted = true;
+              setState(() {
+                _progress = 1.0;
+                _currentStep = '模型加载完成 ✓';
+              });
+              Future.delayed(
+                const Duration(milliseconds: 500),
+                widget.onCompleted,
+              );
+            }
+          })
+          ..forward();
   }
 
   void _updateStep(double progress) {
@@ -922,7 +1362,6 @@ class _ModelLoadingDialogState extends State<_ModelLoadingDialog>
             _currentStep = _steps[i].$2;
             _progress = progress;
           });
-          widget.onStateChanged?.call(_steps[i].$2);
         } else {
           setState(() => _progress = progress);
         }
@@ -975,7 +1414,8 @@ class _ModelLoadingDialogState extends State<_ModelLoadingDialog>
         children: [
           // 图标
           Container(
-            width: 72, height: 72,
+            width: 72,
+            height: 72,
             decoration: BoxDecoration(
               color: hasError
                   ? theme.colorScheme.errorContainer
@@ -985,13 +1425,17 @@ class _ModelLoadingDialogState extends State<_ModelLoadingDialog>
             child: Icon(
               hasError ? Icons.error_outline : Icons.memory_rounded,
               size: 36,
-              color: hasError ? theme.colorScheme.error : theme.colorScheme.primary,
+              color: hasError
+                  ? theme.colorScheme.error
+                  : theme.colorScheme.primary,
             ),
           ),
           const SizedBox(height: 20),
           Text(
             hasError ? '加载失败' : '正在加载模型',
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -1063,7 +1507,8 @@ class _ModelLoadingDialogState extends State<_ModelLoadingDialog>
                   children: [
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      width: 18, height: 18,
+                      width: 18,
+                      height: 18,
                       decoration: BoxDecoration(
                         color: isDone
                             ? theme.colorScheme.primary
@@ -1071,23 +1516,31 @@ class _ModelLoadingDialogState extends State<_ModelLoadingDialog>
                         shape: BoxShape.circle,
                       ),
                       child: isDone
-                          ? const Icon(Icons.check, size: 12, color: Colors.white)
+                          ? const Icon(
+                              Icons.check,
+                              size: 12,
+                              color: Colors.white,
+                            )
                           : isCurrent
-                              ? Padding(
-                                  padding: const EdgeInsets.all(3),
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: theme.colorScheme.primary,
-                                  ),
-                                )
-                              : null,
+                          ? Padding(
+                              padding: const EdgeInsets.all(3),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: theme.colorScheme.primary,
+                              ),
+                            )
+                          : null,
                     ),
                     const SizedBox(width: 10),
                     Text(
                       step.$2,
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: isDone ? theme.colorScheme.onSurface : theme.colorScheme.outline,
-                        fontWeight: isCurrent ? FontWeight.w600 : FontWeight.normal,
+                        color: isDone
+                            ? theme.colorScheme.onSurface
+                            : theme.colorScheme.outline,
+                        fontWeight: isCurrent
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                   ],
@@ -1108,15 +1561,15 @@ class _ModelLoadingDialogState extends State<_ModelLoadingDialog>
 /// 卡片容器
 class _SectionCard extends StatelessWidget {
   final List<Widget> children;
-  final EdgeInsets? padding;
+  final EdgeInsets? _padding;
 
-  const _SectionCard({required this.children, this.padding});
+  const _SectionCard({required this.children, EdgeInsets? padding}) : _padding = padding;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: padding ?? const EdgeInsets.all(16),
+      padding: _padding ?? const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
@@ -1202,19 +1655,27 @@ class _CollapsibleSectionState extends State<_CollapsibleSection>
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
-                  Icon(widget.icon, size: 18, color: theme.colorScheme.secondary),
+                  Icon(
+                    widget.icon,
+                    size: 18,
+                    color: theme.colorScheme.secondary,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       widget.title,
-                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   AnimatedRotation(
                     turns: _expanded ? 0 : -0.25,
                     duration: const Duration(milliseconds: 200),
-                    child: Icon(Icons.keyboard_arrow_down_rounded,
-                        color: theme.colorScheme.onSurfaceVariant),
+                    child: Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -1223,10 +1684,8 @@ class _CollapsibleSectionState extends State<_CollapsibleSection>
           ClipRect(
             child: AnimatedBuilder(
               animation: _heightFactor,
-              builder: (context, child) => Align(
-                heightFactor: _heightFactor.value,
-                child: child,
-              ),
+              builder: (context, child) =>
+                  Align(heightFactor: _heightFactor.value, child: child),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: Column(
@@ -1281,7 +1740,11 @@ class _SliderParam extends StatelessWidget {
                     children: [
                       labelWidget,
                       const SizedBox(width: 4),
-                      Icon(Icons.help_outline, size: 14, color: theme.colorScheme.secondary),
+                      Icon(
+                        Icons.help_outline,
+                        size: 14,
+                        color: theme.colorScheme.secondary,
+                      ),
                     ],
                   ),
                 )
@@ -1291,7 +1754,9 @@ class _SliderParam extends StatelessWidget {
           flex: 3,
           child: Slider(
             value: value.clamp(min, max),
-            min: min, max: max, divisions: divisions,
+            min: min,
+            max: max,
+            divisions: divisions,
             onChanged: onChanged,
           ),
         ),
@@ -1299,7 +1764,9 @@ class _SliderParam extends StatelessWidget {
           width: 44,
           child: Text(
             value.toStringAsFixed(2),
-            style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
             textAlign: TextAlign.end,
           ),
         ),
@@ -1336,7 +1803,11 @@ class _SwitchParam extends StatelessWidget {
                     children: [
                       labelWidget,
                       const SizedBox(width: 4),
-                      Icon(Icons.help_outline, size: 14, color: theme.colorScheme.secondary),
+                      Icon(
+                        Icons.help_outline,
+                        size: 14,
+                        color: theme.colorScheme.secondary,
+                      ),
                     ],
                   ),
                 )
@@ -1388,7 +1859,11 @@ class _SwitchSliderParam extends StatelessWidget {
                         children: [
                           labelWidget,
                           const SizedBox(width: 4),
-                          Icon(Icons.help_outline, size: 14, color: theme.colorScheme.secondary),
+                          Icon(
+                            Icons.help_outline,
+                            size: 14,
+                            color: theme.colorScheme.secondary,
+                          ),
                         ],
                       ),
                     )
@@ -1399,7 +1874,9 @@ class _SwitchSliderParam extends StatelessWidget {
               width: 44,
               child: Text(
                 value.toStringAsFixed(2),
-                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
                 textAlign: TextAlign.end,
               ),
             ),
@@ -1408,7 +1885,9 @@ class _SwitchSliderParam extends StatelessWidget {
         if (enabled)
           Slider(
             value: value.clamp(min, max),
-            min: min, max: max, divisions: divisions,
+            min: min,
+            max: max,
+            divisions: divisions,
             onChanged: onValueChanged,
           ),
       ],
@@ -1447,7 +1926,11 @@ class _DropdownParam extends StatelessWidget {
                     children: [
                       labelWidget,
                       const SizedBox(width: 4),
-                      Icon(Icons.help_outline, size: 14, color: theme.colorScheme.secondary),
+                      Icon(
+                        Icons.help_outline,
+                        size: 14,
+                        color: theme.colorScheme.secondary,
+                      ),
                     ],
                   ),
                 )
@@ -1466,7 +1949,10 @@ class _DropdownParam extends StatelessWidget {
                 value: value,
                 isExpanded: true,
                 items: items.entries
-                    .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                    .map(
+                      (e) =>
+                          DropdownMenuItem(value: e.key, child: Text(e.value)),
+                    )
                     .toList(),
                 onChanged: onChanged,
               ),
@@ -1537,7 +2023,11 @@ class _TextInputParamState extends State<_TextInputParam> {
                     children: [
                       labelWidget,
                       const SizedBox(width: 4),
-                      Icon(Icons.help_outline, size: 14, color: theme.colorScheme.secondary),
+                      Icon(
+                        Icons.help_outline,
+                        size: 14,
+                        color: theme.colorScheme.secondary,
+                      ),
                     ],
                   ),
                 )
@@ -1549,7 +2039,10 @@ class _TextInputParamState extends State<_TextInputParam> {
             decoration: InputDecoration(
               hintText: widget.hint,
               hintStyle: theme.textTheme.bodySmall,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
                 borderSide: BorderSide(color: theme.dividerColor),
@@ -1597,7 +2090,11 @@ class _StepperParam extends StatelessWidget {
                     children: [
                       labelWidget,
                       const SizedBox(width: 4),
-                      Icon(Icons.help_outline, size: 14, color: theme.colorScheme.secondary),
+                      Icon(
+                        Icons.help_outline,
+                        size: 14,
+                        color: theme.colorScheme.secondary,
+                      ),
                     ],
                   ),
                 )
@@ -1616,7 +2113,9 @@ class _StepperParam extends StatelessWidget {
               child: Text(
                 '$value',
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
             IconButton(
@@ -1724,10 +2223,7 @@ class _ParamTooltip extends StatefulWidget {
   final String description;
   final Widget child;
 
-  const _ParamTooltip({
-    required this.description,
-    required this.child,
-  });
+  const _ParamTooltip({required this.description, required this.child});
 
   @override
   State<_ParamTooltip> createState() => _ParamTooltipState();
@@ -1740,13 +2236,13 @@ class _ParamTooltipState extends State<_ParamTooltip> {
 
   void _showTooltip() {
     if (_overlayEntry != null) return;
-    
+
     final RenderBox? box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
-    
-    final size = box.size;
+
+    box.size;
     final position = box.localToGlobal(Offset.zero);
-    
+
     _overlayEntry = OverlayEntry(
       builder: (context) => Positioned(
         // 显示在问号图标的左边

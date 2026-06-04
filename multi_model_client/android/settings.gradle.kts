@@ -14,6 +14,26 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
+        // 国内镜像
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        // 国内镜像
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+        // Flutter 镜像
+        maven { url = uri("https://mirrors.tuna.tsinghua.edu.cn/flutter/download.flutter.io") }
+        maven { url = uri("https://mirrors.cloud.tencent.com/flutter/download.flutter.io") }
+        maven { url = uri("https://repo.huaweicloud.com/repository/maven/flutter/") }
     }
 }
 

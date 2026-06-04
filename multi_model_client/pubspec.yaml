@@ -2,7 +2,7 @@ name: mj_nexus
 description: "MJ Nexus - Multi-Model AI Assistant with local/remote model support, voice dialogue, RAG knowledge base, and memory engine"
 publish_to: 'none'
 
-version: 0.21.0-beta
+version: 0.35.0-beta
 
 environment:
   sdk: ^3.10.7
@@ -59,7 +59,8 @@ dependencies:
   ffi: ^2.1.0
 
   # Local LLM Inference (llama.cpp FFI) - 使用 llamadart 替代 llama_cpp_dart
-  llamadart: ^0.6.10
+  # v0.6.16+ 支持 GGUF v3 格式、最新 llama.cpp 优化（Metal 加速、Flash Attention、MTP 等）
+  llamadart: ^0.6.16
 
   # Crypto
   crypto: ^3.0.3
@@ -91,6 +92,9 @@ dependencies:
 
   # Document parsing
   archive: ^4.0.9
+
+  # Mind map rendering
+  flutter_mind_map: ^1.1.2
   
   # PDF rendering (for OCR: render PDF pages to images)
   pdfx: ^2.8.0
@@ -109,7 +113,9 @@ dependencies:
   permission_handler: ^12.0.1
 
   # Audio recording for ASR (hold-to-record)
-  record: ^6.2.0
+  record: ^6.2.1
+  # Audio recording via miniaudio (macOS compatible, used for voice clone)
+  flutter_recorder: ^1.1.5
   
   # System TTS (使用系统内置语音合成)
   flutter_tts: ^4.2.5
@@ -144,12 +150,13 @@ dev_dependencies:
   # App Icon Generator
   flutter_launcher_icons: ^0.14.4
 
-flutter_icons:
+flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icons/mj_icon_1024.png"
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/icons/mj_icon_1024.png"
+  remove_alpha_ios: true
 
 flutter:
   generate: true
