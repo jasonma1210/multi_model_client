@@ -24,3 +24,6 @@ multi_model_client/macos/.symlinks/
 # Temporary
 *.tmp
 temp/
+
+# WorkBuddy (contains secrets)
+.workbuddy/
