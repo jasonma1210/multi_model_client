@@ -1238,25 +1238,17 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
     _pulseController.repeat();
 
     try {
-      debugPrint('[SpiritVoiceChat] 开始TTS合成');
-      final audioPath = await _ttsService!.synthesize(text);
-
+      debugPrint('[SpiritVoiceChat] 开始TTS合成 (speakLongText)');
+      // ★ 使用 speakLongText 分句流式合成，避免长文本单次请求超时
+      // VoiceClone 模式下单次请求可能超过60秒，分句后每块约50-100字，2-10秒即可完成
+      final completed = await _ttsService!.speakLongText(text);
+      
       if (_isDisposed) {
         _onTTSComplete();
         return;
       }
-      if (_ttsInterrupted) {
+      if (_ttsInterrupted || !completed) {
         return;
-      }
-
-      if (audioPath.isNotEmpty) {
-        try {
-          await _audioPlayer!.stop();
-        } catch (_) {}
-        await _audioPlayer!.setFilePath(audioPath);
-        await _audioPlayer!.play();
-
-        await _waitForPlaybackComplete();
       }
     } catch (e) {
       debugPrint('[SpiritVoiceChat] TTS 播放失败: $e');

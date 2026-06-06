@@ -300,15 +300,17 @@ class TTSService {
         _systemVoiceId = systemVoiceId;
 
   /// 合成语音（返回音频文件路径）
+  /// ★ VoiceClone 模式使用2分钟总超时（比普通合成慢），其他模式1分钟
   Future<String> synthesize(String text, {String? outputPath}) async {
     debugPrint('[$_tag] synthesize() 开始: provider=$_provider, text长度=${text.length}');
-    // ★ 1分钟总超时：语音输出保证在1分钟内完成，否则停止
-    const totalTimeout = Duration(minutes: 1);
+    // ★ 动态总超时：VoiceClone 模式需要更长时间（处理参考音频），其他模式1分钟
+    final isClone = _provider == TTSProvider.mimo && _cloneReferenceAudioPath != null;
+    final totalTimeout = isClone ? const Duration(minutes: 2) : const Duration(minutes: 1);
     try {
       final path = await _synthesizeInternal(text, outputPath: outputPath)
           .timeout(totalTimeout, onTimeout: () {
-        debugPrint('[$_tag] ⚠️ TTS 合成总超时 (1分钟)，停止当前语音输出');
-        throw TimeoutException('TTS synthesis timed out after 1 minute');
+        debugPrint('[$_tag] ⚠️ TTS 合成总超时 (${totalTimeout.inMinutes}分钟)，停止当前语音输出');
+        throw TimeoutException('TTS synthesis timed out after ${totalTimeout.inMinutes} minute(s)');
       });
       debugPrint('[$_tag] synthesize() ✅ 完成: path=$path');
       return path;
@@ -1990,8 +1992,10 @@ class TTSService {
 
     try {
       final dio = Dio();
+      // ★ VoiceClone 比普通 MiMo 慢（需处理参考音频），receiveTimeout 设为90秒
+      // 外层 synthesize 总超时为2分钟，这里必须小于2分钟
       dio.options.connectTimeout = const Duration(seconds: 30);
-      dio.options.receiveTimeout = const Duration(seconds: 60);
+      dio.options.receiveTimeout = const Duration(seconds: 90);
 
       // 构建请求数据
       final requestData = TTSStyleParser.buildMiMoCloneRequest(

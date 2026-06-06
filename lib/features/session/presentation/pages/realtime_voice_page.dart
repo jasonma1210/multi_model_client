@@ -884,28 +884,18 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
     _pulseController.repeat();
 
     try {
-      debugPrint('[RealtimeVoicePage] 开始TTS合成，音色来自语音设置');
-      final audioPath = await _ttsService!.synthesize(text);
+      debugPrint('[RealtimeVoicePage] 开始TTS合成 (speakLongText)，音色来自语音设置');
+      // ★ 使用 speakLongText 分句流式合成，避免长文本单次请求超时
+      // VoiceClone 模式下单次请求可能超过60秒，分句后每块约50-100字，2-10秒即可完成
+      final completed = await _ttsService!.speakLongText(text);
 
       if (_isDisposed) {
         _onTTSComplete();
         return;
       }
-      if (_ttsInterrupted) {
+      if (_ttsInterrupted || !completed) {
         // 被打断时 _interruptTTS 已恢复 state，直接退出
         return;
-      }
-
-      if (audioPath.isNotEmpty) {
-        // ★★★ V77 修复：播放前先 stop 上一轮的音频 ★★★
-        // 旧代码：播放完成后不 stop，player 留在 completed 状态
-        // 下一轮 setFilePath 可能无法正确重置 player 内部状态
-        try { await _audioPlayer!.stop(); } catch (_) {}
-        await _audioPlayer!.setFilePath(audioPath);
-        await _audioPlayer!.play();
-
-        // ★★★ 修复 V75：用 processingStateStream + completion future 替代轮询 ★★★
-        await _waitForPlaybackComplete();
       }
     } catch (e) {
       debugPrint('[RealtimeVoicePage] TTS 播放失败: $e');
