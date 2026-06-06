@@ -2613,3 +2613,60 @@ speakLongText()
 | `spirit_voice_chat_page.dart` | 添加 `edge` provider 映射；添加 `edgeVoice` 参数读取和传递 | 支持 Edge TTS 提供商 |
 | `realtime_voice_page.dart` | 添加 `edge` provider 映射；添加 `edgeVoice` 参数读取和传递 | 支持 Edge TTS 提供商 |
 | `session_detail_page.dart` | 添加 `edge` provider 映射和 switch case；添加 `edgeVoice` 参数读取和传递 | 支持 Edge TTS 提供商 |
+
+---
+
+### Session #35 — v0.40.0 品牌更新、TTS 默认 MiMo 及发布 (2026-06-06)
+
+**会话背景**：用户要求三项更新：TTS 默认使用 MiMo 并移除自动降级、项目品牌更名、发布 v0.40.0 到 GitHub 并打包 dmg/apk。
+
+**会话主要目的**：
+1. TTS 默认使用 MiMo，移除自动降级/切换逻辑，1分钟总超时控制
+2. 项目标题更名：英文 "MJ Nexus Series:Synpse"，中文 "MJ Nexus Series:灵犀通"，版本号 0.40.0
+3. 发布到 GitHub Release，打包 dmg 和 apk
+
+**完成的主要任务**：
+1. 修改 `voice_settings_page.dart` 默认 TTS 提供商从 `sherpa` 改为 `mimo`
+2. 重构 `tts_service.dart`：添加1分钟总超时、移除自动降级逻辑、修复 `_synthesizeInternal` 方法缺少 `try` 块的语法错误
+3. 清理未使用的 `_mimoTimeoutSeconds` 和 `_lastMiMoTimedOut` 字段
+4. 修改所有平台应用标题：Android、iOS、macOS、应用内硬编码标题
+5. 修改 `pubspec.yaml` 版本号为 0.40.0
+6. 修改 `app_en.arb` 和 `app_zh.arb` 的 `appTitle`
+7. 更新 `README.md` 和 `README_zh.md` 的版本号及更新日志
+8. 构建 Android APK (138.2MB) 和 macOS DMG
+9. 推送代码和标签到 GitHub，创建 v0.40.0 Release 并上传 APK 和 DMG
+
+**主要技术栈**：
+- Flutter + Dart（跨平台构建）
+- GitHub CLI (`gh release create`)
+- `hdiutil`（macOS DMG 打包）
+- TTS 服务架构（MiMo / Edge / Sherpa / OpenAI / System）
+
+**关键决策和解决方案**：
+- **TTS 超时控制**：在 `synthesize` 方法外层包装1分钟总超时，超时后抛出 `TimeoutException` 停止合成
+- **移除自动降级**：`_synthesizeInternal` 的 catch 块仅 rethrow，不再自动切换到其他提供商；`speak()` 方法保留降级到系统 TTS 作为最终兜底
+- **品牌更名**：遍历所有平台配置文件（AndroidManifest.xml、Info.plist）和应用内硬编码标题，统一修改为 "MJ Nexus Series"
+- **DMG 打包**：使用 `hdiutil create` 将 .app 打包为 UDZO 格式的 DMG，卷标为 "MJ Nexus Series"
+
+**会话中主要使用的工具**：
+- Read, Edit, Grep（代码审查和修改）
+- RunCommand（flutter analyze, flutter build apk/macos, hdiutil, git, gh）
+- TodoWrite（任务管理）
+
+**修改的文件**：
+| 文件 | 修改内容 | 修改原因 |
+|------|---------|---------|
+| `tts_service.dart` | 修复 `_synthesizeInternal` 缺少 `try` 块的语法错误；移除 MiMo/Edge/Sherpa 自动降级逻辑；清理未使用的 `_mimoTimeoutSeconds` 和 `_lastMiMoTimedOut` 字段 | 编译错误修复 + 用户要求移除自动降级 |
+| `voice_settings_page.dart` | 默认 TTS 提供商从 `sherpa` 改为 `mimo` | 用户要求默认使用 MiMo |
+| `pubspec.yaml` | 版本号从 `0.35.0-beta` 改为 `0.40.0` | 版本更新 |
+| `app_en.arb` | `appTitle` 改为 "MJ Nexus Series:Synpse" | 品牌更名 |
+| `app_zh.arb` | `appTitle` 改为 "MJ Nexus Series:灵犀通" | 品牌更名 |
+| `AndroidManifest.xml` | `android:label` 改为 "MJ Nexus Series" | 品牌更名 |
+| `ios/Runner/Info.plist` | `CFBundleDisplayName`/`CFBundleName` 改为 "MJ Nexus Series" | 品牌更名 |
+| `macos/Runner/Info.plist` | 新增 `CFBundleDisplayName`，`CFBundleName` 改为 "MJ Nexus Series" | 品牌更名 |
+| `app.dart` | `title` 改为 "MJ Nexus Series" | 品牌更名 |
+| `session_list_page.dart` | 侧边栏标题改为 "MJ Nexus Series" | 品牌更名 |
+| `onboarding_service.dart` | 引导页标题改为 "欢迎使用 MJ Nexus Series" | 品牌更名 |
+| `manual_page.dart` | 帮助页标题改为 "欢迎使用 MJ Nexus Series" | 品牌更名 |
+| `README.md` | 更新标题、版本号、添加 v0.40.0 更新日志 | 版本发布文档更新 |
+| `README_zh.md` | 更新标题、版本号、添加 v0.40.0 更新日志 | 版本发布文档更新 |
