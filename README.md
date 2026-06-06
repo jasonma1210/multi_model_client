@@ -219,3 +219,29 @@ Issues and Pull Requests are welcome!
 ## 📞 Contact
 
 For questions or suggestions, please open an issue on GitHub.
+
+---
+
+## 会话开发记录
+
+### Session #36 (2026-06-06): MiMo VoiceClone 超时修复 + V4 流式架构完善
+
+**会话背景**：MiMo VoiceClone TTS 合成超过60秒导致超时，日志显示 `TimeoutException` 和 `DioExceptionType.receiveTimeout` 双重触发。
+
+**主要问题**：
+1. `synthesize()` 的1分钟总超时与 VoiceClone 的60秒 `receiveTimeout` 几乎同时触发
+2. `spirit_voice_chat_page` 和 `realtime_voice_page` 直接调用 `synthesize(text)` 而非 `speakLongText(text)`，未使用 V4 分句流式合成
+3. VoiceClone 模型本身比普通 MiMo 慢（需处理参考音频），需要更长超时
+
+**修复内容**：
+
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `tts_service.dart` - `synthesize()` | VoiceClone 总超时从1分钟改为2分钟 | VoiceClone 需处理参考音频，比普通合成慢 |
+| `tts_service.dart` - `synthesizeWithMiMoClone()` | `receiveTimeout` 从60s提高到90s | 避免与外层2分钟总超时冲突 |
+| `tts_service.dart` - `_synthesizeWithMiMo()` | 动态超时：短文本15s/中等30s/长文本60s | 短文本不需要等30秒 |
+| `tts_service.dart` - `splitIntoSentences()` | MiMo 超长句(>80字)按逗号二次分句 | 降低单块合成时间 |
+| `spirit_voice_chat_page.dart` - `_speakResponse()` | 改用 `speakLongText()` 替代 `synthesize()` | 分句流式合成避免长文本超时 |
+| `realtime_voice_page.dart` - `_speakResponse()` | 改用 `speakLongText()` 替代 `synthesize()` | 同上 |
+
+**技术栈**：Flutter/Dart, MiMo TTS API, VoiceClone, Completer 异步模式
