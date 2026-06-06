@@ -35,34 +35,60 @@ import 'model_inference_engine.dart' show ChatMessage, ChatOptions;
 /// 预编译的正则表达式 - 性能优化
 /// 避免每次调用 _cleanThinkTags 时重复编译正则
 class _ThinkTagPatterns {
-  static final channelThoughtVaping = RegExp(
-    r'<\|channel\|>thought[\s\S]*?<\/?vaping',
-    multiLine: true,
+  // ★★★ V76 修复：精确匹配 Qwen3 等模型的 thinking 块 ★★★
+  // 策略：先用 channelThought 尝试匹配"有结束标签"的思考块；
+  // 如果匹配后仍有残留的 <|channel|>thought，用 channelThoughtToEnd
+  // 删除到字符串末尾（说明整个输出都是思考，没有正式回复）
+  static final channelThought = RegExp(
+    r'<\|channel\|>thought[\s\S]*?(?:<\/?(?:message|constrain|analysis|final))',
   );
-  static final channelThoughtEof = RegExp(
-    r'<\|channel\|>thought[\s\S]*?$',
-    multiLine: true,
+  // 兜底：匹配没有结束标签的思考块（从 <|channel|>thought 到字符串末尾）
+  static final channelThoughtToEnd = RegExp(
+    r'<\|channel\|>thought[\s\S]*$',
   );
   static final channelTag = RegExp(r'<\|channel\|>');
+  static final messageTag = RegExp(r'<\|message\|>');
   static final thinkingProcess = RegExp(
     r'Thinking Process:\s*',
-    multiLine: true,
   );
-  static final xmlLikeTag = RegExp(r'<\|[^|]*\|>');
+  // ★★★ V76 修复：xmlLikeTag 只匹配已知的控制标签 ★★★
+  // 旧正则 `<\|[^|]*\|>` 会匹配任何 <|xxx|> 格式，可能误删模型正常输出
+  // 修复：只匹配已知的 llamadart/llama.cpp 控制标签
+  static final xmlLikeTag = RegExp(
+    r'<\|(?:channel|message|constrain|analysis|final|think|thought|/think|/thought|im_start|im_end|/im_start|/im_end)\|>',
+  );
+  // 匹配 <think>...</think> 块（非贪婪）
+  static final xmlThinkBlock = RegExp(
+    r'<think>[\s\S]*?<\/think>',
+  );
 }
 
 /// 清洗 AI 输出中的思考标签（enableReasoning=false 时调用）
 /// 使用预编译正则表达式，避免每次调用时重复编译
 String _cleanThinkTags(String text) {
   if (text.isEmpty) return text;
-  
+
+  // ★★★ V76 修复：两步清洗策略，避免误删正常内容 ★★★
+  // 第一步：移除 <|channel|>thought...<|message|> 之间的思考块（Qwen3 格式）
   var cleaned = text
-    .replaceAll(_ThinkTagPatterns.channelThoughtVaping, '')
-    .replaceAll(_ThinkTagPatterns.channelThoughtEof, '')
-    .replaceAll(_ThinkTagPatterns.channelTag, '')
+    .replaceAll(_ThinkTagPatterns.channelThought, '');
+
+  // ★★★ V76 新增：如果仍有残留的 <|channel|>thought，说明没有结束标签，
+  // 整个输出都是思考内容，删除到字符串末尾
+  if (cleaned.contains('<|channel|>thought')) {
+    cleaned = cleaned.replaceAll(_ThinkTagPatterns.channelThoughtToEnd, '');
+  }
+
+  // 第二步：移除 <think>...</think> 块（DeepSeek-R1 / Qwen 旧版格式）
+  cleaned = cleaned
+    .replaceAll(_ThinkTagPatterns.xmlThinkBlock, '')
     .replaceAll(_ThinkTagPatterns.thinkingProcess, '')
-    .replaceAll(_ThinkTagPatterns.xmlLikeTag, '');
-  
+    .replaceAll(_ThinkTagPatterns.messageTag, '')
+    .replaceAll(_ThinkTagPatterns.channelTag, '');
+
+  // 第三步：清理残余的已知控制标签（V76：只匹配已知标签，避免误删）
+  cleaned = cleaned.replaceAll(_ThinkTagPatterns.xmlLikeTag, '');
+
   return cleaned.trim();
 }
 
@@ -169,6 +195,9 @@ class LocalFFIEngine {
     // 如果已有模型，先卸载
     await dispose();
 
+    // ★★★ CPU 模式标志（安全模式 / Metal 崩溃回退共用）★★★
+    bool forceCpuMode = false;
+
     // ★★★ 配置 llamadart 日志（仅首次）★★★
     // 捕获 llama.cpp 的警告和错误日志，用于诊断 SIGABRT 崩溃
     if (!_loggingConfigured) {
@@ -201,6 +230,8 @@ class LocalFFIEngine {
         contextSize: 2048,
       );
       _lastLoadCrashed = false;
+      // ★ 安全模式 = CPU 模式，必须同时设置 forceCpuMode
+      forceCpuMode = true;
     }
 
     // ★★★ 写入崩溃标记（加载前）★★★
@@ -297,10 +328,36 @@ class LocalFFIEngine {
     debugPrint('[LocalFFIEngine] 📊 内存预估: 模型${modelSizeMB}MB + KV${kvCacheMB}MB + 运行时256MB = 约${estimatedMemoryMB}MB');
     debugPrint('[LocalFFIEngine] 📊 设备可用: ${availableMB}MB，预留25%后: ${safetyThreshold}MB');
     
-    // 如果预估内存超过安全阈值，尝试降低配置
-    if (estimatedMemoryMB > safetyThreshold) {
+    // ★★★ Android Swap/ZRAM 防护 ★★★
+    // 大模型推理是"内存带宽受限"任务，一旦触发 ZRAM/Swap：
+    // - 闪存速度比 LPDDR5X 慢几十倍
+    // - 生成速度从 20 tokens/s 暴跌到 1 tokens/s
+    // 防护策略：确保模型内存需求 < 可用内存的 75%，避免触发 Swap
+    if (Platform.isAndroid && estimatedMemoryMB > safetyThreshold) {
+      debugPrint('[LocalFFIEngine] ⚠️ Android Swap 防护触发！');
+      debugPrint('[LocalFFIEngine] ⚠️ 预估内存 ${estimatedMemoryMB}MB > 安全阈值 ${safetyThreshold}MB');
+      debugPrint('[LocalFFIEngine] ⚠️ 触发 Swap 会导致推理速度暴跌 20x，必须降低配置');
+      
+      // 策略1：降低 contextSize（KV Cache 是内存大头）
+      final reducedContextSize = (config.contextSize * 0.6).toInt().clamp(2048, 65536);
+      debugPrint('[LocalFFIEngine] 🔧 降低 contextSize: ${config.contextSize} → $reducedContextSize');
+      
+      // 策略2：如果降低 context 后仍然超限，进一步降低 GPU 层数
+      // GPU offload 需要额外显存，减少 GPU 层可以释放部分内存
+      var adjustedGpuLayers = params?.gpuLayers ?? config.gpuLayers;
+      final reestimatedMB = modelSizeMB + (reducedContextSize * 50) ~/ 1024 + 256;
+      if (reestimatedMB > safetyThreshold && adjustedGpuLayers > 20) {
+        adjustedGpuLayers = (adjustedGpuLayers * 0.6).round().clamp(0, 999);
+        debugPrint('[LocalFFIEngine] 🔧 降低 GPU 层数: ${params?.gpuLayers ?? config.gpuLayers} → $adjustedGpuLayers');
+      }
+      
+      params = (params ?? const LocalModelParams()).copyWith(
+        contextSize: reducedContextSize,
+        gpuLayers: adjustedGpuLayers,
+      );
+    } else if (estimatedMemoryMB > safetyThreshold) {
+      // 非 Android 平台：温和降低配置
       debugPrint('[LocalFFIEngine] ⚠️ 预估内存超过安全阈值，尝试降低配置...');
-      // 降低 contextSize，缩减比例从 60% 放宽到 75%
       final reducedContextSize = (config.contextSize * 0.75).toInt().clamp(2048, 65536);
       debugPrint('[LocalFFIEngine] 🔧 降低 contextSize: ${config.contextSize} → $reducedContextSize');
       params = (params ?? const LocalModelParams()).copyWith(
@@ -311,7 +368,7 @@ class LocalFFIEngine {
     // ★★★ macOS Metal 加速策略 ★★★
     // 默认启用 Metal GPU 加速（与 LM Studio 行为一致）
     // 如果 Metal 崩溃（SIGSEGV），loadModel 的 catch 块会自动回退到 CPU 模式
-    bool forceCpuMode = false;
+    // forceCpuMode 已在安全模式检测处声明
 
     // ★★★ 多维度动态适配：Android CPU 特性检测 ★★★
     // 优先级：NPU QNN > Vulkan > DotProd/i8mm > Generic
@@ -353,6 +410,16 @@ class LocalFFIEngine {
 
       // 构建模型参数（异步，根据设备内存动态调整）
       var modelParams = await _buildModelParams(params, forceCpuMode: forceCpuMode);
+      
+      // ★★★ 加载前打印完整参数（方便排查 Prefill 卡死问题）★★★
+      debugPrint('[LocalFFIEngine] 🚀 loadModel 参数: gpuLayers=${modelParams.gpuLayers}, '
+          'contextSize=${modelParams.contextSize}, '
+          'threads=${modelParams.numberOfThreads}, '
+          'batchThreads=${modelParams.numberOfThreadsBatch}, '
+          'batchSize=${modelParams.batchSize}, '
+          'microBatchSize=${modelParams.microBatchSize}, '
+          'flashAttention=${modelParams.flashAttention}, '
+          'preferredBackend=${modelParams.preferredBackend}');
       
       // 使用 llamadart 加载模型
       // ★★★ 关键：这里可能触发 SIGSEGV（Metal 缓冲区分配失败）★★★
@@ -450,13 +517,16 @@ class LocalFFIEngine {
           _llamaEngine = cpuEngine;
           
           // 使用纯 CPU 模式（gpuLayers = 0）
+      // ★ Android Metal 崩溃回退也使用优化的 batch 大小
+      final isAndroidFallback = Platform.isAndroid;
+      final fallbackThreads = isAndroidFallback ? 2 : (Platform.numberOfProcessors > 4 ? 6 : 4);
       final modelParams = ModelParams(
         gpuLayers: 0,  // 禁用 GPU 加速
         contextSize: (params?.contextSize ?? 4096).clamp(512, 8192),
-        numberOfThreads: Platform.numberOfProcessors > 4 ? 6 : 4,
-        numberOfThreadsBatch: Platform.numberOfProcessors > 4 ? 6 : 4,
-        batchSize: 512,
-        microBatchSize: 512,
+        numberOfThreads: fallbackThreads,
+        numberOfThreadsBatch: fallbackThreads,
+        batchSize: isAndroidFallback ? 128 : 512,
+        microBatchSize: isAndroidFallback ? 64 : 512,
         flashAttention: FlashAttention.disabled,
       );
           
@@ -734,8 +804,19 @@ class LocalFFIEngine {
     if (engine == null) {
       throw LocalFFIException('LocalFFIEngine._llamaEngine is null after _ensureInitialized().');
     }
+
+    // ★★★ Prefill 阶段诊断日志 ★★★
+    debugPrint('[LocalFFIEngine] ⏱️ generate() 开始 engine.create() → Prefill...');
+    final prefillStopwatch = Stopwatch()..start();
+    bool firstChunkReceived = false;
+
     try {
       await for (final chunk in engine.create(llamaMessages)) {
+        if (!firstChunkReceived) {
+          firstChunkReceived = true;
+          prefillStopwatch.stop();
+          debugPrint('[LocalFFIEngine] ✅ generate() Prefill 完成！首 token 耗时=${prefillStopwatch.elapsedMilliseconds}ms');
+        }
         _contextInvalidated = false;
         if (chunk.choices.isEmpty) continue;
         final content = chunk.choices.first.delta.content;
@@ -821,18 +902,47 @@ class LocalFFIEngine {
     if (engine == null) {
       throw LocalFFIException('LocalFFIEngine._llamaEngine is null after _ensureInitialized().');
     }
+
+    // ★★★ Prefill 阶段诊断日志 ★★★
+    // 骁龙 8 Elite 上 Vulkan Prefill 可能卡死数分钟
+    // 此日志帮助定位卡在哪个阶段
+    debugPrint('[LocalFFIEngine] ⏱️ 开始 engine.create() → Prefill 阶段...');
+    debugPrint('[LocalFFIEngine] ⏱️ 消息数=${llamaMessages.length}, 上下文=${_contextMaxSize ?? "unknown"}');
+    final prefillStopwatch = Stopwatch()..start();
+
     try {
+      // ★★★ 诊断：流式推理 token 计数 ★★★
+      int chunkCount = 0;
+      int nonEmptyContentCount = 0;
+      int emptyAfterCleanCount = 0;
+      final stopwatch = Stopwatch()..start();
       await for (final chunk in engine.create(llamaMessages)) {
+        if (chunkCount == 0) {
+          prefillStopwatch.stop();
+          debugPrint('[LocalFFIEngine] ✅ Prefill 完成！首 token 耗时=${prefillStopwatch.elapsedMilliseconds}ms');
+        }
+        chunkCount++;
         // 上下文重置成功，正常推理
         _contextInvalidated = false;
 
         if (chunk.choices.isEmpty) continue;
         final content = chunk.choices.first.delta.content;
         if (content != null) {
-          // ★★★ 清洗思考标签（enableReasoning=false 时）★★★
-          yield enableReasoning ? content : _cleanThinkTags(content);
+          final finalContent = enableReasoning ? content : _cleanThinkTags(content);
+          if (finalContent.isNotEmpty) {
+            nonEmptyContentCount++;
+            // ★★★ 清洗思考标签（enableReasoning=false 时）★★★
+            yield finalContent;
+          } else {
+            emptyAfterCleanCount++;
+          }
         }
       }
+      stopwatch.stop();
+      debugPrint('[LocalFFIEngine] 📊 generateStream 统计: '
+          'chunks=$chunkCount, 非空yield=$nonEmptyContentCount, '
+          '清洗后空=$emptyAfterCleanCount, '
+          '耗时=${stopwatch.elapsedMilliseconds}ms');
       // 流式推理完成后刷新上下文使用率
       refreshContextUsage();
     } catch (e) {
@@ -1067,7 +1177,49 @@ class LocalFFIEngine {
       ));
     }
 
-    for (final message in mergedMessages) {
+    // ★★★ 确保消息角色交替（system -> user -> assistant -> user -> ...）★★★
+    // llamadart ChatTemplateEngine 要求角色严格交替
+    // 记忆宫殿等模块可能在中间注入 system 消息，导致角色不交替
+    final fixedMessages = <ChatMessage>[];
+    for (int i = 0; i < mergedMessages.length; i++) {
+      final msg = mergedMessages[i];
+      final isSystem = msg.role == 'system';
+      final isUser = msg.role == 'user';
+      final isAssistant = msg.role == 'assistant';
+
+      // 合并连续相同角色消息
+      if (fixedMessages.isNotEmpty && fixedMessages.last.role == msg.role && !isSystem) {
+        final prev = fixedMessages.removeLast();
+        fixedMessages.add(ChatMessage(role: prev.role, content: '${prev.content}\n\n${msg.content}'));
+        continue;
+      }
+
+      // system 后不能紧跟 assistant，插入空 user
+      if (isSystem && fixedMessages.isNotEmpty && fixedMessages.last.role == 'assistant') {
+        fixedMessages.add(ChatMessage(role: 'user', content: '继续'));
+      }
+
+      // assistant 后不能紧跟 user 以外的角色（非首条）
+      if (isAssistant && fixedMessages.isNotEmpty && fixedMessages.last.role == 'assistant') {
+        fixedMessages.add(ChatMessage(role: 'user', content: '继续'));
+      }
+
+      // user 后不能紧跟 user（合并已在上面处理，这里处理遗漏）
+      if (isUser && fixedMessages.isNotEmpty && fixedMessages.last.role == 'user') {
+        final prev = fixedMessages.removeLast();
+        fixedMessages.add(ChatMessage(role: 'user', content: '${prev.content}\n\n${msg.content}'));
+        continue;
+      }
+
+      fixedMessages.add(msg);
+    }
+
+    // 确保首条非 system 消息是 user
+    if (fixedMessages.isNotEmpty && fixedMessages.first.role != 'system' && fixedMessages.first.role != 'user') {
+      fixedMessages.insert(0, ChatMessage(role: 'user', content: '你好'));
+    }
+
+    for (final message in fixedMessages) {
       final role = switch (message.role) {
         'system' => LlamaChatRole.system,
         'user' => LlamaChatRole.user,
@@ -1183,7 +1335,7 @@ class LocalFFIEngine {
   Future<({int gpuLayers, int contextSize})> _getRecommendedConfig() async {
     final memoryMB = await _getDeviceMemoryMB();
     final memoryGB = memoryMB ~/ 1024;
-    
+
     // 根据设备内存分级配置（优化移动端上下文大小）
     if (memoryGB < 4) {
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 低端设备 (<4GB)');
@@ -1199,15 +1351,25 @@ class LocalFFIEngine {
       return (gpuLayers: 40, contextSize: 16384);
     } else if (memoryGB < 16) {
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 高端设备 (12-16GB)');
-      return (gpuLayers: 60, contextSize: 16384);
-    } else if (memoryGB < 32) {
-      debugPrint('[LocalFFIEngine] 🔧 内存配置: 旗舰设备 (16-32GB), macOS/PC');
+      return (gpuLayers: 60, contextSize: 32768);
+    } else if (memoryGB < 24) {
+      // ★ 优化：16-24GB（如 16GB 内存手机）使用更大的 ctx
+      debugPrint('[LocalFFIEngine] 🔧 内存配置: 旗舰设备 (16-24GB)');
       return (gpuLayers: 999, contextSize: 32768);
+    } else if (memoryGB < 32) {
+      // ★ 新增：24-32GB 中等 PC
+      debugPrint('[LocalFFIEngine] 🔧 内存配置: 高端 PC (24-32GB)');
+      return (gpuLayers: 999, contextSize: 49152);
     } else if (memoryGB < 48) {
+      // ★ 优化：32-48GB 工作站，使用更大 ctx
       debugPrint('[LocalFFIEngine] 🔧 内存配置: 工作站级别 (32-48GB)');
       return (gpuLayers: 999, contextSize: 65536);
+    } else if (memoryGB < 64) {
+      // ★ 新增：48-64GB 大内存
+      debugPrint('[LocalFFIEngine] 🔧 内存配置: 高性能工作站 (48-64GB)');
+      return (gpuLayers: 999, contextSize: 98304);
     } else {
-      debugPrint('[LocalFFIEngine] 🔧 内存配置: 高性能工作站 (>48GB), 大上下文窗口');
+      debugPrint('[LocalFFIEngine] 🔧 内存配置: 服务器级别 (>64GB)');
       return (gpuLayers: 999, contextSize: 131072);
     }
   }
@@ -1216,17 +1378,30 @@ class LocalFFIEngine {
   /// 根据设备内存动态调整配置，避免 OOM 闪退
   /// [forceCpuMode] - 强制 CPU 模式（Metal 不可用时调用）
   Future<ModelParams> _buildModelParams(LocalModelParams? params, {bool forceCpuMode = false}) async {
+    // ★★★ Android 批处理大小优化 ★★★
+    // batchSize=512 在骁龙 8 Elite 上会导致首字延迟 1 分钟！
+    // 原因：大 batch 在 Prefill 阶段需要一次性处理大量 token，
+    //        移动端 GPU 内存带宽不足，导致 Prefill 极慢
+    // 解决：Android 使用 batchSize=128, microBatchSize=64
+    //       桌面端保持 batchSize=512, microBatchSize=512
+    final isAndroid = Platform.isAndroid;
+    final defaultBatchSize = isAndroid ? 128 : 512;
+    final defaultMicroBatchSize = isAndroid ? 64 : 512;
+
     // 强制 CPU 模式：禁用所有 GPU 加速
     if (forceCpuMode) {
-      final threads = Platform.numberOfProcessors > 4 ? 6 : 4;
-      debugPrint('[LocalFFIEngine] 🔧 强制CPU模式: gpuLayers=0, threads=$threads, flashAttention=false');
+      // ★ Android CPU 模式：2 线程绑定超大核
+      final threads = isAndroid ? 2 : (Platform.numberOfProcessors > 4 ? 6 : 4);
+      final cpuBatchSize = isAndroid ? 128 : 512;
+      final cpuMicroBatchSize = isAndroid ? 64 : 512;
+      debugPrint('[LocalFFIEngine] 🔧 强制CPU模式: gpuLayers=0, threads=$threads, batch=$cpuBatchSize, flashAttention=false');
       return ModelParams(
         gpuLayers: 0,
         contextSize: (params?.contextSize ?? 4096).clamp(512, 8192),
         numberOfThreads: threads,
         numberOfThreadsBatch: threads,
-        batchSize: 512,
-        microBatchSize: 512,
+        batchSize: cpuBatchSize,
+        microBatchSize: cpuMicroBatchSize,
         flashAttention: FlashAttention.disabled,
       );
     }
@@ -1239,24 +1414,24 @@ class LocalFFIEngine {
       final effectiveGpuLayers = forceCpuMode ? 0 : params.gpuLayers.clamp(0, 999);
       final effectiveContextSize = params.contextSize.clamp(512, 131072);
       final threads = forceCpuMode 
-          ? (Platform.numberOfProcessors > 4 ? 6 : 4)
+          ? (isAndroid ? 2 : (Platform.numberOfProcessors > 4 ? 6 : 4))
           : params.cpuThreads;
       
-      debugPrint('[LocalFFIEngine] 🔧 使用用户自定义配置${forceCpuMode ? " (强制CPU模式)" : ""}: gpuLayers=$effectiveGpuLayers, ctx=$effectiveContextSize, threads=$threads, batchSize=512, flashAttention=true');
+      debugPrint('[LocalFFIEngine] 🔧 使用用户自定义配置${forceCpuMode ? " (强制CPU模式)" : ""}: gpuLayers=$effectiveGpuLayers, ctx=$effectiveContextSize, threads=$threads, batch=$defaultBatchSize, flashAttention=true');
       return ModelParams(
         gpuLayers: effectiveGpuLayers,
         contextSize: effectiveContextSize,
         numberOfThreads: threads,
         numberOfThreadsBatch: threads,
-        batchSize: 512,
-        microBatchSize: 512,
+        batchSize: defaultBatchSize,
+        microBatchSize: defaultMicroBatchSize,
         flashAttention: forceCpuMode ? FlashAttention.disabled : FlashAttention.enabled,
       );
     }
     
     // 根据设备内存动态调整
     final config = await _getRecommendedConfig();
-    final isAndroid = Platform.isAndroid;
+    // isAndroid 已在方法开头定义
     final isMacOS = Platform.isMacOS;
     
     // ★★★ 动态适配 GPU 层数和上下文大小 ★★★
@@ -1279,6 +1454,7 @@ class LocalFFIEngine {
 
     // ★★★ 线程数优化 ★★★
     // macOS (Apple Silicon): P核数通常为性能核心数，使用 numberOfProcessors * 2/3
+    // Android: 0=自动（llama.cpp 默认）→ 改为使用 numberOfProcessors - 2（保留 2 核给系统）
     // 其他平台: 0 = 自动检测
     final int optimalThreads;
     final int optimalBatchThreads;
@@ -1296,21 +1472,53 @@ class LocalFFIEngine {
       // 桌面平台: 使用物理核心数（排除超线程）
       optimalThreads = (Platform.numberOfProcessors * 0.75).round().clamp(2, 16);
       optimalBatchThreads = (Platform.numberOfProcessors * 0.75).round().clamp(2, 16);
+    } else if (Platform.isAndroid) {
+      // ★★★ Android 优化：大核绑定策略 ★★★
+      // Android big.LITTLE 架构下，EAS（能量感知调度）会把推理任务分配给小核
+      // 必须显式设置线程数，避免"裸奔"在小核上
+      //
+      // 骁龙 8 Elite 5 核心: 2×超大核(P) + 4×大核(M) + 2×小核(E) = 8 核
+      // 推理线程数 = 大核数（跳过小核）
+      // 优先使用原生检测的大核信息，回退到经验值
+      int androidThreads;
+      try {
+        final bigCoreInfo = await CpuFeatureDetector.instance.getBigCoreInfo();
+        androidThreads = bigCoreInfo.recommendedThreads;
+        debugPrint('[LocalFFIEngine] 🔧 Android 大核检测: ${bigCoreInfo.bigCoreCount}大核 + ${bigCoreInfo.littleCoreCount}小核 → 线程数=$androidThreads');
+      } catch (e) {
+        // 回退：总核数 * 0.75（经验值，跳过约 1/4 的小核）
+        final totalCores = Platform.numberOfProcessors;
+        androidThreads = (totalCores * 0.75).round().clamp(2, 10);
+        debugPrint('[LocalFFIEngine] 🔧 Android 大核检测失败，使用经验值: $androidThreads');
+      }
+      optimalThreads = androidThreads;
+      optimalBatchThreads = optimalThreads;
     } else {
       optimalThreads = 0; // 自动检测
       optimalBatchThreads = 0; // 自动检测
     }
 
-    debugPrint('[LocalFFIEngine] 🔧 最终配置: gpuLayers=$gpuLayers, contextSize=$contextSize, threads=$optimalThreads, batchSize=512, microBatchSize=512, flashAttention=true');
+    debugPrint('[LocalFFIEngine] 🔧 最终配置: gpuLayers=$gpuLayers, contextSize=$contextSize, threads=$optimalThreads, batchSize=$defaultBatchSize, microBatchSize=$defaultMicroBatchSize, flashAttention=true');
+
+    // ★★★ Android Vulkan 后端选择 ★★★
+    // 骁龙 8 Elite 5 的 Adreno GPU 通过 Vulkan 可获得 3-5 倍推理加速
+    // llamadart 默认 Android 使用 CPU，必须显式指定 GpuBackend.vulkan
+    // 如果 Vulkan 不可用，llamadart 会自动回退到 CPU
+    final preferredBackend = isAndroid
+        ? GpuBackend.vulkan
+        : (isMacOS ? GpuBackend.metal : GpuBackend.auto);
+
+    debugPrint('[LocalFFIEngine] 🔧 GPU 后端: $preferredBackend');
 
     return ModelParams(
       gpuLayers: gpuLayers,
       contextSize: contextSize,
       numberOfThreads: optimalThreads,
       numberOfThreadsBatch: optimalBatchThreads,
-      batchSize: 512,
-      microBatchSize: 512,
+      batchSize: defaultBatchSize,
+      microBatchSize: defaultMicroBatchSize,
       flashAttention: FlashAttention.enabled,
+      preferredBackend: preferredBackend,
     );
   }
 
@@ -1478,6 +1686,26 @@ class LocalFFIEngine {
       // 3. 再次延迟，让 GC 有时间执行
       await Future.delayed(const Duration(milliseconds: 100));
       
+      // ★★★ 4. Android 专用内存优化 ★★★
+      // Android 应用有 4GB Java 堆内存限制，大模型推理需要绕过此限制
+      // llama.cpp 使用 Native 内存（C++ malloc），不受 Java 堆限制
+      // 但如果系统内存紧张，Android 会触发 ZRAM/Swap，导致推理速度暴跌
+      if (Platform.isAndroid) {
+        // 检查可用内存是否充足
+        final hardwareInfo = await _hardwareChecker.getHardwareInfo();
+        final availableMB = hardwareInfo.availableRamMB;
+        final totalMB = hardwareInfo.totalRamMB;
+        
+        debugPrint('[LocalFFIEngine] 📱 Android 内存: 总计${totalMB}MB, 可用${availableMB}MB');
+        
+        // 如果可用内存 < 总内存的 30%，发出 Swap 风险警告
+        if (availableMB < totalMB * 0.3) {
+          debugPrint('[LocalFFIEngine] ⚠️ Android 内存紧张！可用 ${availableMB}MB < 总计 ${totalMB}MB 的 30%');
+          debugPrint('[LocalFFIEngine] ⚠️ 高概率触发 ZRAM/Swap，推理速度可能暴跌 20x');
+          debugPrint('[LocalFFIEngine] ⚠️ 建议：关闭其他应用，或选择更小的模型');
+        }
+      }
+      
       debugPrint('[LocalFFIEngine] ✅ 系统内存优化完成');
     } catch (e) {
       debugPrint('[LocalFFIEngine] ⚠️ 内存优化失败（非致命）: $e');
@@ -1523,7 +1751,7 @@ class LocalFFIEngine {
   // ════════════════════════════════════════════════════════════════════════
 
   /// 验证 GGUF 文件头，返回诊断信息字符串
-  /// GGUF 格式：前 4 字节是魔数 "GGUF"(0x46475547)，接着 4 字节是版本号
+  /// GGUF 格式：前 4 字节是魔数 "GGUF"(0x46554747)，接着 4 字节是版本号
   Future<String> _validateGgufHeader(String filePath, int fileSizeBytes) async {
     try {
       final file = File(filePath);
@@ -1542,8 +1770,8 @@ class LocalFFIEngine {
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join(' ');
 
-      // GGUF 魔数 = 0x46475547 = "GGUF"
-      const ggufMagic = 0x46475547;
+      // GGUF 魔数 = 0x46554747 = "GGUF"（小端序：0x47,0x47,0x55,0x46）
+      const ggufMagic = 0x46554747;
       if (magic != ggufMagic) {
         return '❌ 非 GGUF 格式: magic=0x${magic.toRadixString(16)} '
             '(期望 0x${ggufMagic.toRadixString(16)}), '

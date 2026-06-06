@@ -691,6 +691,12 @@ class ModelInferenceEngine implements IModelManager {
         _verifiedRemoteModels.contains(modelId);
   }
 
+  /// 判断模型是否为本地模型
+  Future<bool> isLocalModel(String modelId) async {
+    final entry = await _getModelEntry(modelId);
+    return entry?.isLocal ?? false;
+  }
+
   /// 查询模型是否支持多模态（图片输入）
   /// 用于 DialogueEngine 决定历史消息是否保留图片
   Future<bool> supportsMultimodal(String modelId) async {

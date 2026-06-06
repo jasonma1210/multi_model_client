@@ -1,13 +1,15 @@
 /// 语音模型服务 - LLM Studio 语音模型管理模块
-/// 
+///
 /// 功能：
 /// - ASR/TTS 模型下载管理
 /// - 模型版本控制
 /// - 断点续传下载
 /// - 多平台模型适配
-/// 
+/// - 镜像源智能切换（国内/海外）
+/// - 远程版本检查与更新
+///
 /// @author JianMa
-/// @version 1.0.0
+/// @version 1.1.0
 library;
 
 import 'dart:async';
@@ -18,6 +20,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'mirror_service.dart';
+import 'model_version_service.dart';
 
 /// 语音模型类型
 enum VoiceModelType {
@@ -584,6 +589,113 @@ class VoiceModelService {
   /// 获取下载进度
   VoiceModelDownloadProgress? getDownloadProgress(String modelId) {
     return _downloadProgress[modelId];
+  }
+
+  /// 启动下载（公开 API，集成镜像智能选择）
+  ///
+  /// 流程：
+  /// 1. 根据模型 preferChinaMirror 标记 + 当前语言/网络选择镜像
+  /// 2. 重排 downloadUrl + mirrorUrls 顺序（偏好镜像排前）
+  /// 3. 调用内部下载逻辑
+  Future<void> startDownload(
+    String modelId, {
+    void Function(VoiceModelDownloadProgress progress)? onProgress,
+  }) async {
+    final allModels = <VoiceModelInfo>[...asrModels, ...ttsModels];
+    final model = allModels.where((m) => m.id == modelId).firstOrNull;
+    if (model == null) {
+      onProgress?.call(VoiceModelDownloadProgress(
+        modelId: modelId,
+        status: 'error',
+        error: 'Model not found: $modelId',
+      ));
+      return;
+    }
+
+    // 1. 决定镜像偏好
+    final preferredMirror = await MirrorService.instance.detectBestMirror();
+    MirrorService.instance.setUserPreference(preferredMirror);
+    debugPrint('[VoiceModelService] 模型 ${model.id} 使用镜像: $preferredMirror');
+
+    // 2. 重排 downloadUrl + mirrorUrls：偏好镜像的 URL 排前面
+    final allUrls = model.allDownloadUrls;
+    final reorderedUrls = <String>[];
+    for (final url in allUrls) {
+      if (preferredMirror == MirrorType.china) {
+        if (url.contains('modelscope.cn') || url.contains('hf-mirror.com')) {
+          reorderedUrls.insert(0, url);
+        } else {
+          reorderedUrls.add(url);
+        }
+      } else {
+        if (url.contains('huggingface.co') || url.contains('github.com')) {
+          reorderedUrls.insert(0, url);
+        } else {
+          reorderedUrls.add(url);
+        }
+      }
+    }
+    // 重新组合：主 URL + 镜像 URLs
+    final newDownloadUrl = reorderedUrls.isNotEmpty ? reorderedUrls.first : model.downloadUrl;
+    final newMirrorUrls = reorderedUrls.length > 1 ? reorderedUrls.sublist(1) : <String>[];
+
+    // 3. 替换为新顺序的 model
+    final effectiveModel = VoiceModelInfo(
+      id: model.id,
+      name: model.name,
+      description: model.description,
+      type: model.type,
+      version: model.version,
+      downloadUrl: newDownloadUrl,
+      mirrorUrls: newMirrorUrls,
+      archiveName: model.archiveName,
+      fileSize: model.fileSize,
+      checksum: model.checksum,
+      supportedPlatforms: model.supportedPlatforms,
+      minVersion: model.minVersion,
+      voices: model.voices,
+      isDirectDownload: model.isDirectDownload,
+      directFiles: model.directFiles,
+    );
+
+    // 4. 调用原下载逻辑
+    await downloadModel(
+      modelId: effectiveModel.id,
+      onProgress: onProgress ?? (_) {},
+    );
+  }
+
+  /// 检查所有模型是否有更新
+  Future<List<ModelVersionInfo>> checkForUpdates() async {
+    final results = <ModelVersionInfo>[];
+    final allModels = <VoiceModelInfo>[...asrModels, ...ttsModels];
+    for (final model in allModels) {
+      if (model.checksum == null) continue; // 没有 GitHub repo 标识，跳过
+      final installedVersion = await _getInstalledVersion(model.id);
+      final info = await ModelVersionService.instance.checkForUpdate(
+        modelId: model.id,
+        installedVersion: installedVersion,
+        githubRepo: model.checksum, // 暂用 checksum 字段存 github repo
+        specificTag: null,
+      );
+      results.add(info);
+    }
+    return results;
+  }
+
+  /// 设置镜像偏好（null = 自动）
+  void setMirrorPreference(MirrorType? type) {
+    MirrorService.instance.setUserPreference(type);
+  }
+
+  /// 获取当前生效的镜像
+  Future<MirrorType> getCurrentMirror() {
+    return MirrorService.instance.detectBestMirror();
+  }
+
+  /// 获取已安装的本地版本
+  Future<String?> _getInstalledVersion(String modelId) {
+    return getInstalledVersion(modelId);
   }
 
   /// 下载模型（支持断点续传）

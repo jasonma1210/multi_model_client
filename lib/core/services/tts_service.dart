@@ -3,17 +3,20 @@
 /// 
 /// 负责：
 /// - 文本转语音合成
-/// - 多种 TTS 后端支持（OpenAI / Sherpa-ONNX / 系统内置）
+/// - 多种 TTS 后端支持（OpenAI / MiMo / Edge / Sherpa-ONNX / 系统内置）
 /// - 长文本分块处理
 /// - 音频播放控制
+/// - MiMo 优先 + 超时降级（Edge TTS / Sherpa）
 /// 
 /// 支持的 TTS 后端：
 /// - OpenAI TTS API（云端，高质量）
-/// - Sherpa-ONNX（本地离线，中文优化）
-/// - 系统内置 TTS（macOS/Windows/iOS/Android）
+/// - MiMo TTS API（云端，中文优化，优先使用）
+/// - Edge TTS（微软免费神经网络语音，WebSocket 流式，降级方案）
+/// - Sherpa-ONNX（本地离线，中文优化，无网降级方案）
+/// - 系统内置 TTS（macOS/Windows/iOS/Android，最终降级）
 /// 
 /// @author JianMa
-/// @version 1.1.0
+/// @version 2.0.0
 library;
 
 import 'dart:async';
@@ -29,6 +32,8 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:crypto/crypto.dart';
 import 'voice_model_service.dart';
 import 'tts_style_parser.dart';
 import '../platform/platform_utils.dart';
@@ -37,6 +42,7 @@ import '../platform/platform_utils.dart';
 enum TTSProvider {
   openai,    // OpenAI TTS API (云端)
   mimo,      // 小米 MiMo TTS API (云端，中文优化)
+  edge,      // 微软 Edge TTS (免费，WebSocket 流式，降级方案)
   sherpa,    // Sherpa-ONNX 本地离线 TTS (中文优化)
   system,    // 系统内置 TTS (macOS/Windows/iOS/Android)
 }
@@ -58,6 +64,46 @@ enum MiMoVoice {
   default_zh,    // 中文女声
   default_en,    // 英文女声
 }
+
+/// Edge TTS 音色（微软免费神经网络语音）
+enum EdgeVoice {
+  xiaoxiao,     // zh-CN-XiaoxiaoNeural (中文女声，温暖自然)
+  xiaoyi,       // zh-CN-XiaoyiNeural (中文女声，活泼)
+  yunjian,       // zh-CN-YunjianNeural (中文男声，沉稳)
+  xiaochen,     // zh-CN-XiaochenNeural (中文女声，甜美)
+  xiaohan,      // zh-CN-XiaohanNeural (中文女声，温柔)
+  xiaomeng,     // zh-CN-XiaomengNeural (中文女声，可爱)
+  xiaomo,       // zh-CN-XiaomoNeural (中文女声，成熟)
+  xiaoqiu,      // zh-CN-XiaoqiuNeural (中文女声，知性)
+  xiaorui,      // zh-CN-XiaoruiNeural (中文女声，温暖)
+  xiaoshuang,   // zh-CN-XiaoshuangNeural (中文女声，童声)
+  xiaoxuan,     // zh-CN-XiaoxuanNeural (中文女声，优雅)
+  xiaoyan,      // zh-CN-XiaoyanNeural (中文女声，专业)
+  xiaozhen,     // zh-CN-XiaozhenNeural (中文女声，新闻)
+  yunxi,        // zh-CN-YunxiNeural (中文男声，阳光)
+  yunxia,       // zh-CN-YunxiaNeural (中文男声，少年)
+  yunyang,      // zh-CN-YunyangNeural (中文男声，新闻)
+}
+
+/// Edge TTS 音色映射
+const Map<EdgeVoice, String> _edgeVoiceNames = {
+  EdgeVoice.xiaoxiao: 'zh-CN-XiaoxiaoNeural',
+  EdgeVoice.xiaoyi: 'zh-CN-XiaoyiNeural',
+  EdgeVoice.yunjian: 'zh-CN-YunjianNeural',
+  EdgeVoice.xiaochen: 'zh-CN-XiaochenNeural',
+  EdgeVoice.xiaohan: 'zh-CN-XiaohanNeural',
+  EdgeVoice.xiaomeng: 'zh-CN-XiaomengNeural',
+  EdgeVoice.xiaomo: 'zh-CN-XiaomoNeural',
+  EdgeVoice.xiaoqiu: 'zh-CN-XiaoqiuNeural',
+  EdgeVoice.xiaorui: 'zh-CN-XiaoruiNeural',
+  EdgeVoice.xiaoshuang: 'zh-CN-XiaoshuangNeural',
+  EdgeVoice.xiaoxuan: 'zh-CN-XiaoxuanNeural',
+  EdgeVoice.xiaoyan: 'zh-CN-XiaoyanNeural',
+  EdgeVoice.xiaozhen: 'zh-CN-XiaozhenNeural',
+  EdgeVoice.yunxi: 'zh-CN-YunxiNeural',
+  EdgeVoice.yunxia: 'zh-CN-YunxiaNeural',
+  EdgeVoice.yunyang: 'zh-CN-YunyangNeural',
+};
 
 /// Sherpa-ONNX 语音
 enum SherpaVoice {
@@ -162,6 +208,8 @@ class TTSService {
   final VoiceModel _voice;
   /// 小米 MiMo TTS 音色
   final MiMoVoice _mimoVoice;
+  /// Edge TTS 音色
+  final EdgeVoice _edgeVoice;
   /// 克隆音色参考音频路径（非空时使用克隆模式）
   final String? _cloneReferenceAudioPath;
   /// 小米 MiMo TTS 基础 URL（可选，默认使用官方端点）
@@ -171,6 +219,12 @@ class TTSService {
   final String? _sherpaModelId;
   /// 说话人 ID（当模型支持多说话人时使用）
   final int _speakerId;
+  /// ★ 系统 TTS 音色 ID（SharedPreferences 中的 tts_voice_id）
+  final String? _systemVoiceId;
+  /// ★ MiMo 合成超时阈值（秒），超时后降级到 Edge TTS / Sherpa
+  static const int _mimoTimeoutSeconds = 15;
+  /// ★ 上次 MiMo 合成是否超时（用于智能降级判断）
+  static bool _lastMiMoTimedOut = false;
   static const String _tag = 'TTSService';
   static const String _defaultMiMoBaseUrl = 'https://api.xiaomimimo.com/v1';
 
@@ -228,58 +282,104 @@ class TTSService {
     String? apiKey,
     VoiceModel voice = VoiceModel.alloy,
     MiMoVoice mimoVoice = MiMoVoice.Chloe,
+    EdgeVoice edgeVoice = EdgeVoice.xiaoxiao,  // Edge TTS 默认中文女声
     String? cloneReferenceAudioPath,
     String? mimoBaseUrl,
     double speechRate = 1.0,  // 默认语速 1x
     String? sherpaModelId,
     int speakerId = 0,
+    /// ★ 系统 TTS 音色 ID（来自 SharedPreferences 的 tts_voice_id）
+    /// 字符串形式以支持任意 ID（系统 TTS 的 voice ID 可能不是数字）
+    String? systemVoiceId,
   })  : _provider = provider,
         _apiKey = apiKey,
         _voice = voice,
         _mimoVoice = mimoVoice,
+        _edgeVoice = edgeVoice,
         _cloneReferenceAudioPath = cloneReferenceAudioPath,
         _mimoBaseUrl = mimoBaseUrl,
         _speechRate = speechRate,
         _sherpaModelId = sherpaModelId,
-        _speakerId = speakerId;
+        _speakerId = speakerId,
+        _systemVoiceId = systemVoiceId;
 
   /// 合成语音（返回音频文件路径）
   Future<String> synthesize(String text, {String? outputPath}) async {
     debugPrint('[$_tag] synthesize() 开始: provider=$_provider, text长度=${text.length}');
+    // ★ 1分钟总超时：语音输出保证在1分钟内完成，否则停止
+    const totalTimeout = Duration(minutes: 1);
     try {
-      String path;
-      switch (_provider) {
-        case TTSProvider.openai:
-          debugPrint('[$_tag] synthesize() → _synthesizeWithOpenAI');
-          path = await _synthesizeWithOpenAI(text, outputPath: outputPath);
-          break;
-        case TTSProvider.mimo:
-          debugPrint('[$_tag] synthesize() → _synthesizeWithMiMo');
-          path = await _synthesizeWithMiMo(text, outputPath: outputPath);
-          break;
-        case TTSProvider.sherpa:
-          debugPrint('[$_tag] synthesize() → _synthesizeWithSherpa');
-          path = await _synthesizeWithSherpa(text, outputPath: outputPath);
-          break;
-        case TTSProvider.system:
-          debugPrint('[$_tag] synthesize() → _synthesizeWithSystem');
-          path = await _synthesizeWithSystem(text, outputPath: outputPath);
-          break;
+      final path = await _synthesizeInternal(text, outputPath: outputPath)
+          .timeout(totalTimeout, onTimeout: () {
+        debugPrint('[$_tag] ⚠️ TTS 合成总超时 (1分钟)，停止当前语音输出');
+        throw TimeoutException('TTS synthesis timed out after 1 minute');
+      });
+      debugPrint('[$_tag] synthesize() ✅ 完成: path=$path');
+      return path;
+    } catch (e, stack) {
+      debugPrint('[$_tag] synthesize() ❌ 异常: $e');
+      debugPrint('[$_tag] synthesize() 堆栈: $stack');
+      rethrow;
+    }
+  }
+
+  /// 内部合成方法（不含超时包装）
+  Future<String> _synthesizeInternal(String text, {String? outputPath}) async {
+    String path;
+    switch (_provider) {
+      case TTSProvider.openai:
+        debugPrint('[$_tag] synthesize() → _synthesizeWithOpenAI');
+        path = await _synthesizeWithOpenAI(text, outputPath: outputPath);
+        break;
+      case TTSProvider.mimo:
+        debugPrint('[$_tag] synthesize() → _synthesizeWithMiMo');
+        path = await _synthesizeWithMiMo(text, outputPath: outputPath);
+        break;
+      case TTSProvider.edge:
+        debugPrint('[$_tag] synthesize() → _synthesizeWithEdge');
+        path = await _synthesizeWithEdge(text, outputPath: outputPath);
+        break;
+      case TTSProvider.sherpa:
+        debugPrint('[$_tag] synthesize() → _synthesizeWithSherpa');
+        path = await _synthesizeWithSherpa(text, outputPath: outputPath);
+        break;
+      case TTSProvider.system:
+        debugPrint('[$_tag] synthesize() → _synthesizeWithSystem');
+        path = await _synthesizeWithSystem(text, outputPath: outputPath);
+        break;
       }
       debugPrint('[$_tag] synthesize() ✅ 完成: path=$path');
       return path;
     } catch (e, stack) {
       debugPrint('[$_tag] synthesize() ❌ 异常: $e');
       debugPrint('[$_tag] synthesize() 堆栈: $stack');
+      // Edge TTS 失败时降级到 Sherpa
+      if (_provider == TTSProvider.edge) {
+        debugPrint('[$_tag] Edge TTS 合成失败，降级到 Sherpa: $e');
+        try {
+          return await _synthesizeWithSherpa(text, outputPath: outputPath);
+        } catch (_) {
+          return await _synthesizeWithSystem(text, outputPath: outputPath);
+        }
+      }
       // Sherpa 失败时（如移动端 OOM 保护），自动降级到系统 TTS
       if (_provider == TTSProvider.sherpa) {
         debugPrint('[$_tag] Sherpa 合成失败，自动降级到系统 TTS: $e');
         return await _synthesizeWithSystem(text, outputPath: outputPath);
       }
-      // MiMo 失败时降级到系统 TTS
+      // MiMo 失败时降级到 Edge TTS → Sherpa → 系统 TTS
       if (_provider == TTSProvider.mimo) {
-        debugPrint('[$_tag] MiMo 合成失败，自动降级到系统 TTS: $e');
-        return await _synthesizeWithSystem(text, outputPath: outputPath);
+        debugPrint('[$_tag] MiMo 合成失败，降级到 Edge TTS: $e');
+        try {
+          return await _synthesizeWithEdge(text, outputPath: outputPath);
+        } catch (edgeError) {
+          debugPrint('[$_tag] Edge TTS 也失败，降级到 Sherpa: $edgeError');
+          try {
+            return await _synthesizeWithSherpa(text, outputPath: outputPath);
+          } catch (_) {
+            return await _synthesizeWithSystem(text, outputPath: outputPath);
+          }
+        }
       }
       rethrow;
     }
@@ -308,6 +408,7 @@ class TTSService {
       switch (_provider) {
         case TTSProvider.openai:
         case TTSProvider.mimo:
+        case TTSProvider.edge:
         case TTSProvider.sherpa:
           debugPrint('[$_tag] speak() → synthesize + _playAudio (provider=$_provider)');
           final path = await synthesize(text);
@@ -346,8 +447,11 @@ class TTSService {
   /// [onProgress] 可选回调：(当前块序号, 总块数) → 可用于 UI 进度展示
   /// 返回是否正常播完（被打断返回 false）
   /// 
-  /// 【修复 V2】改为「先全部合成 → WAV 合并 → 一次性播放」的两阶段方案，
-  /// 彻底消除旧方案「逐块合成+播放」导致的块间音频断层/跳跃问题。
+  /// 【V3 流水线模式】边合成边播放：
+  /// - 先合成前 2-3 块后立即开始播放
+  /// - 后续块在播放期间并行合成
+  /// - 播放完一块后立即播放下一块（无缝衔接）
+  /// - 大幅降低首字播放延迟
   Future<bool> speakLongText(
     String text, {
     void Function(int current, int total)? onProgress,
@@ -365,7 +469,6 @@ class TTSService {
     
     if (hasControl) {
       debugPrint('[$_tag] speakLongText() 检测到 TTS 控制标签，使用 TTS 标签分段模式');
-      // 包含 TTS 标签：直接调用 synthesize，内部会自动按标签分段合成
       try {
         final path = await synthesize(cleanText);
         debugPrint('[$_tag] speakLongText() 合成完成: path=$path');
@@ -387,14 +490,16 @@ class TTSService {
       return true;
     }
 
-    // 2. 将短句合并成块（每块最多 5 句或 250 字）
+    // 2. 将短句合并成块（每块最多 3 句或 200 字，更细粒度以降低延迟）
     final chunks = <String>[];
-    for (var i = 0; i < sentences.length; i += 5) {
-      final chunk = sentences.skip(i).take(5).join('');
-      if (chunk.length > 250) {
-        final trimmed = chunk.substring(0, 200);
+    const chunkSentenceCount = 3; // 每块3句，2-3句即开始合成
+    const chunkMaxChars = 200;
+    for (var i = 0; i < sentences.length; i += chunkSentenceCount) {
+      final chunk = sentences.skip(i).take(chunkSentenceCount).join('');
+      if (chunk.length > chunkMaxChars) {
+        final trimmed = chunk.substring(0, chunkMaxChars);
         final lastPunct = trimmed.lastIndexOf(RegExp(r'[，。、；：！……？]'));
-        final cutoff = lastPunct > 100 ? lastPunct + 1 : 200;
+        final cutoff = lastPunct > 80 ? lastPunct + 1 : chunkMaxChars;
         chunks.add(trimmed.substring(0, cutoff));
       } else {
         chunks.add(chunk);
@@ -406,94 +511,130 @@ class TTSService {
     _stopRequested = false;
 
     // ============================
-    // 阶段一：预合成所有音频块
+    // V3 流水线模式：边合成边播放
     // ============================
-    debugPrint('[$_tag] ===== 阶段一：预合成全部 ${chunks.length} 个音频块 =====');
-    final tempFiles = <String>[];
-    const firstChunkTimeout = Duration(seconds: 30);
-    const chunkTimeout = Duration(seconds: 15);
+    const preSynthCount = 2; // 先合成前2块再开始播放
+    final synthFutures = <Future<String>>[]; // 合成中的 Future
+    final readyPaths = <String?>[]; // 已合成完成的路径（按序）
+    final allTempFiles = <String>[]; // 所有临时文件（用于清理）
+    
+    // 启动前 N 块的合成
+    final initialCount = chunks.length < preSynthCount ? chunks.length : preSynthCount;
+    for (var i = 0; i < initialCount; i++) {
+      synthFutures.add(_synthChunk(chunks[i], i, chunks.length));
+    }
+    int nextSynthIndex = initialCount; // 下一个需要启动合成的块索引
 
-    for (var i = 0; i < chunks.length; i++) {
+    // 等待前 N 块合成完成
+    for (var i = 0; i < initialCount; i++) {
       if (_stopRequested) {
-        debugPrint('[$_tag] 用户停止，退出预合成（已合成 $i/${chunks.length} 块）');
-        for (final f in tempFiles) {
-          try { await File(f).delete(); } catch (_) {}
-        }
+        await _cleanupFiles(allTempFiles);
         return false;
       }
-      onProgress?.call(i + 1, chunks.length);
-      final timeout = i == 0 ? firstChunkTimeout : chunkTimeout;
-      debugPrint('[$_tag] 合成 chunk[$i/${chunks.length}], 超时=${timeout.inSeconds}s');
       try {
-        final path = await synthesize(chunks[i]).timeout(
-          timeout,
-          onTimeout: () {
-            debugPrint('[$_tag] ⚠️ chunk[$i] 合成超时, 跳过');
-            return '';
-          },
-        );
-        if (path.isNotEmpty) {
-          // 验证文件确实存在且非空
-          final file = File(path);
-          if (await file.exists()) {
-            final size = await file.length();
-            if (size > 0) {
-              tempFiles.add(path);
-              debugPrint('[$_tag] chunk[$i] 合成成功: $path ($size bytes)');
-            } else {
-              debugPrint('[$_tag] ⚠️ chunk[$i] 文件为空，跳过: $path');
+        final path = await synthFutures[i];
+        readyPaths.add(path.isNotEmpty ? path : null);
+        if (path.isNotEmpty) allTempFiles.add(path);
+        onProgress?.call(i + 1, chunks.length);
+      } catch (e) {
+        debugPrint('[$_tag] ❌ chunk[$i] 合成失败: $e');
+        readyPaths.add(null);
+      }
+    }
+    synthFutures.clear();
+
+    debugPrint('[$_tag] 前 $initialCount 块合成完成，开始流水线播放');
+
+    // 流水线播放：播放第 i 块时，同时合成第 i+preSynthCount 块
+    for (var i = 0; i < chunks.length; i++) {
+      if (_stopRequested) {
+        await _cleanupFiles(allTempFiles);
+        return false;
+      }
+
+      // 启动后续块的合成（如果还没启动）
+      final futureIndex = i + preSynthCount;
+      if (futureIndex < chunks.length && futureIndex >= nextSynthIndex) {
+        // 需要启动新的合成
+        final newFutures = <Future<String>>[];
+        for (var fi = nextSynthIndex; fi <= futureIndex && fi < chunks.length; fi++) {
+          newFutures.add(_synthChunk(chunks[fi], fi, chunks.length));
+        }
+        nextSynthIndex = futureIndex + 1;
+
+        // 等待这些块合成完成
+        for (var fi = 0; fi < newFutures.length; fi++) {
+          final chunkIdx = futureIndex - newFutures.length + 1 + fi;
+          if (chunkIdx < readyPaths.length) continue; // 已经有了
+          try {
+            final path = await newFutures[fi];
+            // 确保 readyPaths 有足够空间
+            while (readyPaths.length <= chunkIdx) {
+              readyPaths.add(null);
             }
-          } else {
-            debugPrint('[$_tag] ⚠️ chunk[$i] 文件不存在，跳过: $path');
+            readyPaths[chunkIdx] = path.isNotEmpty ? path : null;
+            if (path.isNotEmpty) allTempFiles.add(path);
+            onProgress?.call(chunkIdx + 1, chunks.length);
+          } catch (e) {
+            debugPrint('[$_tag] ❌ chunk[$chunkIdx] 合成失败: $e');
+            while (readyPaths.length <= chunkIdx) {
+              readyPaths.add(null);
+            }
           }
         }
-      } catch (e) {
-        debugPrint('[$_tag] ❌ chunk[$i] 合成失败: $e, 跳过');
+      }
+
+      // 播放当前块
+      if (i < readyPaths.length && readyPaths[i] != null) {
+        debugPrint('[$_tag] 播放 chunk[$i/${chunks.length}]');
+        try {
+          await _playAudio(readyPaths[i]!);
+        } catch (e) {
+          debugPrint('[$_tag] ❌ chunk[$i] 播放失败: $e');
+        }
+      } else {
+        debugPrint('[$_tag] ⚠️ chunk[$i] 无音频，跳过');
       }
     }
 
-    if (tempFiles.isEmpty) {
-      debugPrint('[$_tag] 未合成任何音频, 跳过播放');
-      return true;
-    }
+    // 清理所有临时文件
+    await _cleanupFiles(allTempFiles);
+    debugPrint('[$_tag] speakLongText() ✅ 全部完成, 共 ${chunks.length} 块');
+    return true;
+  }
 
-    // ============================
-    // 阶段二：将所有 WAV 文件合并为一个（消除块间播放间隔）
-    // ============================
-    debugPrint('[$_tag] ===== 阶段二：合并 ${tempFiles.length} 个 WAV 文件 =====');
-    String combinedPath;
+  /// 合成单个文本块（带超时和错误处理）
+  Future<String> _synthChunk(String text, int index, int total) async {
+    const timeout = Duration(seconds: 20);
+    debugPrint('[$_tag] 合成 chunk[$index/$total]');
     try {
-      combinedPath = await _concatenateWavFiles(tempFiles);
-      debugPrint('[$_tag] 合并完成: $combinedPath');
+      final path = await synthesize(text).timeout(
+        timeout,
+        onTimeout: () {
+          debugPrint('[$_tag] ⚠️ chunk[$index] 合成超时, 跳过');
+          return '';
+        },
+      );
+      if (path.isNotEmpty) {
+        final file = File(path);
+        if (await file.exists() && await file.length() > 0) {
+          debugPrint('[$_tag] chunk[$index] 合成成功: $path');
+          return path;
+        }
+      }
+      debugPrint('[$_tag] ⚠️ chunk[$index] 合成结果无效，跳过');
+      return '';
     } catch (e) {
-      debugPrint('[$_tag] ❌ WAV 合并失败: $e, 回退到单文件播放');
-      combinedPath = tempFiles.first;
+      debugPrint('[$_tag] ❌ chunk[$index] 合成失败: $e');
+      return '';
     }
+  }
 
-    // ============================
-    // 阶段三：一次性播放合并后的完整音频
-    // ============================
-    debugPrint('[$_tag] ===== 阶段三：播放合并音频 =====');
-    try {
-      await _playAudio(combinedPath);
-      debugPrint('[$_tag] 合并音频播放完成');
-    } catch (e) {
-      debugPrint('[$_tag] ❌ 合并音频播放失败: $e');
-    }
-
-    // ============================
-    // 阶段四：清理临时文件
-    // ============================
-    debugPrint('[$_tag] ===== 阶段四：清理临时文件 =====');
-    for (final f in tempFiles) {
+  /// 清理临时音频文件
+  Future<void> _cleanupFiles(List<String> files) async {
+    for (final f in files) {
       try { await File(f).delete(); } catch (_) {}
     }
-    if (combinedPath != tempFiles.first) {
-      try { await File(combinedPath).delete(); } catch (_) {}
-    }
-
-    debugPrint('[$_tag] speakLongText() ✅ 全部完成, 共 ${tempFiles.length} 块');
-    return true;
   }
 
   /// 按标点分句
@@ -580,14 +721,10 @@ class TTSService {
       return;
     }
 
-    // ★★★ 移动端 OOM 保护：Sherpa-ONNX VITS 模型在手机上加载会导致 OOM ★★★
-    if (PlatformUtils.isMobile) {
-      // 不尝试加载 Sherpa 模型，直接抛异常让上层降级
-      throw Exception(
-        '移动端不支持 Sherpa-ONNX 本地 TTS（内存不足）。n'
-        '已自动切换为系统 TTS，请使用系统内置语音引擎。',
-      );
-    }
+    // ★★★ 移除移动端硬编码禁用：恢复之前能正常工作的 sherpa-onnx TTS 路径 ★★★
+    // 历史说明：之前为了防止 OOM 在移动端禁用了 Sherpa TTS，但这导致用户
+    // 选择 sherpa 模型后完全无声。恢复原始实现，由用户自行选择。
+    // 如果 OOM 真正发生，catch 块会捕获并允许上层降级。
 
     try {
       final modelService = voiceModelService;
@@ -759,6 +896,183 @@ class TTSService {
       case SherpaVoice.am_eric:
         return 8;
     }
+  }
+
+  /// ★ 使用 Edge TTS 合成（微软免费神经网络语音，WebSocket 流式传输）
+  /// 降级方案：当 MiMo 超时或失败时使用，无需 API Key，速度快（1-2秒）
+  /// 直接通过 WebSocket 协议与微软 Edge TTS 服务通信
+  Future<String> _synthesizeWithEdge(String text, {String? outputPath}) async {
+    final voiceName = _edgeVoiceNames[_edgeVoice] ?? 'zh-CN-XiaoxiaoNeural';
+    debugPrint('[$_tag] Edge TTS 请求: voice=$voiceName, text长度=${text.length}');
+
+    // 清洗 TTS 控制标签，Edge TTS 不支持这些标签
+    String cleanText = text;
+    final hasControl = TTSStyleParser.hasControlDirective(text);
+    if (hasControl) {
+      final segments = TTSStyleParser.parseAll(text);
+      cleanText = segments.map((s) => s.displayContent).join(' ');
+      debugPrint('[$_tag] Edge TTS 清洗标签: ${text.length}字 → ${cleanText.length}字');
+    }
+
+    // Edge TTS WebSocket 端点（含 Sec-MS-GEC 安全令牌）
+    final reqId = _generateRequestId();
+    final secMsGec = _generateSecMsGec();
+    final secMsGecVersion = '1-143.0.3650.75';
+    final url = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1'
+        '?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4'
+        '&Sec-MS-GEC=$secMsGec'
+        '&Sec-MS-GEC-Version=$secMsGecVersion'
+        '&ConnectionId=$reqId';
+
+    try {
+      // ★ 使用 IOWebSocketChannel 支持自定义 HTTP 请求头（模拟 Edge 浏览器）
+      final channel = IOWebSocketChannel.connect(
+        Uri.parse(url),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
+          'Origin': 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
+          'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache',
+        },
+      );
+
+      // 等待 WebSocket 连接建立
+      await channel.ready;
+
+      // 1. 发送配置消息
+      final configMessage = 'X-Timestamp:${_formatDate()}\r\n'
+          'Content-Type:application/json; charset=utf-8\r\n'
+          'Path:speech.config\r\n\r\n'
+          '{"context":{"synthesis":{"audio":{"metadataoptions":{'
+          '"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"true"},'
+          '"outputFormat":"audio-24khz-48kbitrate-mono-mp3"'
+          '}}}}\r\n';
+      channel.sink.add(configMessage);
+
+      // 2. 发送 SSML 消息
+      final rateStr = '${(_speechRate * 100).round()}%';
+      final ssml = '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">'
+          '<voice name="$voiceName">'
+          '<prosody rate="$rateStr">'
+          '${_escapeXml(cleanText)}'
+          '</prosody>'
+          '</voice>'
+          '</speak>';
+      final ssmlMessage = 'X-RequestId:$reqId\r\n'
+          'Content-Type:application/ssml+xml\r\n'
+          'Path:ssml\r\n\r\n'
+          '$ssml\r\n';
+      channel.sink.add(ssmlMessage);
+
+      // 3. 收集音频数据
+      final audioChunks = <List<int>>[];
+      var synthesisComplete = false;
+      var gotAudio = false;
+
+      await for (final message in channel.stream) {
+        if (message is String) {
+          // 文本消息：检查是否完成
+          if (message.contains('Path:turn.end')) {
+            synthesisComplete = true;
+            break;
+          }
+        } else if (message is List<int>) {
+          // 二进制消息：包含音频数据
+          // Edge TTS 二进制消息格式：前2字节是header长度(大端)，然后是header文本，然后是音频数据
+          if (message.length > 2) {
+            final headerLen = (message[0] << 8) | message[1];
+            if (message.length > headerLen + 2) {
+              final audioData = message.sublist(headerLen + 2);
+              audioChunks.add(audioData);
+              gotAudio = true;
+            }
+          }
+        }
+      }
+
+      channel.sink.close();
+
+      if (!gotAudio || audioChunks.isEmpty) {
+        throw Exception('Edge TTS: 未收到音频数据 (synthesisComplete=$synthesisComplete)');
+      }
+
+      // 合并所有音频块
+      final totalLen = audioChunks.fold<int>(0, (sum, chunk) => sum + chunk.length);
+      final audioBytes = Uint8List(totalLen);
+      var offset = 0;
+      for (final chunk in audioChunks) {
+        audioBytes.setRange(offset, offset + chunk.length, chunk);
+        offset += chunk.length;
+      }
+
+      debugPrint('[$_tag] Edge TTS 音频数据大小: ${audioBytes.length} bytes (MP3)');
+
+      // 保存为 MP3 文件（just_audio 支持 MP3 播放）
+      final tempDir = await getTemporaryDirectory();
+      final filename = outputPath != null
+          ? outputPath.replaceAll('.wav', '.mp3')
+          : 'tts_edge_${DateTime.now().millisecondsSinceEpoch}.mp3';
+      final path = '${tempDir.path}/$filename';
+
+      final file = File(path);
+      await file.writeAsBytes(audioBytes);
+
+      debugPrint('[$_tag] Edge TTS ✅ 合成完成: $path (${audioBytes.length} bytes)');
+      return path;
+    } catch (e, stack) {
+      debugPrint('[$_tag] Edge TTS ❌ 合成失败: $e');
+      debugPrint('[$_tag] Edge TTS 堆栈: $stack');
+      throw Exception('Edge TTS 合成失败: $e');
+    }
+  }
+
+  /// 生成 Edge TTS Sec-MS-GEC 安全令牌
+  ///
+  /// 算法：基于当前时间戳和 TrustedClientToken 生成 SHA-256 哈希
+  /// 参考：https://github.com/travisvn/edge-tts-universal
+  static String _generateSecMsGec() {
+    const trustedClientToken = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
+    const winEpoch = 11644473600; // Windows epoch 偏移量（1601→1970）
+    const sToNs = 1e9;
+
+    // 获取当前 Unix 时间戳
+    double ticks = DateTime.now().millisecondsSinceEpoch / 1000.0;
+    ticks += winEpoch;
+    ticks -= ticks % 300; // 取整到 300 秒窗口
+    ticks *= sToNs / 100;
+
+    final strToHash = '${ticks.round()}$trustedClientToken';
+    final hash = sha256.convert(utf8.encode(strToHash));
+    return hash.toString().toUpperCase();
+  }
+
+  /// 生成 Edge TTS 请求 ID（32位十六进制）
+  static String _generateRequestId() {
+    final random = math.Random();
+    return List.generate(32, (_) => random.nextInt(16).toRadixString(16)).join();
+  }
+
+  /// 格式化日期为 Edge TTS 所需格式
+  static String _formatDate() {
+    final now = DateTime.now().toUtc();
+    return '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}T'
+        '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}:'
+        '${now.second.toString().padLeft(2, '0')}.'
+        '${now.millisecond.toString().padLeft(3, '0')}Z';
+  }
+
+  /// XML 特殊字符转义
+  static String _escapeXml(String text) {
+    return text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&apos;');
   }
 
   @visibleForTesting
@@ -1341,13 +1655,13 @@ class TTSService {
     final url = '$baseUrl/chat/completions';
     
     // 解析所有 TTS 控制指令
-    final allSegments = TTSStyleParser.parseAll(text);
+    var allSegments = TTSStyleParser.parseAll(text);
     debugPrint('[$_tag] MiMo TTS 请求: url=$url, voice=${_mimoVoice.name}, text长度=${text.length}, 段落数=${allSegments.length}');
     
-    // 多标签分段合成
+    // ★ 优化：多标签不再分段合成，直接将原始文本（保留所有 TTS 标签）作为一次 API 调用
+    // MiMo 引擎本身支持解析多个 [tts:...] 标签，分段合成反而更慢且容易触发 429 限流
     if (allSegments.length > 1) {
-      debugPrint('[$_tag] 检测到多个 TTS 标签，分段合成...');
-      return _synthesizeMultipleSegments(allSegments, url, outputPath);
+      debugPrint('[$_tag] 检测到 ${allSegments.length} 个 TTS 标签，使用单次请求合并合成（MiMo 引擎原生支持多标签）');
     }
     
     // 单标签合成
@@ -1424,27 +1738,46 @@ class TTSService {
 
   /// 多标签分段合成
   ///
-  /// 将包含多个 TTS 标签的文本拆分为多个段落，逐段合成后拼接音频。
+  /// 将包含多个 TTS 标签的文本拆分为多个段落，两两合并后合成音频，减少 API 调用次数避免 429 限流。
   Future<String> _synthesizeMultipleSegments(List<TTSControlData> segments, String url, String? outputPath) async {
     final tempDir = await getTemporaryDirectory();
     final audioFiles = <String>[];
 
-    debugPrint('[$_tag] ========== 多标签分段合成开始 ==========');
-    debugPrint('[$_tag] 总段落数: ${segments.length}');
+    // ★ 两两合并段落：5段→3次请求(2+2+1)，4段→2次(2+2)，3段→2次(2+1)
+    final mergedTexts = <String>[];
+    final mergedLabels = <String>[];
+    for (int i = 0; i < segments.length; i += 2) {
+      final first = segments[i];
+      if (i + 1 < segments.length) {
+        final second = segments[i + 1];
+        mergedTexts.add('${first.originalContent} ${second.originalContent}');
+        mergedLabels.add('段落 ${i + 1}+${i + 2}');
+      } else {
+        mergedTexts.add(first.originalContent);
+        mergedLabels.add('段落 ${i + 1}');
+      }
+    }
 
-    for (int i = 0; i < segments.length; i++) {
-      final segment = segments[i];
-      final previewText = segment.displayContent.length > 30
-          ? segment.displayContent.substring(0, 30)
-          : segment.displayContent;
-      debugPrint('[$_tag] --- 段落 ${i + 1}/${segments.length} ---');
-      debugPrint('[$_tag]   type=${segment.type}, hasControl=${segment.hasControl}');
-      debugPrint('[$_tag]   displayContent: $previewText...');
-      debugPrint('[$_tag]   originalContent长度: ${segment.originalContent.length}');
+    debugPrint('[$_tag] ========== 多标签分段合成开始（两两合并）==========');
+    debugPrint('[$_tag] 原始段落数: ${segments.length}, 合并后请求数: ${mergedTexts.length}');
+
+    for (int i = 0; i < mergedTexts.length; i++) {
+      // 批次间延迟：避免连续请求触发 429 限流
+      if (i > 0) {
+        final delayMs = 2000 + (i * 1000); // 2s, 3s, 4s...
+        debugPrint('[$_tag]   ⏳ 批次间延迟 ${delayMs}ms 避免限流...');
+        await Future.delayed(Duration(milliseconds: delayMs));
+      }
+
+      final mergedText = mergedTexts[i];
+      final previewText = mergedText.length > 50 ? mergedText.substring(0, 50) : mergedText;
+      debugPrint('[$_tag] --- 批次 ${i + 1}/${mergedTexts.length} (${mergedLabels[i]}) ---');
+      debugPrint('[$_tag]   合并文本预览: $previewText...');
+      debugPrint('[$_tag]   合并文本长度: ${mergedText.length}');
 
       try {
         final requestData = TTSStyleParser.buildMiMoRequest(
-          text: segment.originalContent,
+          text: mergedText,
           voice: _mimoVoice.name,
           format: 'wav',
           model: 'mimo-v2.5-tts',
@@ -1454,20 +1787,51 @@ class TTSService {
         
         final dio = Dio();
         dio.options.connectTimeout = const Duration(seconds: 15);
-        dio.options.receiveTimeout = const Duration(seconds: 60);
+        dio.options.receiveTimeout = const Duration(seconds: 90);
         
-        await _waitForRateLimit();
-        final response = await dio.post(
-          url,
-          data: requestData,
-          options: Options(
-            headers: {
-              'api-key': _apiKey,
-              'Content-Type': 'application/json',
-            },
-            responseType: ResponseType.json,
-          ),
-        );
+        // 429 限流重试：最多重试 3 次，指数退避
+        Response? response;
+        for (int attempt = 0; attempt < 3; attempt++) {
+          try {
+            await _waitForRateLimit();
+            response = await dio.post(
+              url,
+              data: requestData,
+              options: Options(
+                headers: {
+                  'api-key': _apiKey,
+                  'Content-Type': 'application/json',
+                },
+                responseType: ResponseType.json,
+                validateStatus: (status) => status != null && (status >= 200 && status < 300 || status == 429),
+              ),
+            );
+
+            if (response.statusCode == 429) {
+              final retryAfter = response.headers.value('retry-after');
+              final waitMs = retryAfter != null
+                  ? int.parse(retryAfter) * 1000
+                  : (3000 * (1 << attempt)); // 3s, 6s, 12s
+              debugPrint('[$_tag]   ⚠️ MiMo 429 限流，${waitMs}ms 后重试 (${attempt + 1}/3)');
+              await Future.delayed(Duration(milliseconds: waitMs));
+              continue;
+            }
+            break;
+          } on DioException catch (e) {
+            if (e.response?.statusCode == 429 && attempt < 2) {
+              final waitMs = 3000 * (1 << attempt);
+              debugPrint('[$_tag]   ⚠️ MiMo 429 限流(DioException)，${waitMs}ms 后重试 (${attempt + 1}/3)');
+              await Future.delayed(Duration(milliseconds: waitMs));
+              continue;
+            }
+            rethrow;
+          }
+        }
+
+        if (response == null) {
+          debugPrint('[$_tag]   ❌ 批次 ${i + 1} 请求失败（重试耗尽）');
+          continue;
+        }
         
         debugPrint('[$_tag]   响应状态: ${response.statusCode}');
         
@@ -1484,23 +1848,23 @@ class TTSService {
               final segmentPath = '${tempDir.path}/tts_segment_$i.wav';
               await File(segmentPath).writeAsBytes(audioBytes);
               audioFiles.add(segmentPath);
-              debugPrint('[$_tag]   ✅ 段落 ${i + 1} 合成成功: ${audioBytes.length} bytes');
+              debugPrint('[$_tag]   ✅ 批次 ${i + 1} 合成成功: ${audioBytes.length} bytes');
             } else {
-              debugPrint('[$_tag]   ❌ 段落 ${i + 1} 响应中无音频数据: data=$data');
+              debugPrint('[$_tag]   ❌ 批次 ${i + 1} 响应中无音频数据');
             }
           } else {
-            debugPrint('[$_tag]   ❌ 段落 ${i + 1} 响应中无 choices');
+            debugPrint('[$_tag]   ❌ 批次 ${i + 1} 响应中无 choices');
           }
         } else {
-          debugPrint('[$_tag]   ❌ 段落 ${i + 1} HTTP 错误: ${response.statusCode}');
+          debugPrint('[$_tag]   ❌ 批次 ${i + 1} HTTP 错误: ${response.statusCode}');
         }
       } catch (e, stack) {
-        debugPrint('[$_tag]   ❌ 段落 ${i + 1} 合成异常: $e');
+        debugPrint('[$_tag]   ❌ 批次 ${i + 1} 合成异常: $e');
         debugPrint('[$_tag]   堆栈: $stack');
       }
     }
     
-    debugPrint('[$_tag] ========== 分段合成结果: ${audioFiles.length}/${segments.length} 成功 ==========');
+    debugPrint('[$_tag] ========== 分段合成结果: ${audioFiles.length}/${mergedTexts.length} 成功 ==========');
     
     if (audioFiles.isEmpty) {
       throw Exception('所有段落合成失败');
@@ -1563,17 +1927,17 @@ class TTSService {
     final voiceData = 'data:$mimeType;base64,$base64Audio';
 
     // 使用 parseAll 解析所有 TTS 控制指令（支持多标签）
-    final allSegments = TTSStyleParser.parseAll(text);
+    var allSegments = TTSStyleParser.parseAll(text);
     debugPrint('[$_tag] MiMo VoiceClone 请求: text长度=${text.length}, audioSize=${audioBytes.length} bytes, 段落数=${allSegments.length}');
 
     // 优先使用构造参数，否则从 SharedPreferences 读取自定义地址
     final baseUrl = _mimoBaseUrl ?? await _getMiMoBaseUrl();
     final url = '$baseUrl/chat/completions';
 
-    // 多标签分段合成
+    // ★ 优化：多标签不再分段合成，直接将原始文本（保留所有 TTS 标签）作为一次 API 调用
+    // MiMo 引擎本身支持解析多个 [tts:...] 标签，分段合成反而更慢且容易触发 429 限流
     if (allSegments.length > 1) {
-      debugPrint('[$_tag] VoiceClone 检测到多个 TTS 标签(${allSegments.length}段)，分段合成...');
-      return _synthesizeMultipleCloneSegments(allSegments, voiceData, url, outputPath);
+      debugPrint('[$_tag] VoiceClone 检测到 ${allSegments.length} 个 TTS 标签，使用单次请求合并合成（MiMo 引擎原生支持多标签）');
     }
 
     // 单标签合成
@@ -1681,8 +2045,7 @@ class TTSService {
 
   /// VoiceClone 多标签分段合成
   ///
-  /// 将包含多个 TTS 标签的文本拆分为多个段落，逐段使用 VoiceClone API 合成后拼接音频。
-  /// 通过全局角色锚定确保所有段落保持一致的人格语调。
+  /// 将包含多个 TTS 标签的文本拆分为多个段落，两两合并后使用 VoiceClone API 合成，减少 API 调用次数避免 429 限流。
   Future<String> _synthesizeMultipleCloneSegments(
     List<TTSControlData> segments,
     String voiceData,
@@ -1692,22 +2055,41 @@ class TTSService {
     final tempDir = await getTemporaryDirectory();
     final audioFiles = <String>[];
 
-    debugPrint('[$_tag] ========== VoiceClone 多标签分段合成开始 ==========');
-    debugPrint('[$_tag] 总段落数: ${segments.length}');
+    // ★ 两两合并段落：5段→3次请求(2+2+1)，4段→2次(2+2)，3段→2次(2+1)
+    final mergedTexts = <String>[];
+    final mergedLabels = <String>[];
+    for (int i = 0; i < segments.length; i += 2) {
+      final first = segments[i];
+      if (i + 1 < segments.length) {
+        final second = segments[i + 1];
+        mergedTexts.add('${first.originalContent} ${second.originalContent}');
+        mergedLabels.add('段落 ${i + 1}+${i + 2}');
+      } else {
+        mergedTexts.add(first.originalContent);
+        mergedLabels.add('段落 ${i + 1}');
+      }
+    }
 
-    for (int i = 0; i < segments.length; i++) {
-      final segment = segments[i];
-      final previewText = segment.displayContent.length > 30
-          ? segment.displayContent.substring(0, 30)
-          : segment.displayContent;
-      debugPrint('[$_tag] --- VoiceClone 段落 ${i + 1}/${segments.length} ---');
-      debugPrint('[$_tag]   type=${segment.type}, hasControl=${segment.hasControl}');
-      debugPrint('[$_tag]   displayContent: $previewText...');
-      debugPrint('[$_tag]   originalContent长度: ${segment.originalContent.length}');
+    debugPrint('[$_tag] ========== VoiceClone 多标签分段合成（两两合并）==========');
+    debugPrint('[$_tag] 原始段落数: ${segments.length}, 合并后请求数: ${mergedTexts.length}');
+
+    for (int i = 0; i < mergedTexts.length; i++) {
+      // 批次间延迟：避免连续请求触发 429 限流
+      if (i > 0) {
+        final delayMs = 2000 + (i * 1000); // 2s, 3s, 4s...
+        debugPrint('[$_tag]   ⏳ 批次间延迟 ${delayMs}ms 避免限流...');
+        await Future.delayed(Duration(milliseconds: delayMs));
+      }
+
+      final mergedText = mergedTexts[i];
+      final previewText = mergedText.length > 50 ? mergedText.substring(0, 50) : mergedText;
+      debugPrint('[$_tag] --- VoiceClone 批次 ${i + 1}/${mergedTexts.length} (${mergedLabels[i]}) ---');
+      debugPrint('[$_tag]   合并文本预览: $previewText...');
+      debugPrint('[$_tag]   合并文本长度: ${mergedText.length}');
 
       try {
         final requestData = TTSStyleParser.buildMiMoCloneRequest(
-          text: segment.originalContent,
+          text: mergedText,
           voiceDataUrl: voiceData,
           format: 'wav',
           model: 'mimo-v2.5-tts-voiceclone',
@@ -1717,11 +2099,11 @@ class TTSService {
 
         final dio = Dio();
         dio.options.connectTimeout = const Duration(seconds: 30);
-        dio.options.receiveTimeout = const Duration(seconds: 60);
+        dio.options.receiveTimeout = const Duration(seconds: 90);
 
-        // 429 限流重试：最多重试 2 次
+        // 429 限流重试：最多重试 3 次，指数退避
         Response? response;
-        for (int attempt = 0; attempt < 2; attempt++) {
+        for (int attempt = 0; attempt < 3; attempt++) {
           try {
             await _waitForRateLimit();
             response = await dio.post(
@@ -1741,16 +2123,16 @@ class TTSService {
               final retryAfter = response.headers.value('retry-after');
               final waitMs = retryAfter != null
                   ? int.parse(retryAfter) * 1000
-                  : (2000 * (1 << attempt)); // 2s, 4s
-              debugPrint('[$_tag]   ⚠️ 429 限流，${waitMs}ms 后重试 (${attempt + 1}/2)');
+                  : (3000 * (1 << attempt)); // 3s, 6s, 12s
+              debugPrint('[$_tag]   ⚠️ 429 限流，${waitMs}ms 后重试 (${attempt + 1}/3)');
               await Future.delayed(Duration(milliseconds: waitMs));
               continue;
             }
             break;
           } on DioException catch (e) {
-            if (e.response?.statusCode == 429 && attempt < 1) {
-              final waitMs = 2000 * (1 << attempt);
-              debugPrint('[$_tag]   ⚠️ 429 限流(DioException)，${waitMs}ms 后重试 (${attempt + 1}/2)');
+            if (e.response?.statusCode == 429 && attempt < 2) {
+              final waitMs = 3000 * (1 << attempt);
+              debugPrint('[$_tag]   ⚠️ 429 限流(DioException)，${waitMs}ms 后重试 (${attempt + 1}/3)');
               await Future.delayed(Duration(milliseconds: waitMs));
               continue;
             }
@@ -1759,7 +2141,7 @@ class TTSService {
         }
 
         if (response == null) {
-          debugPrint('[$_tag]   ❌ 段落 ${i + 1} 请求失败（重试耗尽）');
+          debugPrint('[$_tag]   ❌ 批次 ${i + 1} 请求失败（重试耗尽）');
           continue;
         }
 
@@ -1778,23 +2160,23 @@ class TTSService {
               final segmentPath = '${tempDir.path}/tts_clone_segment_$i.wav';
               await File(segmentPath).writeAsBytes(audioBytes);
               audioFiles.add(segmentPath);
-              debugPrint('[$_tag]   ✅ 段落 ${i + 1} 合成成功: ${audioBytes.length} bytes');
+              debugPrint('[$_tag]   ✅ 批次 ${i + 1} 合成成功: ${audioBytes.length} bytes');
             } else {
-              debugPrint('[$_tag]   ❌ 段落 ${i + 1} 响应中无音频数据');
+              debugPrint('[$_tag]   ❌ 批次 ${i + 1} 响应中无音频数据');
             }
           } else {
-            debugPrint('[$_tag]   ❌ 段落 ${i + 1} 响应中无 choices');
+            debugPrint('[$_tag]   ❌ 批次 ${i + 1} 响应中无 choices');
           }
         } else {
-          debugPrint('[$_tag]   ❌ 段落 ${i + 1} HTTP 错误: ${response.statusCode}');
+          debugPrint('[$_tag]   ❌ 批次 ${i + 1} HTTP 错误: ${response.statusCode}');
         }
       } catch (e, stack) {
-        debugPrint('[$_tag]   ❌ 段落 ${i + 1} 合成异常: $e');
+        debugPrint('[$_tag]   ❌ 批次 ${i + 1} 合成异常: $e');
         debugPrint('[$_tag]   堆栈: $stack');
       }
     }
 
-    debugPrint('[$_tag] ========== VoiceClone 分段合成结果: ${audioFiles.length}/${segments.length} 成功 ==========');
+    debugPrint('[$_tag] ========== VoiceClone 分段合成结果: ${audioFiles.length}/${mergedTexts.length} 成功 ==========');
 
     if (audioFiles.isEmpty) {
       throw Exception('所有 VoiceClone 段落合成失败');
@@ -1892,6 +2274,44 @@ class TTSService {
           try {
             await _systemTts!.setLanguage('en-US');
           } catch (_) {}
+        }
+
+        // ★ 修复：应用系统 TTS 音色 ID
+        // 之前 _systemVoiceId 被忽略，导致设置不同音色但始终使用默认音色
+        if (_systemVoiceId != null && _systemVoiceId.isNotEmpty) {
+          try {
+            // Android/iOS 都使用 setVoice({"name": ..., "locale": ...})
+            // name 一般是 voiceId 本身
+            final voices = await _systemTts!.getVoices;
+            if (voices != null) {
+              final voiceList = voices.cast<Map<dynamic, dynamic>>();
+              // 优先按 voiceId 匹配，其次按名字
+              Map<String, String>? matched;
+              for (final v in voiceList) {
+                final vid = v['name']?.toString() ?? '';
+                if (vid == _systemVoiceId) {
+                  matched = {
+                    'name': v['name']?.toString() ?? '',
+                    'locale': v['locale']?.toString() ?? 'zh-CN',
+                  };
+                  break;
+                }
+              }
+              if (matched != null) {
+                await _systemTts!.setVoice(matched);
+                debugPrint('[TTSService] ✅ 设置系统 TTS 音色: name=${matched['name']}, locale=${matched['locale']}');
+              } else {
+                // fallback: 直接用 voiceId 设置
+                await _systemTts!.setVoice({
+                  'name': _systemVoiceId,
+                  'locale': 'zh-CN',
+                });
+                debugPrint('[TTSService] ⚠️ 未找到匹配音色，按 name=$_systemVoiceId 设置');
+              }
+            }
+          } catch (e) {
+            debugPrint('[TTSService] 设置系统 TTS 音色失败: $e');
+          }
         }
 
       } else if (PlatformUtils.isIOS) {

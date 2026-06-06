@@ -500,6 +500,18 @@ class MemoryPalaceService {
     debugPrint('[MemoryPalace] 清理完成，删除 $deleted 条归档记忆，$extraDeleted 条超额记忆');
     return deleted + extraDeleted;
   }
+
+  /// 清理所有"共享/全局"记忆
+  ///
+  /// 【修复 V72】随会话隔离策略，旧的 isGlobal=true 记忆属于脏数据。
+  ///   调用此方法可一次性删除所有全局记忆，不影响会话级记忆。
+  ///
+  /// 返回被删除的记忆数量。
+  Future<int> clearGlobalMemories() async {
+    final deleted = await _db.deleteAllGlobalMemories();
+    debugPrint('[MemoryPalace] 已清理 $deleted 条共享/全局记忆');
+    return deleted;
+  }
 }
 
 /// 记忆宫殿统计

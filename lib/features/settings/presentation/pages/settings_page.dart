@@ -1176,31 +1176,77 @@ class _SettingsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(
-            left: AppTheme.spacingS,
-            bottom: AppTheme.spacingS,
+            left: AppTheme.spacingS + 2,
+            bottom: AppTheme.spacingM,
           ),
-          child: Text(
-            title,
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w600,
-            ),
+          child: Row(
+            children: [
+              Container(
+                width: 3,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentPrimary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: AppTheme.spacingS),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: AppTheme.accentPrimary,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
         ),
-        Card(
-          margin: EdgeInsets.zero,
-          child: Column(
-            children: children,
+        Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? theme.colorScheme.surface.withValues(alpha: 0.6)
+                : theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(AppTheme.radiusL),
+            border: Border.all(
+              color: theme.dividerColor.withValues(alpha: isDark ? 0.3 : 0.5),
+              width: 0.5,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppTheme.radiusL),
+            child: Column(
+              children: _buildChildrenWithDividers(children, theme),
+            ),
           ),
         ),
       ],
     );
+  }
+
+  /// 在子项之间添加分隔线
+  List<Widget> _buildChildrenWithDividers(List<Widget> items, ThemeData theme) {
+    final result = <Widget>[];
+    for (int i = 0; i < items.length; i++) {
+      result.add(items[i]);
+      if (i < items.length - 1) {
+        result.add(
+          Divider(
+            height: 0.5,
+            thickness: 0.5,
+            indent: 56,
+            color: theme.dividerColor.withValues(alpha: 0.3),
+          ),
+        );
+      }
+    }
+    return result;
   }
 }
 
@@ -1221,22 +1267,71 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(AppTheme.spacingS),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(AppTheme.radiusS),
-        ),
-        child: Icon(
-          icon,
-          color: Theme.of(context).colorScheme.primary,
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTheme.spacingL,
+            vertical: AppTheme.spacingM,
+          ),
+          child: Row(
+            children: [
+              // 图标容器 — 带微渐变背景
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentPrimary.withValues(alpha: isDark ? 0.12 : 0.08),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusS),
+                ),
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: AppTheme.accentPrimary,
+                ),
+              ),
+              const SizedBox(width: AppTheme.spacingM),
+              // 文字区域
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              // 尾部组件
+              if (trailing != null)
+                trailing!
+              else if (onTap != null)
+                Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                ),
+            ],
+          ),
         ),
       ),
-      title: Text(title),
-      subtitle: subtitle != null ? Text(subtitle!) : null,
-      trailing: trailing ?? (onTap != null ? const Icon(Icons.chevron_right) : null),
-      onTap: onTap,
     );
   }
 }

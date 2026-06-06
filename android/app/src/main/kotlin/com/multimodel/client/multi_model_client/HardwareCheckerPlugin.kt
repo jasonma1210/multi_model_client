@@ -11,13 +11,16 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import java.io.File
+import kotlin.math.roundToInt
 
 class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        channel = MethodChannel(binding.binaryMessenger, "com.example.ai_assistant/hardware")
+        // ★ 修复：Channel 名必须与 Dart 端一致
+        // Dart 端（hardware_compatibility_checker.dart / hardware_checker_channel.dart）使用 'hardware_checker'
+        channel = MethodChannel(binding.binaryMessenger, "hardware_checker")
         channel.setMethodCallHandler(this)
         context = binding.applicationContext
     }
@@ -64,6 +67,10 @@ class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
             }
             "checkNpuAvailability" -> {
                 result.success(checkNpuAvailability())
+            }
+            // ===== 新增：大核信息检测（骁龙 8 Elite 优化）=====
+            "getBigCoreInfo" -> {
+                result.success(getBigCoreInfo())
             }
             else -> {
                 result.notImplemented()
@@ -264,13 +271,23 @@ class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     // 检查Vulkan支持
+    // ★ 骁龙 8 Elite 5 优化：Vulkan 是 Android GPU 加速的关键
+    // 纯 CPU 推理连芯片实力 1/10 都发挥不出来
     private fun checkVulkanSupport(): Boolean {
-        return try {
-            val lib = System.loadLibrary("vulkan")
-            true
+        // 方法1：尝试加载 libvulkan.so（最可靠）
+        try {
+            System.loadLibrary("vulkan")
+            return true
         } catch (e: UnsatisfiedLinkError) {
-            false
+            // 方法2：检查 /system/lib64 下是否有 Vulkan 库
+            val vulkanLib = File("/system/lib64/libvulkan.so")
+            if (vulkanLib.exists()) return true
+
+            // 方法3：检查 /vendor/lib64（某些设备把驱动放在 vendor 分区）
+            val vendorVulkan = File("/vendor/lib64/libvulkan.so")
+            if (vendorVulkan.exists()) return true
         }
+        return false
     }
 
     // 检查NEON支持
@@ -547,5 +564,64 @@ class HardwareCheckerPlugin : FlutterPlugin, MethodCallHandler {
         } catch (e: Exception) {
             false
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  新增：大核信息检测（骁龙 8 Elite 优化核心）
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// 获取 CPU 大核信息
+    /// ★ Android big.LITTLE 架构优化核心：
+    ///   - EAS（能量感知调度）会把推理任务分配给小核，导致性能极差
+    ///   - 必须显式设置线程数 = 大核数，避免"裸奔"在小核上
+    ///   - 骁龙 8 Elite 5: 2×超大核(P) + 4×大核(M) + 2×小核(E) = 8 核
+    private fun getBigCoreInfo(): Map<String, Any> {
+        val info = mutableMapOf<String, Any>()
+        val totalCores = Runtime.getRuntime().availableProcessors()
+        info["totalCores"] = totalCores
+
+        // 尝试从 /sys/devices/system/cpu/ 读取每个核心的最大频率
+        // 大核频率通常 > 小核频率
+        var bigCoreCount = 0
+        var maxFreq = 0L
+        val coreFreqs = mutableListOf<Int>()
+
+        for (i in 0 until totalCores) {
+            val freqFile = File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq")
+            val freq = if (freqFile.exists()) {
+                try {
+                    freqFile.readText().trim().toIntOrNull() ?: 0
+                } catch (e: Exception) {
+                    0
+                }
+            } else {
+                0
+            }
+            coreFreqs.add(freq)
+            if (freq > maxFreq) maxFreq = freq.toLong()
+        }
+
+        // 大核 = 频率 >= 最大频率 70% 的核心
+        // 骁龙 8 Elite: 超大核 ~4.47GHz, 大核 ~3.53GHz, 小核 ~2.47GHz
+        // 70% 阈值: 4470 * 0.7 = 3129，大核和小核都能区分
+        val bigCoreThreshold = (maxFreq * 0.7).toInt()
+        for (freq in coreFreqs) {
+            if (freq >= bigCoreThreshold && freq > 0) {
+                bigCoreCount++
+            }
+        }
+
+        // 如果无法检测频率，使用经验值
+        if (bigCoreCount == 0) {
+            bigCoreCount = (totalCores * 0.75).roundToInt()
+        }
+
+        info["bigCoreCount"] = bigCoreCount
+        info["littleCoreCount"] = totalCores - bigCoreCount
+        info["recommendedThreads"] = bigCoreCount.coerceIn(2, 10)
+        info["maxFreqKHz"] = maxFreq
+        info["coreFreqs"] = coreFreqs
+
+        return info
     }
 }

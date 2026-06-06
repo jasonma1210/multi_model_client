@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/voice_model_service.dart';
 import '../../../../core/services/voice_clone_service.dart';
+import '../../../../core/services/tts_director_template.dart';
 import '../../../../generated/app_localizations.dart';
 
 // 语音设置 Provider
@@ -14,7 +16,9 @@ final voiceSettingsProvider = StateNotifierProvider<VoiceSettingsNotifier, Voice
 });
 
 class VoiceSettings {
-  final String ttsProvider; // sherpa, system
+  final String ttsProvider; // sherpa, system, mimo
+  /// ★ 新增：ASR provider 字段（之前缺失导致用户无法切换）
+  final String asrProvider; // sherpa, system, openai
   final String ttsVoice;   // 音色 ID
   final double ttsSpeed;
   final bool autoPlayTts;
@@ -28,8 +32,22 @@ class VoiceSettings {
   final double systemTtsSpeed;
   final double systemTtsPitch;
 
+  // ★ 导演模式（MiMo v2.5 director mode）— MVP
+  final bool enableDirectorMode;       // 是否启用导演模式
+  final String directorTemplateId;     // 当前选中的导演模板 ID（'tsundere'/'mature_sister'/'yandere'）
+
+  // ★ 音色设计（MiMo v2.5 voicedesign）— MVP 占位
+  final String voiceDesignPrompt;      // 音色描述（用户自由编辑）
+
+  // ★ V1.0 新增：用户自定义导演模板 JSON 列表
+  final List<DirectorTemplate> customTemplates;
+
+  // ★ Edge TTS 音色选择
+  final String edgeVoice;  // EdgeVoice 枚举名称，如 'xiaoxiao', 'yunjian'
+
   const VoiceSettings({
-    this.ttsProvider = 'sherpa',
+    this.ttsProvider = 'mimo',
+    this.asrProvider = 'system',  // ★ 默认使用系统 ASR（兼容旧行为）
     this.ttsVoice = '0',
     this.ttsSpeed = 1.0,
     this.autoPlayTts = true,
@@ -38,10 +56,16 @@ class VoiceSettings {
     this.selectedTtsModelId = 'melo-zh-en',
     this.systemTtsSpeed = 0.5,  // flutter_tts 范围 0.0-1.0，默认 0.5
     this.systemTtsPitch = 1.0,
+    this.enableDirectorMode = false,  // ★ 默认关闭（避免影响现有用户）
+    this.directorTemplateId = 'tsundere',  // ★ 默认预置：傲娇
+    this.voiceDesignPrompt = '年轻女性声音，温柔且略带磁性的中低音',  // ★ 默认音色描述
+    this.customTemplates = const [],  // ★ V1.0：默认空
+    this.edgeVoice = 'xiaoxiao',  // ★ Edge TTS 默认中文女声
   });
 
   VoiceSettings copyWith({
     String? ttsProvider,
+    String? asrProvider,
     String? ttsVoice,
     double? ttsSpeed,
     bool? autoPlayTts,
@@ -50,9 +74,15 @@ class VoiceSettings {
     String? selectedTtsModelId,
     double? systemTtsSpeed,
     double? systemTtsPitch,
+    bool? enableDirectorMode,        // ★ 新增
+    String? directorTemplateId,      // ★ 新增
+    String? voiceDesignPrompt,       // ★ 新增
+    List<DirectorTemplate>? customTemplates,  // ★ V1.0 新增
+    String? edgeVoice,              // ★ Edge TTS 音色
   }) {
     return VoiceSettings(
       ttsProvider: ttsProvider ?? this.ttsProvider,
+      asrProvider: asrProvider ?? this.asrProvider,
       ttsVoice: ttsVoice ?? this.ttsVoice,
       ttsSpeed: ttsSpeed ?? this.ttsSpeed,
       autoPlayTts: autoPlayTts ?? this.autoPlayTts,
@@ -61,6 +91,11 @@ class VoiceSettings {
       selectedTtsModelId: selectedTtsModelId ?? this.selectedTtsModelId,
       systemTtsSpeed: systemTtsSpeed ?? this.systemTtsSpeed,
       systemTtsPitch: systemTtsPitch ?? this.systemTtsPitch,
+      enableDirectorMode: enableDirectorMode ?? this.enableDirectorMode,    // ★
+      directorTemplateId: directorTemplateId ?? this.directorTemplateId,      // ★
+      voiceDesignPrompt: voiceDesignPrompt ?? this.voiceDesignPrompt,        // ★
+      customTemplates: customTemplates ?? this.customTemplates,              // ★
+      edgeVoice: edgeVoice ?? this.edgeVoice,                                // ★
     );
   }
 }
@@ -71,24 +106,141 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettings> {
   }
 
   static const String _ttsProviderKey = 'tts_provider';
+  static const String _asrProviderKey = 'asr_provider';  // ★ 新增
   static const String _selectedAsrModelKey = 'selected_asr_model_id';
   static const String _selectedTtsModelKey = 'selected_tts_model_id';
   static const String _ttsVoiceKey = 'tts_voice_id';
+  // ★ 导演模式持久化 key
+  static const String _enableDirectorModeKey = 'enable_director_mode';
+  static const String _directorTemplateIdKey = 'director_template_id';
+  static const String _voiceDesignPromptKey = 'voice_design_prompt';
+  static const String _customTemplatesKey = 'tts_custom_director_templates_v1';
+  static const String _edgeVoiceKey = 'edge_voice';  // ★ Edge TTS 音色
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+
+    // 加载用户自定义导演模板
+    final customJson = prefs.getString(_customTemplatesKey);
+    List<DirectorTemplate> customs = const [];
+    if (customJson != null && customJson.isNotEmpty) {
+      try {
+        customs = DirectorTemplateLibrary.loadAll(customTemplatesJson: customJson)
+            .where((t) => !t.isPreset)
+            .toList();
+      } catch (_) {
+        customs = const [];
+      }
+    }
+
     state = state.copyWith(
-      ttsProvider: prefs.getString(_ttsProviderKey) ?? 'sherpa',
+      ttsProvider: prefs.getString(_ttsProviderKey) ?? 'mimo',
+      asrProvider: prefs.getString(_asrProviderKey) ?? 'system',  // ★ 新增
       selectedAsrModelId: prefs.getString(_selectedAsrModelKey) ?? 'sensevoice-int8',
       selectedTtsModelId: prefs.getString(_selectedTtsModelKey) ?? 'melo-zh-en',
       ttsVoice: prefs.getString(_ttsVoiceKey) ?? '0',
+      // ★ 导演模式加载（默认关闭，避免影响现有用户）
+      enableDirectorMode: prefs.getBool(_enableDirectorModeKey) ?? false,
+      directorTemplateId: prefs.getString(_directorTemplateIdKey) ?? 'tsundere',
+      voiceDesignPrompt: prefs.getString(_voiceDesignPromptKey)
+          ?? '年轻女性声音，温柔且略带磁性的中低音',
+      // ★ V1.0：用户自定义模板
+      customTemplates: customs,
+      // ★ Edge TTS 音色
+      edgeVoice: prefs.getString(_edgeVoiceKey) ?? 'xiaoxiao',
     );
+  }
+
+  // ============================================================================
+  // ★ 导演模式 setter（V1.0 完整接入 TTSService 时会调用）
+  // ============================================================================
+
+  /// 切换导演模式开关
+  void setEnableDirectorMode(bool value) {
+    state = state.copyWith(enableDirectorMode: value);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool(_enableDirectorModeKey, value);
+    });
+  }
+
+  /// 选择导演模板
+  void setDirectorTemplateId(String value) {
+    state = state.copyWith(directorTemplateId: value);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(_directorTemplateIdKey, value);
+    });
+  }
+
+  /// 编辑音色描述（voicedesign 模型用）
+  void setVoiceDesignPrompt(String value) {
+    state = state.copyWith(voiceDesignPrompt: value);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(_voiceDesignPromptKey, value);
+    });
+  }
+
+  // ============================================================================
+  // ★ V1.0 用户自定义导演模板增删改（持久化到 SharedPreferences）
+  // ============================================================================
+
+  /// 添加用户自定义模板
+  void addCustomTemplate(DirectorTemplate template) {
+    final updated = [...state.customTemplates, template];
+    state = state.copyWith(customTemplates: updated);
+    _saveCustomTemplates(updated);
+  }
+
+  /// 删除用户自定义模板
+  void deleteCustomTemplate(String id) {
+    final updated = state.customTemplates.where((t) => t.id != id).toList();
+    state = state.copyWith(customTemplates: updated);
+    _saveCustomTemplates(updated);
+    // 如果删除的是当前选中的模板，切换回默认预置
+    if (state.directorTemplateId == id) {
+      setDirectorTemplateId('tsundere');
+    }
+  }
+
+  /// 更新用户自定义模板
+  void updateCustomTemplate(DirectorTemplate template) {
+    final updated = state.customTemplates
+        .map((t) => t.id == template.id ? template : t)
+        .toList();
+    state = state.copyWith(customTemplates: updated);
+    _saveCustomTemplates(updated);
+  }
+
+  /// 内部：序列化保存到 SharedPreferences
+  void _saveCustomTemplates(List<DirectorTemplate> templates) {
+    final json = DirectorTemplateLibrary.encodeCustomTemplates(templates);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(_customTemplatesKey, json);
+    });
+  }
+
+  /// 获取当前导演描述（拼接模板角色/场景/指导）
+  ///
+  /// 返回完整 director 描述字符串，可直接放入 MiMo API 的 user 消息
+  String? getCurrentDirectorPrompt() {
+    if (!state.enableDirectorMode) return null;
+    final template = DirectorTemplatePresets.findById(state.directorTemplateId);
+    if (template == null) return null;
+    return template.composed;
   }
 
   void setTtsProvider(String value) {
     state = state.copyWith(ttsProvider: value);
     SharedPreferences.getInstance().then((prefs) {
       prefs.setString(_ttsProviderKey, value);
+    });
+  }
+
+  /// ★ 新增：设置 ASR provider
+  /// 之前没有这个方法，导致用户无法在 UI 中切换 ASR provider
+  void setAsrProvider(String value) {
+    state = state.copyWith(asrProvider: value);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(_asrProviderKey, value);
     });
   }
 
@@ -120,6 +272,14 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettings> {
     state = state.copyWith(ttsSpeed: value);
   }
 
+  /// ★ 设置 Edge TTS 音色
+  void setEdgeVoice(String value) {
+    state = state.copyWith(edgeVoice: value);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(_edgeVoiceKey, value);
+    });
+  }
+
   void setAutoPlayTts(bool value) {
     state = state.copyWith(autoPlayTts: value);
   }
@@ -144,6 +304,7 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettings> {
 // TTS 提供商选项
 const ttsProviderOptions = [
   {'id': 'sherpa', 'name': 'Sherpa-ONNX', 'desc': '本地离线 TTS，中文优化（推荐）'},
+  {'id': 'edge', 'name': 'Edge TTS', 'desc': '微软免费神经网络语音，无需 API Key，速度快'},
   {'id': 'system', 'name': '系统语音合成', 'desc': '使用系统自带的 TTS 引擎'},
   {'id': 'mimo', 'name': '小米 MiMo TTS', 'desc': '云端语音合成，音色丰富，需 API Key'},
 ];
@@ -185,6 +346,14 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
           _SettingsSection(
             title: '语音识别 (ASR)',
             children: [
+              // ★ 新增：ASR 识别引擎选择
+              ListTile(
+                leading: const Icon(Icons.engineering, color: Colors.green),
+                title: const Text('ASR 识别引擎'),
+                subtitle: Text(_getAsrProviderName(settings.asrProvider)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _showAsrProviderSelectDialog(context, ref, settings.asrProvider),
+              ),
               ListTile(
                 leading: const Icon(Icons.mic, color: Colors.green),
                 title: const Text('Sherpa-ONNX 本地识别'),
@@ -250,7 +419,24 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
               ],
 
               // 系统 TTS 设置
-                            // MiMo TTS 设置
+
+              // Edge TTS 设置
+              if (settings.ttsProvider == 'edge') ...[
+                ListTile(
+                  leading: const Icon(Icons.record_voice_over, color: Colors.blue),
+                  title: const Text('Edge TTS 音色'),
+                  subtitle: Text(_getEdgeVoiceName(settings.edgeVoice)),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showEdgeVoiceSelectDialog(context, ref, settings.edgeVoice),
+                ),
+                const ListTile(
+                  leading: Icon(Icons.info_outline, color: Colors.grey),
+                  title: Text('Edge TTS 说明'),
+                  subtitle: Text('微软免费神经网络语音，无需 API Key，支持 16 种中文音色，需联网'),
+                ),
+              ],
+
+              // MiMo TTS 设置
               if (settings.ttsProvider == 'mimo') ...[
                 ListTile(
                   leading: const Icon(Icons.key, color: Colors.amber),
@@ -310,6 +496,74 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
                       : '已创建 ${clonedVoices.length} 个克隆音色'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => context.push('/settings/voice/clone'),
+                ),
+
+                // ============================================================================
+                // ★ 导演模式（MiMo v2.5 director mode）— MVP
+                // ============================================================================
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: const Icon(Icons.movie_creation, color: Colors.deepPurple),
+                  title: const Text('导演模式（MiMo v2.5）'),
+                  subtitle: Text(settings.enableDirectorMode
+                      ? '已启用 · 当前模板：${_getDirectorTemplateName(settings.directorTemplateId)}'
+                      : '关闭 · 启用后将从角色/场景/指导三维度控制语音'),
+                  trailing: Switch(
+                    value: settings.enableDirectorMode,
+                    onChanged: (value) {
+                      ref.read(voiceSettingsProvider.notifier).setEnableDirectorMode(value);
+                      setState(() {});
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(value ? '已启用导演模式' : '已关闭导演模式'),
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                if (settings.enableDirectorMode)
+                  ListTile(
+                    leading: const Icon(Icons.style, color: Colors.deepPurple),
+                    title: const Text('选择导演模板'),
+                    subtitle: Text(_getDirectorTemplateName(settings.directorTemplateId)),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _showDirectorTemplateSelectDialog(context, ref, settings.directorTemplateId),
+                  ),
+                if (settings.enableDirectorMode)
+                  ListTile(
+                    leading: const Icon(Icons.preview, color: Colors.deepPurple),
+                    title: const Text('预览导演描述'),
+                    subtitle: Text(
+                      _getDirectorTemplateDescription(settings.directorTemplateId),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _showDirectorPreviewDialog(context, settings.directorTemplateId),
+                  ),
+                // ★ V1.0：我的模板（用户自定义）
+                ListTile(
+                  leading: const Icon(Icons.folder_special, color: Colors.indigo),
+                  title: const Text('我的模板'),
+                  subtitle: Text(settings.customTemplates.isEmpty
+                      ? '未创建自定义模板'
+                      : '已创建 ${settings.customTemplates.length} 个 · 点击管理'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/settings/voice/director-templates'),
+                ),
+                // ★ 音色设计（voicedesign 模型）— MVP 占位，V1.0 完整接入 API
+                ListTile(
+                  leading: const Icon(Icons.tune, color: Colors.pink),
+                  title: const Text('音色描述（voice design · V1.0）'),
+                  subtitle: Text(
+                    settings.voiceDesignPrompt,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showVoiceDesignEditDialog(context, ref, settings.voiceDesignPrompt),
                 ),
               ],
 
@@ -389,6 +643,68 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
   String _getAsrModelName(String modelId) {
     final model = VoiceModelService.asrModels.where((m) => m.id == modelId).firstOrNull;
     return model?.name ?? modelId;
+  }
+
+  /// ★ 新增：ASR provider 名称映射
+  String _getAsrProviderName(String providerId) {
+    return switch (providerId) {
+      'sherpa' => 'Sherpa-ONNX 本地识别（推荐）',
+      'system' => '系统语音识别（实时转写）',
+      'openai' => 'OpenAI Whisper API',
+      _ => providerId,
+    };
+  }
+
+  /// ★ 新增：ASR provider 选择对话框
+  void _showAsrProviderSelectDialog(BuildContext context, WidgetRef ref, String currentProvider) {
+    final providers = [
+      {'id': 'system', 'name': '系统语音识别（实时转写）', 'desc': '使用系统自带的语音识别引擎，实时显示识别结果'},
+      {'id': 'sherpa', 'name': 'Sherpa-ONNX 本地识别', 'desc': '离线识别，中英日韩粤支持，需要下载模型'},
+      {'id': 'openai', 'name': 'OpenAI Whisper', 'desc': '云端识别，精度高但需网络和 API Key'},
+    ];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择 ASR 识别引擎'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 350,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: providers.length,
+            itemBuilder: (_, i) {
+              final p = providers[i];
+              return RadioListTile<String>(
+                title: Text(p['name']!),
+                subtitle: Text(p['desc']!, maxLines: 2),
+                value: p['id']!,
+                groupValue: currentProvider,
+                onChanged: (value) {
+                  if (value != null) {
+                    ref.read(voiceSettingsProvider.notifier).setAsrProvider(value);
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('已切换到 ${p['name']}'),
+                        behavior: SnackBarBehavior.floating,
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
   }
 
   String _getTtsModelName(String modelId) {
@@ -676,14 +992,28 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
     );
 
     try {
-      await service.downloadModel(
-        modelId: model.id,
-        onProgress: (progress) {
-          if (progressKey.currentState != null) {
-            progressKey.currentState!.updateProgress(progress.progress);
-          }
-        },
-      );
+      // ★ 修复：根据模型类型选择正确的下载方法
+      // isDirectDownload=true 走 downloadModelDirect（直链，无需解压）
+      // 其他走 downloadModel（tar.bz2，需要解压）
+      if (model.isDirectDownload) {
+        await service.downloadModelDirect(
+          modelId: model.id,
+          onProgress: (progress) {
+            if (progressKey.currentState != null) {
+              progressKey.currentState!.updateProgress(progress);
+            }
+          },
+        );
+      } else {
+        await service.downloadModel(
+          modelId: model.id,
+          onProgress: (progress) {
+            if (progressKey.currentState != null) {
+              progressKey.currentState!.updateProgress(progress);
+            }
+          },
+        );
+      }
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -691,6 +1021,16 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
         );
       }
     } catch (e) {
+      if (progressKey.currentState != null) {
+        progressKey.currentState!.updateProgress(
+          VoiceModelDownloadProgress(
+            modelId: model.id,
+            progress: 0.0,
+            status: 'error',
+            error: e.toString(),
+          ),
+        );
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('下载失败: $e')),
@@ -701,6 +1041,69 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
   // ══════════════════════════════════════════════════════════════════════════
   // MiMo TTS 辅助方法
   // ══════════════════════════════════════════════════════════════════════════
+
+  /// ★ Edge TTS 音色名称映射
+  static const Map<String, String> _edgeVoiceDisplayNames = {
+    'xiaoxiao': '晓晓 (女声·温暖自然)',
+    'xiaoyi': '晓依 (女声·活泼)',
+    'yunjian': '云健 (男声·沉稳)',
+    'xiaochen': '晓辰 (女声·甜美)',
+    'xiaohan': '晓涵 (女声·温柔)',
+    'xiaomeng': '晓梦 (女声·可爱)',
+    'xiaomo': '晓墨 (女声·成熟)',
+    'xiaoqiu': '晓秋 (女声·知性)',
+    'xiaorui': '晓睿 (女声·温暖)',
+    'xiaoshuang': '晓双 (女声·童声)',
+    'xiaoxuan': '晓萱 (女声·优雅)',
+    'xiaoyan': '晓妍 (女声·专业)',
+    'xiaozhen': '晓甄 (女声·新闻)',
+    'yunxi': '云希 (男声·阳光)',
+    'yunxia': '云夏 (男声·少年)',
+    'yunyang': '云扬 (男声·新闻)',
+  };
+
+  /// ★ 获取 Edge TTS 音色显示名称
+  String _getEdgeVoiceName(String edgeVoiceId) {
+    return _edgeVoiceDisplayNames[edgeVoiceId] ?? edgeVoiceId;
+  }
+
+  /// ★ Edge TTS 音色选择对话框
+  void _showEdgeVoiceSelectDialog(BuildContext context, WidgetRef ref, String currentVoice) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择 Edge TTS 音色'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _edgeVoiceDisplayNames.length,
+            itemBuilder: (ctx, index) {
+              final voiceId = _edgeVoiceDisplayNames.keys.elementAt(index);
+              final voiceName = _edgeVoiceDisplayNames.values.elementAt(index);
+              return RadioListTile<String>(
+                title: Text(voiceName),
+                value: voiceId,
+                groupValue: currentVoice,
+                onChanged: (value) {
+                  if (value != null) {
+                    ref.read(voiceSettingsProvider.notifier).setEdgeVoice(value);
+                    Navigator.pop(ctx);
+                  }
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+  }
 
   String _getMiMoVoiceName(String voiceId, List<ClonedVoice> clonedVoices) {
     if (voiceId.startsWith('clone_')) {
@@ -889,6 +1292,215 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
       ref.read(voiceSettingsProvider.notifier).setTtsVoice(selected);
     }
   }
+
+  // ============================================================================
+  // ★ 导演模式辅助方法（MiMo v2.5 director mode）— MVP
+  // ============================================================================
+
+  /// 获取导演模板的中文显示名
+  String _getDirectorTemplateName(String id) {
+    final t = DirectorTemplatePresets.findById(id);
+    return t?.name ?? '未选择';
+  }
+
+  /// 获取导演模板的简短描述（前 50 字）
+  String _getDirectorTemplateDescription(String id) {
+    final t = DirectorTemplatePresets.findById(id);
+    if (t == null) return '';
+    final full = t.role;
+    return full.length > 50 ? '${full.substring(0, 50)}…' : full;
+  }
+
+  /// 显示导演模板选择对话框
+  void _showDirectorTemplateSelectDialog(
+    BuildContext context,
+    WidgetRef ref,
+    String currentId,
+  ) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择导演模板'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 380,
+          child: ListView(
+            shrinkWrap: true,
+            children: DirectorTemplatePresets.all.map((t) {
+              final isSelected = t.id == currentId;
+              return InkWell(
+                onTap: () {
+                  ref.read(voiceSettingsProvider.notifier).setDirectorTemplateId(t.id);
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('已切换到「${t.name}」模板'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.deepPurple.withValues(alpha: 0.1)
+                        : null,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.movie_creation, color: Colors.deepPurple),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              t.name,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              t.category,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isSelected)
+                        const Icon(Icons.check, color: Colors.green),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 显示导演描述完整预览
+  void _showDirectorPreviewDialog(BuildContext context, String templateId) {
+    final t = DirectorTemplatePresets.findById(templateId);
+    if (t == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('「${t.name}」导演描述预览'),
+        content: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.deepPurple.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: Colors.deepPurple.withValues(alpha: 0.2),
+              ),
+            ),
+            child: SelectableText(
+              t.composed,
+              style: const TextStyle(fontSize: 14, height: 1.5),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: t.composed));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已复制到剪贴板')),
+              );
+            },
+            child: const Text('复制'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 显示音色描述编辑对话框
+  void _showVoiceDesignEditDialog(
+    BuildContext context,
+    WidgetRef ref,
+    String currentPrompt,
+  ) {
+    final controller = TextEditingController(text: currentPrompt);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑音色描述'),
+        content: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '用自然语言描述想要的音色（如：年轻女性声音、温柔且略带磁性的中低音）。\n此描述会在 V1.0 版本中传递给 MiMo voicedesign 模型生成专属音色。',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLines: 3,
+                maxLength: 200,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: '例如：年轻女性声音，温柔且略带磁性的中低音',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('音色描述不能为空')),
+                );
+                return;
+              }
+              ref.read(voiceSettingsProvider.notifier).setVoiceDesignPrompt(text);
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('音色描述已保存（V1.0 完整启用）'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // 设置区块组件
@@ -1009,32 +1621,78 @@ class _DownloadProgressDialog extends StatefulWidget {
 
 class _DownloadProgressState extends State<_DownloadProgressDialog> {
   double _progress = 0;
+  String _status = 'downloading'; // downloading, extracting, completed, error
+  String? _errorMessage;
+  // 0..0.8 = 下载, 0.8..1.0 = 解压（UI 端平滑过渡用）
+  String _statusText = '下载中';
 
-  void updateProgress(double progress) {
+  void updateProgress(VoiceModelDownloadProgress progress) {
     if (mounted) {
       setState(() {
-        _progress = progress;
+        _progress = progress.progress;
+        _status = progress.status;
+        _errorMessage = progress.error;
+        // ★ 状态文本映射
+        _statusText = switch (progress.status) {
+          'downloading' => '下载中 ${(progress.progress * 100).toStringAsFixed(1)}%',
+          'extracting' => '解压中...',
+          'completed' => '下载完成',
+          'error' => '下载失败',
+          'paused' => '已暂停',
+          _ => '准备中...',
+        };
       });
     }
   }
 
+  bool get _isCompleted => _status == 'completed';
+  bool get _isError => _status == 'error';
+
   @override
   Widget build(BuildContext context) {
+    // ★ 进度条：下载阶段显示真实进度（0-1），解压阶段显示 0.95（已接近完成）
+    final displayProgress = _status == 'extracting'
+        ? 0.95
+        : (_status == 'completed' ? 1.0 : _progress);
+
     return AlertDialog(
       title: Text('下载 ${widget.model.name}'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          LinearProgressIndicator(value: _progress),
+          LinearProgressIndicator(value: displayProgress),
           const SizedBox(height: 16),
-          Text('${(_progress * 100).toStringAsFixed(1)}%'),
+          Text(_statusText,
+              style: TextStyle(
+                color: _isError ? Colors.red : (_isCompleted ? Colors.green : null),
+                fontWeight: _isCompleted || _isError ? FontWeight.bold : null,
+              )),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 8),
+            Text('错误: $_errorMessage',
+                style: const TextStyle(color: Colors.red, fontSize: 12)),
+          ],
         ],
       ),
       actions: [
-        TextButton(
-          onPressed: widget.onCancel,
-          child: const Text('取消'),
-        ),
+        // ★ 完成时显示"完成"按钮，错误时显示"关闭"，下载中显示"取消"
+        if (_isCompleted)
+          TextButton(
+            onPressed: widget.onCancel,
+            style: TextButton.styleFrom(foregroundColor: Colors.green),
+            child: const Text('完成', style: TextStyle(fontWeight: FontWeight.bold)),
+          )
+        else if (_isError)
+          TextButton(
+            onPressed: widget.onCancel,
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('关闭'),
+          )
+        else
+          TextButton(
+            onPressed: widget.onCancel,
+            child: const Text('取消'),
+          ),
       ],
     );
   }

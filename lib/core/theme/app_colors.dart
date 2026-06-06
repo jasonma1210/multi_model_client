@@ -1,53 +1,55 @@
-/// MJ Nexus 色彩系统 - 现代极简设计
-/// 
+/// MJ Nexus 色彩系统 - 与 AppTheme 统一的设计令牌
+///
 /// 设计理念：
-/// - 科技蓝强调色，专业感
-/// - 深邃背景，护眼舒适
+/// - 与 AppTheme 保持色彩一致性
+/// - 提供便捷的上下文感知色彩访问方法
 /// - 渐变色增强视觉层次
-/// 
+///
 /// @author JianMa
-/// @version 1.0.0
+/// @version 2.0.0 — 与 AppTheme 统一
 library;
 
 import 'package:flutter/material.dart';
 
-/// 应用色彩系统
+import 'app_theme.dart';
+
+/// 应用色彩系统（与 AppTheme 统一）
 class AppColors {
   AppColors._();
 
   // =====================================================
-  // 深色主题
+  // 深色主题 — 与 AppTheme 保持一致
   // =====================================================
 
-  /// 深邃背景色
-  static const Color darkBackground = Color(0xFF0A0A0F);
+  /// 深邃背景色（微带蓝调）
+  static const Color darkBackground = Color(0xFF0F1117);
   
   /// 表面色（卡片、面板）
-  static const Color darkSurface = Color(0xFF141419);
+  static const Color darkSurface = Color(0xFF161822);
   
   /// 卡片色
-  static const Color darkCard = Color(0xFF1E1E24);
+  static const Color darkCard = Color(0xFF1C1E2A);
   
   /// 边框色
-  static const Color darkBorder = Color(0xFF2A2A32);
+  static const Color darkBorder = Color(0xFF2A2D3A);
   
   /// Hover 状态色
-  static const Color darkHover = Color(0xFF25252D);
+  static const Color darkHover = Color(0xFF222536);
   
   /// 主文字色
-  static const Color darkTextPrimary = Color(0xFFE8E8EC);
+  static const Color darkTextPrimary = Color(0xFFE8EAF0);
   
   /// 次文字色
-  static const Color darkTextSecondary = Color(0xFF8E8E96);
+  static const Color darkTextSecondary = Color(0xFF8B8FA3);
   
   /// 暗示文字色
-  static const Color darkTextMuted = Color(0xFF555560);
+  static const Color darkTextMuted = Color(0xFF555770);
 
   // =====================================================
-  // 浅色主题
+  // 浅色主题 — 与 AppTheme 保持一致
   // =====================================================
 
-  /// 背景色
+  /// 背景色（微带蓝调冷白）
   static const Color lightBackground = Color(0xFFF8F9FA);
   
   /// 表面色
@@ -60,26 +62,32 @@ class AppColors {
   static const Color lightBorder = Color(0xFFE5E7EB);
   
   /// 主文字色
-  static const Color lightTextPrimary = Color(0xFF111827);
+  static const Color lightTextPrimary = Color(0xFF1A1A1A);
   
   /// 次文字色
   static const Color lightTextSecondary = Color(0xFF6B7280);
+  
+  /// 暗示文字色
+  static const Color lightTextMuted = Color(0xFF9CA3AF);
+  
+  /// Hover 状态色
+  static const Color lightHover = Color(0xFFF3F4F6);
 
   // =====================================================
-  // 强调色（科技蓝）
+  // 强调色（与 AppTheme.accentPrimary 统一）
   // =====================================================
 
   /// 主强调色（科技蓝）
-  static const Color accentPrimary = Color(0xFF3B82F6);
+  static const Color accentPrimary = AppTheme.accentPrimary;
   
   /// 次强调色（靛蓝）
-  static const Color accentSecondary = Color(0xFF6366F1);
+  static const Color accentSecondary = AppTheme.accentSecondary;
   
   /// 强调色 Hover 状态
-  static const Color accentHover = Color(0xFF2563EB);
+  static const Color accentHover = AppTheme.accentHover;
   
   /// 强调色浅色变体（背景用）
-  static const Color accentLight = Color(0x1A3B82F6);
+  static const Color accentLight = AppTheme.accentSubtle;
 
   // =====================================================
   // 状态色
@@ -110,27 +118,17 @@ class AppColors {
   static const Color infoLight = Color(0x1A3B82F6);
 
   // =====================================================
-  // 渐变色
+  // 渐变色（与 AppTheme 统一）
   // =====================================================
 
   /// 主渐变（科技蓝到靛蓝）
-  static const LinearGradient primaryGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF3B82F6), Color(0xFF6366F1)],
-  );
+  static const LinearGradient primaryGradient = AppTheme.gradientPrimary;
 
-  /// 表面渐变（深色主题）
-  static const LinearGradient surfaceGradient = LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-    colors: [Color(0xFF1E1E24), Color(0xFF141419)],
-  );
+  /// 表面渐变（深色主题微层次）
+  static const LinearGradient surfaceGradient = AppTheme.gradientSurfaceDark;
 
   /// 强调渐变（紫粉）
-  static const LinearGradient accentGradient = LinearGradient(
-    colors: [Color(0xFF8B5CF6), Color(0xFFEC4899)],
-  );
+  static const LinearGradient accentGradient = AppTheme.gradientAccent;
 
   /// 成功渐变
   static const LinearGradient successGradient = LinearGradient(

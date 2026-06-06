@@ -123,6 +123,7 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
         'system' => TTSProvider.system,
         'openai' => TTSProvider.openai,
         'mimo' => TTSProvider.mimo,
+        'edge' => TTSProvider.edge,
         _ => TTSProvider.system,
       };
 
@@ -178,10 +179,18 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
         sherpaModelId: selectedAsrModelId,
       );
 
+      // ★ 读取 Edge TTS 音色设置
+      final edgeVoiceStr = prefs.getString('edge_voice') ?? 'xiaoxiao';
+      final edgeVoice = EdgeVoice.values.firstWhere(
+        (v) => v.name == edgeVoiceStr,
+        orElse: () => EdgeVoice.xiaoxiao,
+      );
+
       _ttsService = TTSService(
         provider: ttsProviderEnum,
         apiKey: ttsApiKey,
         mimoVoice: mimoVoice,
+        edgeVoice: edgeVoice,
         cloneReferenceAudioPath: cloneRefAudioPath,
         sherpaModelId: ttsModelId,
         speechRate: ttsSpeed,
@@ -768,6 +777,11 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
   }
 
   Future<void> _processWithLLM(String text) async {
+    // ★★★ 修复 V76：每次新对话前重置 _ttsInterrupted ★★★
+    // 上一轮 TTS 被打断时 _ttsInterrupted=true，如果不重置，
+    // 下一轮 await for 循环会在第一个 chunk 就 break，导致 fullResponse 为空
+    _ttsInterrupted = false;
+
     setState(() {
       _state = _VoiceState.thinking;
       _statusText = '正在思考...';
@@ -778,15 +792,25 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
 
     try {
       if (_dialogueEngine != null) {
+        debugPrint('[RealtimeVoicePage] 开始流式推理: sessionId=${widget.sessionId}');
         final responseStream = _dialogueEngine!.streamResponse(
           widget.sessionId,
           text,
         );
 
         String fullResponse = '';
+        int chunkCount = 0;
         await for (final chunk in responseStream) {
-          if (_isDisposed || _ttsInterrupted) break;
-          fullResponse += chunk.content;
+          chunkCount++;
+          if (_isDisposed) break;
+          // ★ 修复：只累加中间 token，isComplete=true 时的 yield 是完整的 responseBuffer，
+          //   不能再累加，否则会导致"输出的 content 变成 2 遍"。
+          if (!chunk.isComplete) {
+            fullResponse += chunk.content;
+          } else {
+            // 完成信号：直接用完整内容覆盖（防止中途丢 token 时内容不完整）
+            fullResponse = chunk.content;
+          }
           if (mounted) {
             setState(() {
               _aiText = fullResponse;
@@ -794,7 +818,9 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
           }
         }
 
-        if (fullResponse.isNotEmpty && !_isDisposed) {
+        debugPrint('[RealtimeVoicePage] 流式推理完成: chunkCount=$chunkCount, fullResponse.length=${fullResponse.length}, _ttsInterrupted=$_ttsInterrupted');
+
+        if (fullResponse.isNotEmpty && !_isDisposed && !_ttsInterrupted) {
           setState(() {
             _messages.add(_VoiceMessage(
               text: fullResponse,
@@ -806,19 +832,48 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
           _scrollToBottom();
 
           await _speakResponse(fullResponse);
+        } else if (!_isDisposed) {
+          // ★★★ V77 修复：所有"非 happy path"都恢复 idle ★★★
+          // 覆盖场景：
+          //   1. fullResponse 为空（被 _cleanThinkTags 全部清洗）
+          //   2. _ttsInterrupted=true（用户打断 LLM 思考，跳过 TTS）
+          //   3. dialogue_engine 注入"模型未产生输出..."
+          // 不恢复 → state 永远卡 thinking/speaking → 后续按说话无效
+          debugPrint('[RealtimeVoicePage] 跳过TTS（响应为空或被打断），恢复 idle 状态');
+          if (mounted) {
+            setState(() {
+              _aiText = '';
+              _userText = '';
+            });
+          }
+          _onTTSComplete();
         }
       }
     } catch (e) {
       debugPrint('[RealtimeVoicePage] LLM 处理失败: $e');
-      setState(() {
-        _errorMsg = '处理失败: $e';
-        _state = _VoiceState.error;
-      });
+      // ★★★ V77 修复：异常时也恢复 idle，避免状态卡死 ★★★
+      if (mounted) {
+        setState(() {
+          _errorMsg = '处理失败: $e';
+          _state = _VoiceState.idle;
+          _statusText = '按住说话';
+          _aiText = '';
+          _userText = '';
+        });
+      }
+      _pulseController.stop();
     }
   }
 
   Future<void> _speakResponse(String text) async {
-    if (_ttsService == null || _isDisposed) return;
+    // ★★★ V77 修复：所有 early return 都必须恢复状态 ★★★
+    // 旧代码：_ttsService==null 或 _isDisposed 时直接 return，
+    // 但此时 state 已经是 thinking（由 _processWithLLM 设置），
+    // 不恢复 → state 永远卡 thinking → 后续按说话无效
+    if (_ttsService == null || _isDisposed) {
+      _onTTSComplete();
+      return;
+    }
 
     setState(() {
       _state = _VoiceState.speaking;
@@ -832,22 +887,86 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
       debugPrint('[RealtimeVoicePage] 开始TTS合成，音色来自语音设置');
       final audioPath = await _ttsService!.synthesize(text);
 
-      if (_isDisposed || _ttsInterrupted) return;
+      if (_isDisposed) {
+        _onTTSComplete();
+        return;
+      }
+      if (_ttsInterrupted) {
+        // 被打断时 _interruptTTS 已恢复 state，直接退出
+        return;
+      }
 
       if (audioPath.isNotEmpty) {
+        // ★★★ V77 修复：播放前先 stop 上一轮的音频 ★★★
+        // 旧代码：播放完成后不 stop，player 留在 completed 状态
+        // 下一轮 setFilePath 可能无法正确重置 player 内部状态
+        try { await _audioPlayer!.stop(); } catch (_) {}
         await _audioPlayer!.setFilePath(audioPath);
         await _audioPlayer!.play();
 
-        await _audioPlayer!.playerStateStream.firstWhere(
-          (state) => state.processingState == ProcessingState.completed,
-        );
+        // ★★★ 修复 V75：用 processingStateStream + completion future 替代轮询 ★★★
+        await _waitForPlaybackComplete();
       }
     } catch (e) {
       debugPrint('[RealtimeVoicePage] TTS 播放失败: $e');
     }
 
-    if (!_isDisposed && !_ttsInterrupted) {
+    // ★★★ 修复 V75：无论 audioPath 是否为空、TTS 是否被打断，都确保 state 恢复 ★★★
+    // 旧代码：audioPath.isEmpty 时不调 _onTTSComplete() → state 永远卡 speaking
+    // 旧代码：_ttsInterrupted 时 return 不调 _onTTSComplete() → state 不一致
+    // 修复：只在 _interruptTTS 已恢复 state 时跳过，其他情况都恢复
+    if (!_isDisposed && _state != _VoiceState.idle) {
       _onTTSComplete();
+    }
+  }
+
+  /// 等待音频播放完成或被打断
+  ///
+  /// ★★★ V77 修复：使用 playerStateStream 替代 processingStateStream ★★★
+  /// 旧方案问题：
+  ///   1. processingStateStream 的 completed 事件可能在 timeout 检查间隙被吞掉
+  ///   2. completer.future.timeout(50ms) 每次创建新 future，completed 信号可能丢失
+  ///   3. 导致正常播放完成后方法挂起，直到 3 分钟超时
+  /// 新方案：
+  ///   1. 监听 playerStateStream（更可靠，包含 playing/completed 等完整状态）
+  ///   2. 用 Completer + 100ms 轮询检查中断信号
+  ///   3. 播放完成后 stop() 重置 player，确保下次可复用
+  Future<void> _waitForPlaybackComplete() async {
+    const maxWait = Duration(minutes: 3);
+    final startTime = DateTime.now();
+
+    final completer = Completer<void>();
+    StreamSubscription? subscription;
+
+    subscription = _audioPlayer!.playerStateStream.listen((playerState) {
+      if (playerState.processingState == ProcessingState.completed && !completer.isCompleted) {
+        completer.complete();
+      }
+    });
+
+    try {
+      while (!completer.isCompleted && !_isDisposed && !_ttsInterrupted) {
+        if (DateTime.now().difference(startTime) > maxWait) {
+          debugPrint('[RealtimeVoicePage] TTS 播放超过 3 分钟，强制结束');
+          break;
+        }
+
+        // 等待完成信号，每 100ms 检查一次中断
+        try {
+          await completer.future.timeout(const Duration(milliseconds: 100));
+          // completed → 正常退出
+          debugPrint('[RealtimeVoicePage] TTS 播放正常完成');
+          break;
+        } on TimeoutException {
+          // 超时 = 还没播放完，检查中断信号后继续
+          continue;
+        }
+      }
+    } finally {
+      await subscription.cancel();
+      // ★★★ V77 修复：播放完成后始终 stop() 重置 player ★★★
+      // 无论正常完成还是被打断/超时，都 stop 以确保下次可复用
+      try { await _audioPlayer?.stop(); } catch (_) {}
     }
   }
 

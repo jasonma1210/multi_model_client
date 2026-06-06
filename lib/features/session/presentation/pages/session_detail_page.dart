@@ -620,7 +620,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     }
     
     // 初始化 TTS 服务
-    if (ttsProvider == 'openai' || ttsProvider == 'sherpa' || ttsProvider == 'system' || ttsProvider == 'mimo') {
+    if (ttsProvider == 'openai' || ttsProvider == 'sherpa' || ttsProvider == 'system' || ttsProvider == 'mimo' || ttsProvider == 'edge') {
       String? apiKey;
       TTSProvider ttsProviderEnum;
       
@@ -632,6 +632,9 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
         case 'mimo':
           ttsProviderEnum = TTSProvider.mimo;
           apiKey = settingsService.getMimoApiKey();
+          break;
+        case 'edge':
+          ttsProviderEnum = TTSProvider.edge;
           break;
         case 'sherpa':
           ttsProviderEnum = TTSProvider.sherpa;
@@ -671,10 +674,18 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
         );
       }
       
+      // ★ 读取 Edge TTS 音色设置
+      final edgeVoiceStr = prefs.getString('edge_voice') ?? 'xiaoxiao';
+      final edgeVoice = EdgeVoice.values.firstWhere(
+        (v) => v.name == edgeVoiceStr,
+        orElse: () => EdgeVoice.xiaoxiao,
+      );
+      
       ttsService = TTSService(
         provider: ttsProviderEnum,
         apiKey: apiKey,
         mimoVoice: mimoVoice,
+        edgeVoice: edgeVoice,
         cloneReferenceAudioPath: cloneReferenceAudioPath,
         sherpaModelId: ttsProvider == 'sherpa' ? selectedTtsModelId : null,
         speakerId: speakerId,
@@ -4140,8 +4151,15 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
 
           // ★ 修复：TTS 播报改为非阻塞，避免 TTS 卡死导致整个会话 UI 冻住
           // 不使用 await，让 TTS 在后台执行，主流程立即继续
-          debugPrint('[SessionDetail] 流式响应完成，触发 TTS 播报: 响应长度=${response.content.length}');
-          _playAssistantVoice(response.content);
+          // 跳过 TTS 播报"系统提示"消息（如"模型未产生输出..."），避免噪音
+          if (response.content.isNotEmpty &&
+              !response.content.startsWith('（') &&
+              !response.content.startsWith('(')) {
+            debugPrint('[SessionDetail] 流式响应完成，触发 TTS 播报: 响应长度=${response.content.length}');
+            _playAssistantVoice(response.content);
+          } else {
+            debugPrint('[SessionDetail] 跳过 TTS 播报（系统提示）: ${response.content}');
+          }
         }
       }
     } catch (e, stack) {
@@ -4346,22 +4364,23 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       debugPrint('[VoiceOutput]   tts_voice_id = "$ttsVoice"');
       debugPrint('[VoiceOutput]   system_tts_speed = $ttsSpeed');
 
-      // ★★★ 移动端 OOM 保护 ★★★
-      // 使用本地 LLM 模型时，原生内存已被大量占用（可达 50GB+），
-      // 再用 Sherpa TTS 加载另一个 ONNX 模型会导致系统 OOM kill。
-      // 移动端自动降级为系统 TTS（不占用额外原生内存）。
+      // ★★★ 移动端 OOM 保护（已弱化为可选项） ★★★
+      // 使用本地 LLM 模型时，原生内存已被大量占用，
+      // 再用 Sherpa TTS 加载另一个 ONNX 模型可能 OOM。
+      // 历史说明：之前是硬编码自动降级，导致用户选 sherpa 完全无声。
+      // 现在保留提示但不再静默降级，由用户自行决定。
       final isMobile = Platform.isAndroid || Platform.isIOS;
-      final isLocalModel = session.modelId.startsWith('local-') || 
+      final isLocalModel = session.modelId.startsWith('local-') ||
                            session.modelId.startsWith('ffi-') ||
                            session.modelId.contains('gguf');
       debugPrint('[VoiceOutput] [步骤4] OOM检测: isMobile=$isMobile, isLocalModel=$isLocalModel, modelId=${session.modelId}');
       if (isMobile && isLocalModel && ttsProvider == 'sherpa') {
-        debugPrint('[VoiceOutput] ⚠️ 移动端+本地模型：Sherpa TTS 降级为系统 TTS（防止 OOM）');
-        ttsProvider = 'system';
+        debugPrint('[VoiceOutput] ⚠️ 移动端+本地模型：Sherpa TTS 可能有 OOM 风险，但已恢复用户选择');
+        // ★ 不再静默降级，保留用户选择的 sherpa
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('💡 已自动切换为系统语音（节省内存）'),
+              content: Text('💡 提示：移动端+本地模型下使用 Sherpa TTS 可能有 OOM 风险'),
               duration: Duration(seconds: 2),
               behavior: SnackBarBehavior.floating,
             ),
@@ -4414,7 +4433,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       final needRecreate = _cachedTtsService == null || _ttsSettingsFingerprint != settingsFingerprint;
       debugPrint('[VoiceOutput] [步骤7] TTS服务缓存: cached=${_cachedTtsService != null}, fingerprint匹配=${_ttsSettingsFingerprint == settingsFingerprint}, 需要重建=$needRecreate');
       if (needRecreate) {
-        debugPrint('[VoiceOutput] [步骤7] 创建 TTSService: provider=$_getTTSProvider(ttsProvider), apiKey=${ttsApiKey != null ? "有" : "无"}, mimoVoice=$mimoVoice, speechRate=$ttsSpeed');
+        debugPrint('[VoiceOutput] [步骤7] 创建 TTSService: provider=$_getTTSProvider(ttsProvider), apiKey=${ttsApiKey != null ? "有" : "无"}, mimoVoice=$mimoVoice, speechRate=$ttsSpeed, systemVoiceId=$ttsVoice');
         _cachedTtsService = TTSService(
           provider: _getTTSProvider(ttsProvider),
           apiKey: ttsApiKey,
@@ -4422,7 +4441,9 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           cloneReferenceAudioPath: cloneRefAudioPath,
           speechRate: ttsSpeed,
           sherpaModelId: ttsProvider == 'sherpa' ? ttsModelId : null,
-          speakerId: ttsVoice.isNotEmpty ? int.tryParse(ttsVoice) ?? 0 : 0,
+          speakerId: ttsProvider == 'sherpa' && ttsVoice.isNotEmpty ? int.tryParse(ttsVoice) ?? 0 : 0,
+          // ★ 修复：传递 system TTS 音色 ID（之前完全被忽略）
+          systemVoiceId: ttsProvider == 'system' && ttsVoice.isNotEmpty ? ttsVoice : null,
         );
         _ttsSettingsFingerprint = settingsFingerprint;
         // 仅 system TTS 需要预热（MiMo/OpenAI/Sherpa 不需要系统 TTS 绑定）

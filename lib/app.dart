@@ -43,7 +43,7 @@ class _AppState extends ConsumerState<App> {
   Widget build(BuildContext context) {
     if (_isCheckingOnboarding) {
       return MaterialApp(
-        title: 'MJ Nexus',
+        title: 'MJ Nexus Series',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
@@ -65,7 +65,7 @@ class _AppState extends ConsumerState<App> {
 
     if (_showOnboarding) {
       return MaterialApp(
-        title: 'MJ Nexus',
+        title: 'MJ Nexus Series',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,

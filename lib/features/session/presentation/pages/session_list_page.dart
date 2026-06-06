@@ -174,6 +174,12 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
         });
       }
     });
+
+    // ★★★ 修复：监听模型下载完成事件，触发 UI 重建 ★★★
+    // 问题：模型下载完成后回到会话列表时，由于没有订阅 modelProvider，
+    // UI 不会自动重建，导致 _handleAddSession 仍用旧 modelState，
+    // 进而误判为"无模型"并跳转到模型下载页面
+    final modelState = ref.watch(modelProvider);
     final theme = Theme.of(context);
     final isPortrait = _isPortraitMode;
 
@@ -199,10 +205,22 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
       },
       child: Scaffold(
         backgroundColor: theme.colorScheme.surface,
-        floatingActionButton: FloatingActionButton(
-          onPressed: () => _navigateToInspiration(context),
-          tooltip: '灵感一瞬',
-          child: const Icon(Icons.lightbulb_outline),
+        floatingActionButton: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.accentPrimary.withValues(alpha: 0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: FloatingActionButton(
+            onPressed: () => _navigateToInspiration(context),
+            tooltip: '灵感一瞬',
+            child: const Icon(Icons.lightbulb_outline),
+          ),
         ),
         body: Stack(children: [
           Row(
@@ -214,7 +232,10 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surfaceContainerLow,
                     border: Border(
-                      right: BorderSide(color: theme.dividerColor, width: 0.5),
+                      right: BorderSide(
+                        color: theme.dividerColor.withValues(alpha: 0.3),
+                        width: 0.5,
+                      ),
                     ),
                   ),
                   child: _buildSidebar(context),
@@ -234,35 +255,51 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
   );
 }
 
-  /// 构建竖屏模式的侧边栏覆盖层
+  /// 构建竖屏模式的侧边栏覆盖层（带动画）
   Widget _buildSidebarOverlay(BuildContext context, ThemeData theme) {
     final screenWidth = MediaQuery.of(context).size.width;
     final overlayWidth = screenWidth * 2 / 3; // 2/3 宽度
+    final isDark = theme.brightness == Brightness.dark;
 
-    return GestureDetector(
-      onTap: () => setState(() => _sidebarOpen = false),
-      child: Container(
-        color: Colors.black54,
-        width: screenWidth,
-        height: double.infinity,
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: GestureDetector(
-            onTap: () {}, // 点击侧边栏内容不关闭
-            child: Container(
-              width: overlayWidth,
-              height: double.infinity,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerLow,
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 16,
-                    offset: Offset(4, 0),
+    return AnimatedOpacity(
+      opacity: _sidebarOpen ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 200),
+      child: GestureDetector(
+        onTap: () => setState(() => _sidebarOpen = false),
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.5),
+          width: screenWidth,
+          height: double.infinity,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: GestureDetector(
+              onTap: () {}, // 点击侧边栏内容不关闭
+              child: AnimatedSlide(
+                offset: _sidebarOpen ? Offset.zero : const Offset(-0.3, 0),
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                child: Container(
+                  width: overlayWidth,
+                  height: double.infinity,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerLow,
+                    border: Border(
+                      right: BorderSide(
+                        color: theme.dividerColor.withValues(alpha: 0.3),
+                        width: 0.5,
+                      ),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.15),
+                        blurRadius: 24,
+                        offset: const Offset(4, 0),
+                      ),
+                    ],
                   ),
-                ],
+                  child: _buildSidebarContent(context),
+                ),
               ),
-              child: _buildSidebarContent(context),
             ),
           ),
         ),
@@ -312,7 +349,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('MJ Nexus',
+                    Text('MJ Nexus Series',
                         style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                     Text('多模型 AI 助手',
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -346,29 +383,25 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
           child: SingleChildScrollView(
             child: Column(
               children: [
+                // 1. 会话
                 _NavItem(icon: Icons.chat_outlined, label: l10n.sessions, isActive: true,
                     onTap: () {
                       setState(() => _sidebarOpen = false);
                     }),
-                _NavItem(icon: Icons.smart_toy_outlined, label: l10n.models, isActive: false,
-                    onTap: () {
-                      setState(() => _sidebarOpen = false);
-                      context.go('/settings/models');
-                    }),
-                _NavItem(icon: Icons.psychology_outlined, label: l10n.knowledge, isActive: false,
-                    onTap: () {
-                      setState(() => _sidebarOpen = false);
-                      context.go('/settings/knowledge');
-                    }),
-                const SizedBox(height: 8),
-                // 灵感一瞬入口
+                // 2. 灵感一瞬
                 _NavItem(icon: Icons.lightbulb_outline, label: '灵感一瞬', isActive: false,
                     onTap: () {
                       setState(() => _sidebarOpen = false);
                       _navigateToInspiration(context);
                     }),
+                // 3. 名灵回响
+                _NavItem(icon: Icons.auto_awesome, label: '名灵回响', isActive: false,
+                    onTap: () {
+                      setState(() => _sidebarOpen = false);
+                      context.push('/spirit');
+                    }),
                 const SizedBox(height: 16),
-                // 下载管理入口（带角标显示下载中数量）
+                // 6. 下载管理
                 _DownloadNavItem(
                   onTap: () {
                     setState(() => _sidebarOpen = false);
@@ -376,6 +409,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
                   },
                 ),
                 const SizedBox(height: 8),
+                // 7. 设置
                 _NavItem(icon: Icons.settings_outlined, label: l10n.settings, isActive: false,
                     onTap: () {
                       setState(() => _sidebarOpen = false);
@@ -390,14 +424,17 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
     );
   }
 
-  /// 获取当前显示的会话列表
+  /// 获取当前显示的会话列表（过滤掉名灵回响会话）
   Future<List<Session>> _getSessions(SessionManager sessionManager) async {
     if (_showArchived) {
-      return await _folderService.getArchivedSessions();
+      final archived = await _folderService.getArchivedSessions();
+      return archived.where((s) => !s.isSpirit).toList();
     } else if (_selectedFolderId != null) {
-      return await _folderService.getSessionsByFolder(_selectedFolderId!);
+      final folderSessions = await _folderService.getSessionsByFolder(_selectedFolderId!);
+      return folderSessions.where((s) => !s.isSpirit).toList();
     } else {
-      return await sessionManager.getAllSessions();
+      final all = await sessionManager.getAllSessions();
+      return all.where((s) => !s.isSpirit).toList();
     }
   }
 
@@ -713,7 +750,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('MJ Nexus',
+                  Text('MJ Nexus Series',
                       style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 2),
                   Text('多模型 AI 助手',
@@ -726,23 +763,23 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
           ),
         ),
         const Divider(height: 24),
+        // 1. 会话
         _NavItem(icon: Icons.chat_outlined, label: l10n.sessions, isActive: true,
             onTap: () {}),
-        _NavItem(icon: Icons.smart_toy_outlined, label: l10n.models, isActive: false,
-            onTap: () => context.go('/settings/models')),
-        _NavItem(icon: Icons.psychology_outlined, label: l10n.knowledge, isActive: false,
-            onTap: () => context.go('/settings/knowledge')),
-        const SizedBox(height: 8),
-        // 灵感一瞬入口
+        // 2. 灵感一瞬
         _NavItem(icon: Icons.lightbulb_outline, label: '灵感一瞬', isActive: false,
             onTap: () => _navigateToInspiration(context)),
+        // 3. 名灵回响
+        _NavItem(icon: Icons.auto_awesome, label: '名灵回响', isActive: false,
+            onTap: () => context.push('/spirit')),
         const Spacer(),
         const Divider(height: 1),
-        // 下载管理入口（带角标显示下载中数量）
+        // 6. 下载管理
         _DownloadNavItem(
           onTap: () => context.push('/downloads'),
         ),
         const SizedBox(height: 8),
+        // 7. 设置
         _NavItem(icon: Icons.settings_outlined, label: l10n.settings, isActive: false,
             onTap: () => context.go('/settings')),
         const SizedBox(height: 12),
@@ -1467,164 +1504,168 @@ class _CreateSessionSheetState extends ConsumerState<_CreateSessionSheet> {
     final theme = Theme.of(context);
     final models = ref.watch(availableModelsProvider);
 
+    // ★ 修复：使用 SingleChildScrollView 包裹内容，避免 BottomSheet 高度受限时
+    //   Column 整体溢出导致 "RenderFlex overflowed by N pixels" 错误。
     return Padding(
       padding: EdgeInsets.only(
         left: 24, right: 24, top: 16,
         bottom: MediaQuery.viewInsetsOf(context).bottom + 24,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 拖动把手
-          Center(
-            child: Container(
-              width: 36, height: 4,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.outlineVariant,
-                borderRadius: BorderRadius.circular(2),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 拖动把手
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 20),
-          Text('创建会话', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 20),
+            const SizedBox(height: 20),
+            Text('创建会话', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 20),
 
-          // 会话名称
-          TextField(
-            controller: _nameController,
-            decoration: InputDecoration(
-              labelText: '会话名称',
-              hintText: '输入会话名称...',
-              prefixIcon: const Icon(Icons.chat_outlined),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // 模型选择
-          Text('选择模型', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 10),
-
-          if (models.isEmpty)
-            // 无模型提示
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.errorContainer.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(12),
+            // 会话名称
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(
+                labelText: '会话名称',
+                hintText: '输入会话名称...',
+                prefixIcon: const Icon(Icons.chat_outlined),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: Row(
-                children: [
-                  Icon(Icons.warning_amber_rounded, color: theme.colorScheme.error),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '暂无可用模型，请先添加模型',
-                      style: TextStyle(color: theme.colorScheme.error),
+            ),
+            const SizedBox(height: 16),
+
+            // 模型选择
+            Text('选择模型', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 10),
+
+            if (models.isEmpty)
+              // 无模型提示
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.errorContainer.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: theme.colorScheme.error),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '暂无可用模型，请先添加模型',
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
                     ),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      context.go('/settings/models');
-                    },
-                    child: const Text('去添加'),
-                  ),
-                ],
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        context.go('/settings/models');
+                      },
+                      child: const Text('去添加'),
+                    ),
+                  ],
+                ),
+              )
+            else
+              // 模型列表（最大 35% 屏幕高度，可滚动）
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.35,
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: models.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (context, i) {
+                    final model = models[i];
+                    final isSelected = _selectedModelId == model.id;
+                    return _ModelSelectTile(
+                      model: model,
+                      isSelected: isSelected,
+                      onTap: () => setState(() => _selectedModelId = model.id),
+                    );
+                  },
+                ),
               ),
-            )
-          else
-            // 模型列表
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.35,
-              ),
+
+            const SizedBox(height: 16),
+
+            // 角色人设选择
+            Text('选择角色', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 10),
+
+            // 角色选项（横向滚动）
+            SizedBox(
+              height: 90,
               child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: models.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                scrollDirection: Axis.horizontal,
+                itemCount: PersonaTemplates.templates.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
                 itemBuilder: (context, i) {
-                  final model = models[i];
-                  final isSelected = _selectedModelId == model.id;
-                  return _ModelSelectTile(
-                    model: model,
+                  final persona = PersonaTemplates.templates[i];
+                  final isSelected = _selectedPersonaId == persona.id;
+                  return _PersonaChip(
+                    persona: persona,
                     isSelected: isSelected,
-                    onTap: () => setState(() => _selectedModelId = model.id),
+                    onTap: () {
+                      setState(() {
+                        _selectedPersonaId = persona.id;
+                        _showCustomPrompt = persona.id == 'custom';
+                      });
+                    },
                   );
                 },
               ),
             ),
 
-          const SizedBox(height: 16),
+            // 自定义提示词输入框
+            if (_showCustomPrompt) ...[
+              const SizedBox(height: 16),
+              TextField(
+                controller: _customPromptController,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  labelText: '自定义系统提示词',
+                  hintText: '输入你想要的 AI 角色设定...',
+                  alignLabelWithHint: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
 
-          // 角色人设选择
-          Text('选择角色', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 10),
+            const SizedBox(height: 24),
 
-          // 角色选项（横向滚动）
-          SizedBox(
-            height: 90,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: PersonaTemplates.templates.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (context, i) {
-                final persona = PersonaTemplates.templates[i];
-                final isSelected = _selectedPersonaId == persona.id;
-                return _PersonaChip(
-                  persona: persona,
-                  isSelected: isSelected,
-                  onTap: () {
-                    setState(() {
-                      _selectedPersonaId = persona.id;
-                      _showCustomPrompt = persona.id == 'custom';
-                    });
-                  },
-                );
-              },
-            ),
-          ),
-
-          // 自定义提示词输入框
-          if (_showCustomPrompt) ...[
-            const SizedBox(height: 16),
-            TextField(
-              controller: _customPromptController,
-              maxLines: 4,
-              decoration: InputDecoration(
-                labelText: '自定义系统提示词',
-                hintText: '输入你想要的 AI 角色设定...',
-                alignLabelWithHint: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            // 创建按钮
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: (models.isEmpty || _selectedModelId == null || _isCreating)
+                    ? null
+                    : _handleCreate,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _isCreating
+                    ? const SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('创建会话', style: TextStyle(fontSize: 16)),
               ),
             ),
           ],
-
-          const SizedBox(height: 24),
-
-          // 创建按钮
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: (models.isEmpty || _selectedModelId == null || _isCreating)
-                  ? null
-                  : _handleCreate,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: _isCreating
-                  ? const SizedBox(
-                      width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Text('创建会话', style: TextStyle(fontSize: 16)),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2121,39 +2162,54 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      child: Material(
-        color: isActive
-            ? theme.colorScheme.primaryContainer
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                Icon(
-                  icon,
-                  size: 20,
-                  color: isActive
-                      ? theme.colorScheme.onPrimaryContainer
-                      : theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  label,
-                  style: theme.textTheme.bodyMedium?.copyWith(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: isActive
+              ? AppTheme.accentPrimary.withValues(alpha: isDark ? 0.12 : 0.08)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppTheme.radiusM),
+          border: isActive
+              ? Border.all(
+                  color: AppTheme.accentPrimary.withValues(alpha: isDark ? 0.2 : 0.15),
+                  width: 0.5,
+                )
+              : null,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(AppTheme.radiusM),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppTheme.radiusM),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 18,
                     color: isActive
-                        ? theme.colorScheme.onPrimaryContainer
+                        ? AppTheme.accentPrimary
                         : theme.colorScheme.onSurfaceVariant,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Text(
+                    label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isActive
+                          ? (isDark ? AppTheme.accentPrimary : AppTheme.accentHover)
+                          : theme.colorScheme.onSurfaceVariant,
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

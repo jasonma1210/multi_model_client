@@ -371,8 +371,23 @@ class DialogueEngine implements IDialogueEngine {
     final avgTPS = stopwatch.elapsedMilliseconds > 0 
         ? totalTokens / (stopwatch.elapsedMilliseconds / 1000.0) 
         : null;
+
+    // ★★★ 修复：检测"模型未产生任何输出"的情况 ★★★
+    // 现象：流式推理正常结束（无异常），但 responseBuffer 为空
+    //      常见于：多轮对话后 KV cache 状态污染、模型静默失败、enableReasoning
+    //      误删了所有内容、prompt 触发模型的特殊 token（如 eos 直返）等
+    // 此前响应为空会让用户看到空白气泡 + 静音无 TTS，体验上无任何反馈
+    String finalContent = responseBuffer.toString();
+    if (finalContent.isEmpty && !hasError) {
+      debugPrint(
+          '[DialogueEngine] ⚠️ 响应为空: sessionId=$sessionId, '
+          'messages=${messages.length}');
+      // 提示用户重试，不写入"空字符串"以避免上层 TTS 调用 _synthesize("") 失败
+      finalContent = '（模型未产生输出，请重试或检查上下文是否超出限制）';
+    }
+
     yield DialogueResponse(
-      content: responseBuffer.toString(),
+      content: finalContent,
       isComplete: true,
       tokenCount: totalTokens,
       tokensPerSecond: avgTPS,
@@ -411,6 +426,26 @@ class DialogueEngine implements IDialogueEngine {
   @override
   Future<void> clearContext(String sessionId) async {
     await _messageRepository.deleteSessionMessages(sessionId);
+  }
+
+  /// ★ 翻译文本（使用 LLM 进行翻译，支持英→中/中→英等）
+  Future<String> translateText(String text, {String targetLang = '中文'}) async {
+    // 获取可用的模型
+    final models = await _modelEngine.getAvailableModels();
+    String? modelId;
+    // 优先使用远程模型（速度快）
+    for (final m in models) {
+      if (m.source != 'ollama' && m.source != 'gguf') {
+        modelId = m.id;
+        break;
+      }
+    }
+    // 兜底使用本地模型
+    modelId ??= models.isNotEmpty ? models.first.id : null;
+    if (modelId == null) throw StateError('无可用模型进行翻译');
+
+    final prompt = '请将以下内容翻译为$targetLang，只输出翻译结果，不要添加任何解释或额外内容：\n\n$text';
+    return _modelEngine.generate(modelId, prompt, maxTokens: 4096);
   }
 
   /// 构建结构化消息数组（支持 system/user/assistant 角色）
@@ -487,8 +522,26 @@ class DialogueEngine implements IDialogueEngine {
     // ✅ 查询模型是否支持多模态：支持则保留历史图片，否则剥离（节省 token）
     final supportsVision = await _modelEngine.supportsMultimodal(session.modelId);
 
+    // ★★★ V77 修复：提取历史消息中的压缩总结，注入到 system 消息区 ★★★
+    final List<String> compressionSummaries2 = [];
+    for (final msg in historyMessages) {
+      if (msg.role == 'system') {
+        final content = msg.content ?? '';
+        if (content.contains('[📝 对话历史总结]') || content.contains('[🗜️ 压缩]')) {
+          compressionSummaries2.add(content);
+        }
+      }
+    }
+    if (compressionSummaries2.isNotEmpty) {
+      final combinedSummary = compressionSummaries2.join('\n\n');
+      messages.add(ChatMessage.system(
+        '以下是之前对话的压缩总结，请结合此总结和系统提示来回答用户的问题：\n\n$combinedSummary',
+      ));
+      debugPrint('[DialogueEngine] 已注入 ${compressionSummaries2.length} 条压缩总结到 system 消息区');
+    }
+
     // 历史消息（过滤 tool 和 system 角色）
-    // 注意：system 消息已经在开头添加，历史消息中的 system 消息需要跳过
+    // 注意：system 消息已经在开头添加（包括压缩总结），历史消息中的 system 消息需要跳过
     // llama.cpp 要求所有 system 消息必须在最前面，否则会报错 "System message must be at the beginning"
     for (final msg in historyMessages) {
       if (msg.role == 'tool' || msg.role == 'system') continue; // 跳过工具和系统消息
@@ -655,8 +708,35 @@ class DialogueEngine implements IDialogueEngine {
     // ✅ 查询模型是否支持多模态：支持则保留历史图片，否则剥离（节省 token）
     final supportsVision = await _modelEngine.supportsMultimodal(session.modelId);
 
+    // ★★★ V77 修复：提取历史消息中的压缩总结，注入到 system 消息区 ★★★
+    // 旧逻辑：直接跳过所有 system 角色的历史消息
+    // 问题：手动压缩后写入的 [📝 对话历史总结] 也是 system 角色，被跳过后
+    //       后续对话不会带上总结描述，压缩等于白做
+    // 修复：将压缩总结提取出来，作为 system 消息注入到对话开头
+    final List<String> compressionSummaries = [];
+    for (int i = 0; i < historyMessages.length; i++) {
+      final msg = historyMessages[i];
+      if (msg.role == 'system') {
+        final content = msg.content ?? '';
+        // 提取压缩总结消息（以 [📝 对话历史总结] 开头的 system 消息）
+        if (content.contains('[📝 对话历史总结]') || content.contains('[🗜️ 压缩]')) {
+          compressionSummaries.add(content);
+          debugPrint('[DialogueEngine] 提取到压缩总结: ${content.substring(0, content.length > 50 ? 50 : content.length)}...');
+        }
+      }
+    }
+
+    // 将压缩总结注入到 system 消息区（在 systemPrompt 之后、历史对话之前）
+    if (compressionSummaries.isNotEmpty) {
+      final combinedSummary = compressionSummaries.join('\n\n');
+      messages.add(ChatMessage.system(
+        '以下是之前对话的压缩总结，请结合此总结和系统提示来回答用户的问题：\n\n$combinedSummary',
+      ));
+      debugPrint('[DialogueEngine] 已注入 ${compressionSummaries.length} 条压缩总结到 system 消息区');
+    }
+
     // 历史消息（过滤 tool 和 system 角色）
-    // 注意：system 消息已经在开头添加，历史消息中的 system 消息需要跳过
+    // 注意：system 消息已经在开头添加（包括压缩总结），历史消息中的 system 消息需要跳过
     // llama.cpp 要求所有 system 消息必须在最前面，否则会报错 "System message must be at the beginning"
     for (int i = 0; i < historyMessages.length; i++) {
       final msg = historyMessages[i];
@@ -1428,14 +1508,161 @@ class DialogueEngine implements IDialogueEngine {
 
   /// 手动触发上下文压缩（UI 调用）
   /// 用于用户点击进度条时主动压缩上下文
+  /// ★★★ V77 重写：手动压缩将所有消息压缩为一条总结描述 ★★★
+  /// 用户期望：
+  ///   1. 点击压缩按钮后，无论使用率多少，都应该执行压缩
+  ///   2. 所有对话内容变成一条总结描述记录
+  ///   3. 旧消息全部删除
+  ///   4. 后续对话带上总结描述记录和系统描述
   Future<void> autoCompressContext(String sessionId) async {
     try {
       final session = await _sessionManager.getSession(sessionId);
-      await _performPostConversationCompression(sessionId, session.modelId);
+      final dbMessages = await _messageRepository.getSessionMessages(sessionId);
+
+      // 至少需要 2 条消息才压缩
+      if (dbMessages.length < 2) {
+        debugPrint('[DialogueEngine] 手动压缩：消息数不足，跳过');
+        return;
+      }
+
+      debugPrint('[DialogueEngine] 手动压缩：开始压缩 ${dbMessages.length} 条消息');
+
+      // ★★★ V77 核心改动：将所有消息压缩为一条总结描述 ★★★
+      // 旧逻辑：调用 compress/compressWithLlmSummary，保留最近消息+摘要旧消息
+      // 新逻辑：生成一条包含所有对话内容的总结描述，删除所有旧消息
+      final summaryText = await _generateFullSummary(dbMessages, session);
+
+      debugPrint('[DialogueEngine] 手动压缩：生成总结长度=${summaryText.length}');
+
+      // ★★★ 第一步：把历史消息存到 MemPalace（确保不丢失）★★★
+      await _archiveToMemoryPalace(sessionId,
+        dbMessages.map((m) => CompressedMessage(
+          id: m.id ?? '',
+          role: m.role,
+          content: m.content ?? '',
+          timestamp: m.createdAt ?? DateTime.now(),
+        )).toList(),
+        dbMessages.length,
+      );
+
+      // ★★★ 第二步：清空该会话的所有历史消息 ★★★
+      await _messageRepository.deleteSessionMessages(sessionId);
+
+      // ★★★ 第三步：写入总结描述（作为 system 消息，后续对话会自动带上）★★★
+      await _messageRepository.createMessage(
+        sessionId: sessionId,
+        role: 'system',
+        content: '[📝 对话历史总结]\n$summaryText',
+      );
+
+      // ★★★ 第四步：刷新会话，确保 UI 显示最新数据 ★★★
+      await _sessionManager.refreshCurrentSession();
+
+      // 刷新上下文使用率
       _modelEngine.refreshContextUsage();
+
+      debugPrint('[DialogueEngine] ✅ 手动压缩完成: ${dbMessages.length} → 1 条总结消息');
     } catch (e) {
       debugPrint('[DialogueEngine] 手动上下文压缩失败: $e');
     }
+  }
+
+  /// ★★★ V77 新增：生成完整的对话总结 ★★★
+  ///
+  /// 将所有消息压缩为一条总结描述，包含：
+  /// - 对话主题
+  /// - 各轮对话的关键内容
+  /// - 重要结论和决策
+  /// - 未解决的问题
+  ///
+  /// 优先使用 LLM 摘要（如果可用），否则使用规则摘要
+  Future<String> _generateFullSummary(List<dynamic> messages, dynamic session) async {
+    // 过滤掉 tool 角色消息
+    final conversationMessages = messages.where((m) => m.role != 'tool').toList();
+
+    if (conversationMessages.isEmpty) return '（无对话内容）';
+
+    // 尝试使用 LLM 生成智能摘要
+    if (_llmSummaryCallback != null) {
+      try {
+        final messageMaps = conversationMessages.map((m) => <String, String>{
+          'role': m.role,
+          'content': m.content ?? '',
+        }).toList();
+
+        debugPrint('[DialogueEngine] 使用 LLM 生成对话总结...');
+        final llmSummary = await _llmSummaryCallback!(messageMaps);
+        if (llmSummary.isNotEmpty) {
+          return llmSummary;
+        }
+      } catch (e) {
+        debugPrint('[DialogueEngine] LLM 摘要生成失败，回退到规则摘要: $e');
+      }
+    }
+
+    // 规则摘要：逐轮提取关键内容
+    return _generateRuleBasedFullSummary(conversationMessages);
+  }
+
+  /// ★★★ V77 新增：基于规则的完整对话总结 ★★★
+  ///
+  /// 逐轮提取用户问题和助手回答的关键内容
+  String _generateRuleBasedFullSummary(List<dynamic> messages) {
+    final buffer = StringBuffer();
+
+    // 统计
+    final userMessages = messages.where((m) => m.role == 'user').toList();
+    final assistantMessages = messages.where((m) => m.role == 'assistant').toList();
+    final systemMessages = messages.where((m) => m.role == 'system').toList();
+
+    buffer.writeln('共 ${userMessages.length} 轮对话');
+    buffer.writeln();
+
+    // 提取对话主题（前几条用户消息）
+    if (userMessages.isNotEmpty) {
+      buffer.writeln('【对话主题】');
+      for (var i = 0; i < userMessages.length && i < 3; i++) {
+        final content = userMessages[i].content ?? '';
+        final truncated = content.length > 100
+            ? '${content.substring(0, 100)}...'
+            : content;
+        buffer.writeln('• $truncated');
+      }
+      buffer.writeln();
+    }
+
+    // 逐轮总结
+    buffer.writeln('【对话详情】');
+    int roundNum = 0;
+    for (int i = 0; i < messages.length; i++) {
+      final msg = messages[i];
+      if (msg.role == 'user') {
+        roundNum++;
+        final content = msg.content ?? '';
+        final truncated = content.length > 150
+            ? '${content.substring(0, 150)}...'
+            : content;
+        buffer.writeln('第$roundNum轮 - 用户: $truncated');
+      } else if (msg.role == 'assistant') {
+        final content = msg.content ?? '';
+        final truncated = content.length > 200
+            ? '${content.substring(0, 200)}...'
+            : content;
+        buffer.writeln('第${roundNum}轮 - 助手: $truncated');
+        buffer.writeln();
+      }
+    }
+
+    // 提取关键结论（最后一条助手消息）
+    if (assistantMessages.isNotEmpty) {
+      final lastReply = assistantMessages.last.content ?? '';
+      final truncated = lastReply.length > 200
+          ? '${lastReply.substring(0, 200)}...'
+          : lastReply;
+      buffer.writeln('【最新结论】$truncated');
+    }
+
+    return buffer.toString();
   }
 }
 

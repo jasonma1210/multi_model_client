@@ -148,6 +148,11 @@ LazyDatabase openConnection() {
         } catch (e) {
           // 忽略：安全错误
         }
+        try {
+          db.execute('ALTER TABLE sessions ADD COLUMN is_spirit INTEGER DEFAULT 0');
+        } catch (e) {
+          // 忽略：安全错误
+        }
         
         // 4. 确保 knowledge_bases 表有 description 和 document_count 列
         try {
@@ -311,6 +316,15 @@ extension AppDatabaseDAO on AppDatabase {
 
   /// 删除所有记忆
   Future<int> deleteAllMemories() => delete(memories).go();
+
+  /// 删除所有共享/全局记忆（isGlobal=true）
+  ///
+  /// 【修复 V72】随着记忆宫殿改为"会话隔离"策略，所有遗留的 isGlobal=true 共享数据
+  ///   都属于脏数据，应该清理掉。该方法仅删除共享记忆，不会影响会话级记忆。
+  ///
+  /// 返回被删除的行数。
+  Future<int> deleteAllGlobalMemories() =>
+      (delete(memories)..where((t) => t.isGlobal.equals(true))).go();
 
   /// 删除所有消息
   Future<int> deleteAllMessages() => delete(messages).go();

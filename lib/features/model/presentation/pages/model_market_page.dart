@@ -54,34 +54,22 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage>
   final Map<String, DownloadProgress> _downloadProgress = {};
 
   // 精选推荐模型（手动维护）
+  // ★ 移动端量化格式推荐策略：
+  //   - 16GB 手机（骁龙 8 Elite 等）：7B-9B + Q4_K_M/Q5_K_M（约 5-6GB，完美契合）
+  //   - 12GB 手机：7B + Q4_K_M（约 4.5GB）
+  //   - 8GB 手机：3B + Q4_K_M（约 2GB）或 7B + Q3_K_M（约 3.5GB）
+  //   - 6GB 以下：3B + Q4_K_M（约 2GB）
+  // ★ 2B 以下模型极易"重复循环"，务必开启 Repetition Penalty (1.05-1.15) + Min P (0.05)
   final _featuredHF = const [
+    // ── 旗舰级推荐（16GB 手机首选）──
     _FeaturedModel(
       id: 'bartowski/Qwen2.5-7B-Instruct-GGUF',
       name: 'Qwen2.5 7B Instruct',
       author: 'Qwen / bartowski',
       params: '7B',
       quantLevel: 'Q4_K_M',
-      description: '通义千问 2.5 7B 指令微调版，中英双语，GGUF 量化',
-      minRam: 6,
-      minStorage: 5,
-    ),
-    _FeaturedModel(
-      id: 'bartowski/Llama-3.2-3B-Instruct-GGUF',
-      name: 'Llama 3.2 3B Instruct',
-      author: 'Meta / bartowski',
-      params: '3B',
-      quantLevel: 'Q4_K_M',
-      description: 'Meta 最新轻量级指令模型，移动端友好',
-      minRam: 3,
-      minStorage: 2,
-    ),
-    _FeaturedModel(
-      id: 'bartowski/Mistral-7B-Instruct-v0.3-GGUF',
-      name: 'Mistral 7B Instruct v0.3',
-      author: 'Mistral / bartowski',
-      params: '7B',
-      quantLevel: 'Q4_K_M',
-      description: '高性能英文推理模型，速度快，质量好',
+      description: '通义千问 2.5 7B 指令微调版，中英双语，GGUF 量化。'
+          '16GB 手机首选，Q4_K_M 约 4.5GB，完美契合不触发 Swap',
       minRam: 6,
       minStorage: 5,
     ),
@@ -91,9 +79,45 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage>
       author: 'Google / bartowski',
       params: '9B',
       quantLevel: 'Q4_K_M',
-      description: 'Google Gemma 2 指令微调版，多任务表现优秀',
+      description: 'Google Gemma 2 指令微调版，多任务表现优秀。'
+          '16GB 手机可跑 Q5_K_M（约 6.5GB），12GB 手机建议 Q4_K_M',
       minRam: 8,
       minStorage: 6,
+    ),
+    // ── 中端推荐（8-12GB 手机）──
+    _FeaturedModel(
+      id: 'bartowski/Llama-3.2-3B-Instruct-GGUF',
+      name: 'Llama 3.2 3B Instruct',
+      author: 'Meta / bartowski',
+      params: '3B',
+      quantLevel: 'Q4_K_M',
+      description: 'Meta 轻量级指令模型，8GB 手机友好。'
+          'Q4_K_M 约 2GB，8GB 手机可跑 Q5_K_M（约 2.5GB）',
+      minRam: 3,
+      minStorage: 2,
+    ),
+    _FeaturedModel(
+      id: 'bartowski/Mistral-7B-Instruct-v0.3-GGUF',
+      name: 'Mistral 7B Instruct v0.3',
+      author: 'Mistral / bartowski',
+      params: '7B',
+      quantLevel: 'Q4_K_M',
+      description: '高性能英文推理模型，速度快，质量好。'
+          '12GB+ 手机推荐，Q4_K_M 约 4.5GB',
+      minRam: 6,
+      minStorage: 5,
+    ),
+    // ── 入门级推荐（6GB 以下手机）──
+    _FeaturedModel(
+      id: 'bartowski/Qwen2.5-1.5B-Instruct-GGUF',
+      name: 'Qwen2.5 1.5B Instruct',
+      author: 'Qwen / bartowski',
+      params: '1.5B',
+      quantLevel: 'Q5_K_M',
+      description: '通义千问轻量版，6GB 以下手机可用。'
+          '⚠️ 2B 以下模型易重复循环，务必开启 Repetition Penalty (1.05-1.15)',
+      minRam: 2,
+      minStorage: 2,
     ),
   ];
 

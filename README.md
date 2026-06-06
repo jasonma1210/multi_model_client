@@ -1,7 +1,7 @@
-# MJ Nexus - Multi-Modal AI Assistant
+# MJ Nexus Series:Synpse - Multi-Modal AI Assistant
 
 <p align="center">
-  <img src="assets/mj_nexus_logo.png" width="120" alt="MJ Nexus Logo"/>
+  <img src="assets/mj_nexus_logo.png" width="120" alt="MJ Nexus Series Logo"/>
 </p>
 
 <p align="center">
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.31.1-blue" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-0.40.0-blue" alt="Version"/>
   <img src="https://img.shields.io/badge/flutter-3.x-blue" alt="Flutter"/>
   <img src="https://img.shields.io/badge/dart-3.10.7+-blue" alt="Dart"/>
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20macOS-green" alt="Platform"/>
@@ -18,7 +18,7 @@
 
 ---
 
-**MJ Nexus** is a powerful cross-platform AI assistant application that supports local and remote large language models, real-time voice dialogue, RAG knowledge base, memory engine, and multi-modal reasoning capabilities.
+**MJ Nexus Series:Synpse** is a powerful cross-platform AI assistant application that supports local and remote large language models, real-time voice dialogue, RAG knowledge base, memory engine, and multi-modal reasoning capabilities.
 
 ## ✨ Key Features
 
@@ -190,9 +190,23 @@ flutter build ios --release
 
 ## 📦 Releases
 
-Download the latest release (v0.30.0) from the [Releases](https://github.com/jasonma1210/multi_model_client/releases) page:
+Download the latest release (v0.40.0) from the [Releases](https://github.com/jasonma1210/multi_model_client/releases) page:
 - `app-release.apk` — Android APK
-- `multi_model_client.app.dmg` — macOS DMG
+- `MJ_Nexus_Series.dmg` — macOS DMG
+
+## 📋 Changelog
+
+### v0.40.0 (2026-06-06)
+
+**Brand Update**
+- App renamed to **MJ Nexus Series:Synpse** (English) / **MJ Nexus Series:灵犀通** (Chinese)
+- Updated app title across all platforms (Android, iOS, macOS)
+
+**TTS Voice Improvements**
+- Default TTS provider changed to **MiMo** (cloud TTS) for better voice quality
+- Removed automatic fallback/degradation logic — users have full control over TTS provider switching
+- Added **1-minute total timeout** for TTS synthesis — if voice output doesn't complete within 1 minute, it stops automatically
+- No more 20-30 second waiting for automatic provider switching
 
 ## 📄 License
 
@@ -1613,3 +1627,989 @@ speakLongText()
 | `tts_service.dart` | `_synthesizeMultipleCloneSegments` 移除 `globalAnchor` 参数传递 | 克隆模式同理 |
 | `tts_service.dart` | 清理两个方法中无用的 `globalAnchor` 变量和日志 | 消除死代码 |
 | `README.md` | 追加 Session #68 会话记录 | 按要求记录 |
+
+---
+
+## Session #69 - 导演模板库扩展（覆盖 9 种复杂情绪 + 7 种情色系语调）
+
+**会话背景**：用户要求完成导演模板库的后续代办任务，针对"导演模式"扩充多套涉及各种情绪表达和情色系语调的预设模板，每个细节（语速、气息、共鸣点、句中停顿）都要涉及，包括情色系语调。
+
+**主要目的**：
+1. 把导演模板库从 12 套扩充到 25 套，覆盖 4 大分类、多个细分情绪和情色系语调
+2. 完善相关单元测试以验证模板的完整性、合规性、可量化参数
+3. 修复测试用例中因白名单外标签引发的误判
+4. 验证编译无错误
+
+**完成的主要任务**：
+1. **基础人设扩充 (5→7)**：新增 `queen`（女王）、`shy_girl`（羞怯少女）
+2. **复杂情绪扩充 (2→9)**：新增 `joy`（喜悦）、`fear`（恐惧）、`surprise`（惊讶）、`disgust`（厌恶）、`conflicted`（纠结）、`breakdown`（崩溃）、`jealousy`（嫉妒）
+3. **情色系语调扩充 (3→7)**：新增 `panting`（娇喘）、`earWhisper`（耳语）、`ambiguous`（暧昧）、`infatuated`（痴情）；同时清理诱惑/呢喃/亲密中残留的英文双引号
+4. **测试用例增强**：
+   - 新增"ID 唯一性"测试
+   - 新增"情色系不含露骨词"测试（黑名单：性交/做爱/操/肏/插入/阴茎/阴道/乳头/高潮/自慰/口交/肛交/舔阴/阴蒂/乳房/臀部）
+   - 新增"情色系必含正向情感关键词"测试
+   - 新增"每个模板的 direction 至少命中 3 项可量化参数"测试（语速/气息/共鸣/音色/停顿）
+5. **修复 audio tag 过多测试**：原测试用 `[哭][喘]` 触发 audioTagOverload，但因"哭""喘"不在白名单，会优先触发 unknownAudioTag。改为白名单内标签组合 `[笑][轻笑][大笑]`。
+6. **修复 director_template.dart 字符串字面量**：原 line 324 使用英文双引号，导致 Dart 字符串提前终止；改为中文标点
+
+**主要技术栈**：Flutter/Dart, TTS 导演模式, Riverpod, SharedPreferences
+
+**关键决策和解决方案**：
+- **情色系内容合规设计**：情色系模板聚焦"声音/气息/温度"的情感表达，**严禁**露骨内容（性行为/生殖器）。通过正则白名单+黑名单双重校验：
+  - 必含正向词（声音/情感/情绪/气息/温度/亲密/暧昧/心/呼吸/温柔/依赖/撒娇）
+  - 必不含露骨词（性交/做爱/操/肏/插入/阴茎/阴道/乳头/高潮/自慰/口交/肛交/舔阴/阴蒂/乳房/臀部）
+- **每个模板的可量化参数保证**：所有 25 套模板的 `direction` 字段必须包含"语速/气息/共鸣点/音色/停顿"中至少 3 项，确保导演模式有足够的可执行细节
+
+**主要使用的工具**：flutter analyze, flutter test, Edit/Read/Write 文件操作
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `tts_director_template.dart` | 文档头注释从 12 套改为 25 套；分类数量更新 | 反映实际模板数量 |
+| `tts_director_template.dart` | 新增 `queen`、`shyGirl` 两个基础人设常量 | 扩充人设覆盖 |
+| `tts_director_template.dart` | 新增 7 个复杂情绪：`joy`/`fear`/`surprise`/`disgust`/`conflicted`/`breakdown`/`jealousy` | 细化情绪表达 |
+| `tts_director_template.dart` | 新增 4 个情色系语调：`panting`/`earWhisper`/`ambiguous`/`infatuated` | 覆盖情色系细分 |
+| `tts_director_template.dart` | 修复 7 处模板字符串中的英文双引号 → 中文标点 | 避免 Dart 字符串提前终止 |
+| `tts_director_template.dart` | `all` 列表添加全部 13 个新模板 | 注册到预置集合 |
+| `test/director_template_test.dart` | 测试总数量断言从 12 改为 25 | 反映扩充 |
+| `test/director_template_test.dart` | 分类数量断言（基础人设 7、复杂情绪 9、情色系 7、特殊场景 2） | 反映扩充 |
+| `test/director_template_test.dart` | 新增 4 个 ID 完整性测试（情色系/复杂情绪/基础人设/特殊场景） | 防止 ID 漂移 |
+| `test/director_template_test.dart` | 新增"ID 唯一性"、"情色系不含露骨词"、"情色系含正向词"测试 | 内容合规验证 |
+| `test/director_template_test.dart` | 新增"direction 至少 3 项可量化参数"测试 | 模板专业性验证 |
+| `test/tts_style_parser_v11_test.dart` | audio tag 过多测试改用白名单内标签组合 | 修复测试用例 |
+| `README.md` | 追加 Session #69 会话记录 | 按要求记录 |
+
+**完整测试结果**：
+- `flutter analyze`：5 个相关文件全部 `No issues found`
+- `flutter test test/director_template_test.dart`：23/23 通过
+- `flutter test test/tts_style_parser_v11_test.dart`：27/27 通过
+- 合计 50/50 通过
+
+---
+
+## Session #70 - 修复语音设置"我的模板"404 路由
+
+**会话背景**：用户反馈在语音设置页面点击"我的模板"按钮，提示 404 错误。
+
+**主要目的**：为"我的模板"页面（`MyDirectorTemplatesPage`）补全 go_router 路由配置。
+
+**根因分析**：
+- `voice_settings_page.dart` 第 519 行通过 `context.push('/settings/voice/director-templates')` 跳转到"我的模板"页面
+- 但 `app_router.dart` 的 settings 路由树中只有 `voice`、`voice/clone` 等子路由，**没有 `voice/director-templates`**
+- go_router 在路径不匹配时返回 404，导致页面无法进入
+
+**完成的主要任务**：
+1. 在 `app_router.dart` 中 import `director_template_editor_page.dart`（其中包含 `MyDirectorTemplatesPage`）
+2. 在 settings 路由树下添加 `voice/director-templates` 子路由，指向 `MyDirectorTemplatesPage`
+
+**主要技术栈**：Flutter/Dart, go_router, Riverpod
+
+**关键决策**：
+- 不修改 `MyDirectorTemplatesPage` 类本身（功能已完备），仅补全路由配置即可
+- 路由路径严格匹配 `voice_settings_page.dart` 第 519 行的 `context.push` 调用，避免路径不一致
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `app_router.dart` | 顶部新增 `director_template_editor_page.dart` 导入 | 引用 `MyDirectorTemplatesPage` |
+| `app_router.dart` | 在 `voice/clone` 后新增 `voice/director-templates` 路由，指向 `MyDirectorTemplatesPage` | 修复 404 错误 |
+
+**验证结果**：
+- `flutter analyze lib/core/router/`：No issues found
+- `flutter test test/director_template_test.dart test/tts_style_parser_v11_test.dart`：50/50 通过
+
+---
+
+## Session #71 - 修复创建会话界面溢出 + 实时语音 content 重复
+
+**会话背景**：用户反馈三个问题：
+1. 创建会话界面出现 `A RenderFlex overflowed by 3.0 pixels on the bottom` 异常
+2. 实时语音页面 TTS 输出的 content 重复出现两遍
+3. 不同会话之间不共享上下文
+
+**主要目的**：
+- 修复 UI 溢出和实时语音重复输出两个 bug
+- 评估"不同会话不共享上下文"行为是否需要变更
+
+**完成的主要任务**：
+1. **创建会话界面修复**（[session_list_page.dart:1472-1640](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/session_list_page.dart#L1472-L1640)）：
+   - 用 `SingleChildScrollView` 包裹整个 `Column`
+   - 修复 BottomSheet 高度受限时（键盘弹起或小屏设备）Column 内容超出可用高度导致 RenderFlex 溢出的问题
+2. **实时语音 content 重复修复**（[realtime_voice_page.dart:786-802](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart#L786-L802)）：
+   - 修复 `fullResponse += chunk.content` 在 `isComplete=true` 时仍累加导致的重复
+   - 改为 `isComplete=false` 时累加中间 token，`isComplete=true` 时直接用 `chunk.content` 覆盖
+3. **上下文行为确认**：经与用户确认，"不同会话不共享上下文"是预期正确行为，不需要修改
+
+**主要技术栈**：Flutter/Dart, Riverpod, go_router
+
+**根因分析（实时语音重复）**：
+- `dialogue_engine.dart:281-288` 流式 yield 每个 token（`content: token`）
+- `dialogue_engine.dart:374-380` 完成时 yield 完整 response（`content: responseBuffer.toString()`）
+- 上层 `realtime_voice_page.dart` 不区分 `isComplete`，一律 `fullResponse += chunk.content`
+- 导致 `fullResponse` 中间累加完所有 token 后，又被追加一次完整 response，**总长度翻倍**
+
+**对比 `session_detail_page.dart:4085-4146`**：
+- 该文件正确区分了 `isComplete`：只有 `!isComplete` 时累加 token，`isComplete` 时仅触发 TTS 不累加
+- 这就是为什么普通文字对话不会重复，但实时语音页面会重复
+
+**关键决策和解决方案**：
+- 修复策略选择：在消费者（realtime_voice_page）层区分 `isComplete` 信号，而非修改 `dialogue_engine`
+- 原因：`session_detail_page` 已经按此模式工作，是项目既定规范；保持 API 行为一致
+- 替代方案是改 `dialogue_engine` 在 `isComplete=true` 时 yield `content: ''`，会破坏 `session_detail_page` 中的 TTS 调用（`response.content.length` 传 TTS 会被空字符串替换）
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `session_list_page.dart` | `_CreateSessionSheet.build` 中将 `Column` 嵌套进 `SingleChildScrollView` | 修复 RenderFlex 溢出 |
+| `realtime_voice_page.dart` | `fullResponse += chunk.content` 改为只在 `!chunk.isComplete` 时累加；`isComplete=true` 时直接覆盖 | 修复 content 重复输出 |
+
+**未修改的代码**（已与用户确认）：
+- `session_isolator.dart` - 各会话上下文独立是预期行为
+- `dialogue_engine.dart` - 保持现有 yield 协议（token + complete 信号）
+
+**验证结果**：
+- `flutter analyze session_list_page.dart realtime_voice_page.dart`：No issues found
+- `flutter test`：50/50 通过（无破坏）
+
+---
+
+## Session #72 - 修复对话几轮后无内容输出（_cleanThinkTags 误删整段响应）
+
+**会话背景**：用户反馈"在会话沟通中大概几轮就不在有任何内容输出了"。从 Terminal#925-955 日志看：
+- `streamResponse 开始` → `用户消息已保存` → `会话已刷新` → `会话已获取` → `开始构建结构化消息`（消息数=7）
+- `估算1149tokens, 预算2765tokens`（未触发截断）
+- `开始流式推理` → `_applyThinkingMode: enableReasoning=false`
+- **之后无任何 token yield 日志，stream 正常结束，无错误**
+
+**主要目的**：
+- 定位"流式推理阶段 yield 0 token"的根因
+- 修复后会话几轮后仍能正常输出
+
+**根因分析（_cleanThinkTags 正则 bug）**：
+- `_cleanThinkTags` 在 `enableReasoning=false` 时被调用，目的是去除模型输出的 thinking 块
+- 原模式 1：`<|channel|>thought[\s\S]*?<\/?vaping` 中的 `vaping` 是**错误的占位符**，真实 Qwen3 模型输出是 `<|message|>` 或 `</think>`，不命中
+- 原模式 2：`<|channel|>thought[\s\S]*?$` 在 multiLine 模式下，`[\s\S]*?` 非贪婪匹配会扩展到第一个 `$`（行尾），但**当输入是单行（无 `\n`）时**，匹配会扩展到字符串末尾
+- 当模型输出 Qwen3 新格式 `<|channel|>thought思考内容<|message|>正常回复`（无换行），模式 2 会**贪婪匹配到字符串末尾**，删除整段响应
+- yield 的 `content` 始终是空字符串，**用户在 UI 上看到空白气泡 + 无 TTS**
+- "几轮后才出现"是因为：Qwen3 简单回答时不会进入 thinking 模式；几轮后用户提出复杂问题（需要思考），模型进入 thinking 模式，触发 bug
+
+**完成的主要任务**：
+1. **修复 _cleanThinkTags 正则**（[local_ffi_engine.dart:37-60](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/core/engines/local_ffi_engine.dart#L37-L60)）：
+   - 删除错误的 `vaping` 占位符模式
+   - 修复 channelThought 为 `<|channel|>thought...<|message|>` 精确匹配
+   - 新增 `xmlThinkBlock` 模式匹配 `<think>...</think>`（DeepSeek-R1 / Qwen 旧版）
+   - 区分 messageTag 和 channelTag 处理顺序：先删除 thought 块，再清理残余标签
+2. **添加诊断日志**（[local_ffi_engine.dart:830-857](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/core/engines/local_ffi_engine.dart#L830-L857)）：
+   - 记录 `chunks / 非空 yield / 清洗后空 / 耗时` 四个指标
+   - 区分"流为空（模型无响应）"和"内容被清洗为空"两种场景
+3. **空响应检测**（[dialogue_engine.dart:374-395](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/domain/dialogue_engine.dart#L374-L395)）：
+   - 当 stream 正常结束但 `responseBuffer` 为空时，向用户显示"（模型未产生输出，请重试...）"
+   - 避免用户面对"空白气泡 + 无反馈"无任何线索
+4. **跳过系统提示 TTS**（[session_detail_page.dart:4141-4151](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/session_detail_page.dart#L4141-L4151)）：
+   - 不 TTS 播放"系统提示"类消息（以 `（` 或 `(` 开头）
+   - 避免噪音
+
+**主要技术栈**：Flutter/Dart, Riverpod, llamadart, Qwen3 推理
+
+**关键决策和解决方案**：
+- **修复策略选择**：精确匹配真实模型的 thinking 结束标签（`<|message|>`、`</think>`），而不是贪婪地删到结尾
+- **诊断 vs 修复并行**：先加诊断日志（不破坏功能），同时修复根因。诊断日志后续可保留作为"模型无响应"的快速定位工具
+- **用户反馈兜底**：空响应时给明确提示，避免"看似发出去了但什么都没收到"的体验
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `local_ffi_engine.dart` | `_ThinkTagPatterns` 重写：删除错误的 `vaping` 模式，新增 `xmlThinkBlock` 模式，修复 `channelThought` 精确匹配 | 修复 thinking 块误删整段响应 |
+| `local_ffi_engine.dart` | `_cleanThinkTags` 改用新正则集合 | 配合新模式 |
+| `local_ffi_engine.dart` | `generateStream` 添加 chunks/非空 yield/清洗后空/耗时统计 | 诊断未来类似问题 |
+| `local_ffi_engine.dart` | yield 条件增加 `if (finalContent.isNotEmpty)`，避免 yield 空字符串 | 减少上游噪音 |
+| `dialogue_engine.dart` | `streamResponse` 完成时检测 responseBuffer 为空，注入友好错误提示 | 用户体验兜底 |
+| `session_detail_page.dart` | 跳过 TTS 播放系统提示类消息 | 避免噪音 |
+
+**验证结果**：
+- `flutter analyze` 相关文件：No issues found
+- `flutter test test/director_template_test.dart test/tts_style_parser_v11_test.dart`：50/50 通过
+
+---
+
+## Session #73 - 修复实时语音几轮后无内容输出（死锁）+ 清理共享记忆数据
+
+**会话背景**：用户反馈：
+1. 实时语音中基本经历 3-4 轮对话就再也无法输出任何内容
+2. 记忆宫殿的数据应该只跟随 sessionId，删除遗留的共享/全局记忆（isGlobal=true）
+
+**主要目的**：
+1. 解决实时语音 3-4 轮后卡死的真凶（不是上次修复的 dialogue_engine stream）
+2. 提供"清理共享记忆"功能，让记忆宫殿彻底跟随 sessionId 区分
+
+**根因分析（实时语音死锁）**：
+- 上一轮修复聚焦在 dialogue_engine 的 stream 协议，但**未触及 TTS 播放的死锁**
+- 现场代码 [realtime_voice_page.dart:851-853](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart#L851-L853)：
+  ```dart
+  await _audioPlayer!.playerStateStream.firstWhere(
+    (state) => state.processingState == ProcessingState.completed,
+  );
+  ```
+- 死锁链路：
+  1. 第 1-2 轮 TTS 正常播放完，`firstWhere` 正常返回
+  2. 第 3 轮：用户**打断** TTS（按住说话键），触发 `_interruptTTS()` → `_audioPlayer.stop()` → `_ttsInterrupted = true`
+  3. **stop() 后 playerStateStream 不再发出 `completed` 事件**，`firstWhere` 永远 await 不返回
+  4. `_speakResponse` 永远 hang → `_processWithLLM` 永远 hang
+  5. 后续所有轮次的 `streamResponse` 都在排队等待，控制权永不释放
+- 用户视角："几轮后再无内容输出"
+
+**完成的主要任务**：
+
+1. **修复 TTS 死锁**（[realtime_voice_page.dart:833-887](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart#L833-L887)）：
+   - 新增 `_waitForAudioCompletedOrInterrupted()`：替代 `firstWhere(ProcessingState.completed)`
+   - 轮询 `stream.first.timeout(200ms)`，检查状态 + 中断信号 + 5 分钟兜底超时
+   - 任一条件触发即返回，确保 `_speakResponse` 不会永久 hang
+2. **添加"清理共享/全局记忆"功能**：
+   - [database_connection.dart](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/core/storage/database_connection.dart) 新增 `deleteAllGlobalMemories()`：只删除 `isGlobal=true` 的脏数据
+   - [memory_palace_service.dart:504-515](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/core/services/memory_palace_service.dart#L504-L515) 新增 `clearGlobalMemories()` 业务方法
+   - [memory_settings_page.dart:185-200](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/settings/presentation/pages/memory_settings_page.dart#L185-L200) 数据管理区域新增"清理共享/全局记忆"按钮（轻量级确认，无 5 秒倒计时）
+3. **新增 Provider**（[memory_settings_page.dart:15-18](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/settings/presentation/pages/memory_settings_page.dart#L15-L18)）：`memoryPalaceServiceProvider` 用于 UI 调用 service
+
+**主要技术栈**：Flutter/Dart, Riverpod, just_audio, drift/sqlite, MemoryPalace
+
+**关键决策和解决方案**：
+- **修复策略选择**：用轮询 + 超时替代 `firstWhere`，因为 stream 在 `stop()` 后不会发出 `completed`，需要主动 poll 检查
+- **共享记忆清理范围**：仅 `isGlobal=true` 的记录，会话级记忆（`isGlobal=false` + `sessionId` 非空）完全保留
+- **确认对话框差异化**：清理共享记忆用普通 AlertDialog；清除所有记忆保留 5 秒倒计时（破坏性更大）
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | `_speakResponse` 中将 `firstWhere(completed)` 替换为 `_waitForAudioCompletedOrInterrupted()` | 修复 TTS 死锁 |
+| `realtime_voice_page.dart` | 新增 `_waitForAudioCompletedOrInterrupted()` 私有方法 | 替代阻塞式 await |
+| `database_connection.dart` | 新增 `deleteAllGlobalMemories()` | 删除共享记忆 |
+| `memory_palace_service.dart` | 新增 `clearGlobalMemories()` 业务方法 | 包装 DB 操作 |
+| `memory_settings_page.dart` | 新增 `memoryPalaceServiceProvider` | UI 注入 service |
+| `memory_settings_page.dart` | 数据管理区域新增"清理共享/全局记忆"按钮 | 用户操作入口 |
+| `memory_settings_page.dart` | 新增 `_showClearGlobalMemoriesDialog()` | 轻量级确认对话框 |
+
+**记忆隔离机制（已确认）**：
+- `dialogue_engine.dart:980-984` 调用 `addMemory` 时已经传 `isGlobal: false, sessionId: sessionId`
+- 记忆表 `Memories` 表 schema 中 `sessionId` 是 nullable，`isGlobal` 标志共享状态
+- 当前没有"全局记忆"插入路径，所有新增记忆都跟随 sessionId
+- **遗留的 `isGlobal=true` 数据是旧版本/测试残留**，通过本次新增的"清理共享记忆"功能可一键清除
+
+**验证结果**：
+- `flutter analyze` 相关文件：No issues found
+- `flutter test test/director_template_test.dart test/tts_style_parser_v11_test.dart`：50/50 通过
+
+---
+
+## Session #74 - 修复实时语音 2-3 句后无法继续对话（空响应卡死）
+
+**会话背景**：用户反馈"使用实时语音，大概率 2-3 句后不继续对话"。
+
+**主要目的**：定位并修复"几轮后按说话按钮无效"的问题，让用户**任何时候**都能继续对话。
+
+**根因分析**：
+- [`_processWithLLM` 流程](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart#L770-L838)：
+  - 770-775 行：进入时设置 `_state = _VoiceState.thinking`
+  - 779-816 行：try 块中 stream 累积 + 调 TTS
+  - **817 行（修复前）**：`if (fullResponse.isNotEmpty && !_isDisposed)` 触发 TTS — **没有 else 分支**
+  - 818-823 行：catch 块（异常时设置 `_state = error`）
+- **Bug**：当 `fullResponse` 为空（被 `_cleanThinkTags` 全部清洗、被 `dialogue_engine` 注入"模型未产生输出..."等）时，**不进入 TTS 分支、不进入 catch、try 正常结束、函数返回 → `_state` 永远卡在 thinking**
+
+**为什么 2-3 句后才出现？**：
+- 前 1-2 句 LLM 正常响应，state 正常恢复
+- 某次 LLM 触发 thinking 模式，_cleanThinkTags 误删内容（已 Session #72 修复）→ 注入"模型未产生输出..."
+- 或者 LLM 输出格式异常导致流提前关闭、responseBuffer 为空
+- 此后每次按说话，572 行状态检查：
+  ```dart
+  if (_state != _VoiceState.idle && _state != _VoiceState.error && _state != _VoiceState.speaking) {
+    return;  // ★ 阻止录音
+  }
+  ```
+  state 不是 idle/error/speaking → 直接 return → **按说话按钮无效**
+
+**完成的主要任务**：
+
+1. **添加 else 分支处理空响应**（[realtime_voice_page.dart:816-832](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart#L816-L832)）：
+   - 当 LLM 响应为空时，**显式恢复 `_state = idle`**
+   - 复用 `_onTTSComplete()` 完成状态机重置（state、statusText、aiText、userText）
+   - 即使 LLM 异常，**用户始终能继续对话**
+
+2. **未触碰现有 TTS 死锁修复**：上一轮（Session #73）已修复 `firstWhere(ProcessingState.completed)` 永久 hang 问题
+
+**主要技术栈**：Flutter/Dart, Riverpod, just_audio, 状态机
+
+**关键决策和解决方案**：
+- **修复策略选择**：else 分支 + 复用 `_onTTSComplete()`，避免重复实现状态重置逻辑
+- **健壮性提升**：不仅空响应，从现在起任何"非 happy path"（如 `await for` 中断、流异常但没抛错）都会走到正确的状态恢复
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 816 行起新增 `else if (!_isDisposed)` 分支 | 修复空响应卡死 state=thinking |
+
+**状态机状态转换表（修复后）**：
+
+| 触发场景 | 修复前 | 修复后 |
+|---------|--------|--------|
+| 正常响应 | TTS → `_onTTSComplete()` → idle ✓ | 同 ✓ |
+| LLM 响应为空 | state 永远卡 thinking ✗ | else → `_onTTSComplete()` → idle ✓ |
+| 流异常抛错 | catch → state=error ✓ | 同 ✓ |
+| 用户打断 TTS | `_interruptTTS()` → idle ✓ | 同 ✓ |
+| ASR 失败 | catch → state=error ✓ | 同 ✓ |
+
+**验证结果**：
+- `flutter analyze lib/features/session/presentation/pages/realtime_voice_page.dart`：No issues found
+- `flutter test test/director_template_test.dart test/tts_style_parser_v11_test.dart`：50/50 通过
+
+---
+
+## Session #75 - 修复实时语音"输出极慢/无内容输出"（5 个问题）
+
+**会话背景**：用户反馈实时语音功能"基本无法沟通，大部分情况下输出效率极慢，甚至直接无任何内容输出"。
+
+**主要目的**：彻底修复实时语音页面的所有阻塞/死锁/性能问题。
+
+**排查发现的 5 个问题**：
+
+| # | 严重度 | 问题 | 根因 | 影响 |
+|---|--------|------|------|------|
+| 1 | **致命** | `_waitForAudioCompletedOrInterrupted` 正常播放也要等 200ms×N 轮才退出 | `stream.first` 每次循环重新订阅，completed 事件可能被吞 | **"输出极慢"的主因** |
+| 2 | **致命** | `audioPath.isEmpty` 时不调 `_onTTSComplete()` | 858 行 `if (_isDisposed \|\| _ttsInterrupted) return` 后无恢复 | state 永远卡 speaking |
+| 3 | **严重** | `_ttsInterrupted` 时 `_speakResponse` 直接 return 不恢复 state | 858 行合并了两个不同语义的条件 | state 不一致 |
+| 4 | **严重** | `_processWithLLM` 中 `_ttsInterrupted` break 后 fullResponse 非空但跳过 TTS | 804 行 `if (fullResponse.isNotEmpty && !_isDisposed)` 不检查 `_ttsInterrupted` | state 卡 thinking |
+| 5 | **中等** | 正常播放完也无条件 `stop()` audioPlayer | 920 行兜底 stop 不区分场景 | 浪费资源 |
+
+**修复方案**：
+
+1. **`_speakResponse` 重写**（[realtime_voice_page.dart:843-885](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart#L843-L885)）：
+   - 拆分 `_isDisposed` 和 `_ttsInterrupted` 的处理逻辑
+   - `_isDisposed` → 直接 return（页面已销毁）
+   - `_ttsInterrupted` → return（`_interruptTTS` 已恢复 state）
+   - **末尾统一恢复**：`if (!_isDisposed && _state != _VoiceState.idle) _onTTSComplete()`
+   - 覆盖：audioPath 为空、TTS 异常、播放完成、被打断等所有场景
+
+2. **`_waitForPlaybackComplete` 替代 `_waitForAudioCompletedOrInterrupted`**（[realtime_voice_page.dart:887-937](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart#L887-L937)）：
+   - 用 `StreamSubscription<ProcessingState>` + `Completer` 替代 `stream.first` 轮询
+   - **completed 事件立即触发 Completer.complete()**，不再被吞
+   - 50ms 轮询中断信号（比旧方案 200ms 快 4 倍）
+   - 3 分钟兜底超时
+   - 正常播放完不调 `stop()`，仅打断/超时时 stop
+
+3. **`_processWithLLM` 条件修复**（[realtime_voice_page.dart:804](file:///Users/jianma/Desktop/LLM%20STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart#L804)）：
+   - `if (fullResponse.isNotEmpty && !_isDisposed && !_ttsInterrupted)` → 跳过 TTS 时走 else 分支恢复 idle
+
+**主要技术栈**：Flutter/Dart, just_audio (processingStateStream, StreamSubscription, Completer), 状态机
+
+**关键决策和解决方案**：
+- **Completer + StreamSubscription 替代 stream.first 轮询**：stream.first 每次 .first 都重新订阅，completed 事件可能被前一个订阅消费掉，导致后续 .first 永远等不到。Completer 只 complete 一次，不受订阅次数影响
+- **统一恢复点**：`_speakResponse` 末尾 `if (_state != idle) _onTTSComplete()` 确保任何路径都不会漏恢复
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `realtime_voice_page.dart` | 重写 `_speakResponse`：拆分中断/销毁逻辑 + 统一恢复 | 修复问题 2、3 |
+| `realtime_voice_page.dart` | 新增 `_waitForPlaybackComplete` 替代旧轮询方案 | 修复问题 1、5 |
+| `realtime_voice_page.dart` | 删除 `_waitForAudioCompletedOrInterrupted` | 被 `_waitForPlaybackComplete` 替代 |
+| `realtime_voice_page.dart` | 804 行条件增加 `!_ttsInterrupted` | 修复问题 4 |
+
+**验证结果**：
+- `flutter analyze lib/features/session/presentation/pages/realtime_voice_page.dart`：No issues found
+- `flutter test test/director_template_test.dart test/tts_style_parser_v11_test.dart`：50/50 通过
+
+---
+
+## Session #76 - 名灵回响：Skill详情页、蒸馏弹窗自动关闭、首次选择模型音色+配置切换
+
+**会话背景**：用户对"名灵回响"功能提出三项改进需求：
+1. 蒸馏出的人物可点击查看 skill 描述，蒸馏完成弹窗3秒自动关闭，查看按钮跳转详情页
+2. 确保蒸馏人物被正确引用到对话中
+3. 首次点击选择模型和MIMO音色，后续直接进入实时对话；对话界面显示上下文历史；右上角配置按钮切换模型和音色
+
+**主要目的**：
+- 完善名灵蒸馏后的交互体验（详情查看、弹窗行为、对话入口）
+- 确保蒸馏人物 skill 在对话引擎中正确注入
+- 实现首次配置+后续直接进入的对话流程
+
+**完成的主要任务**：
+
+### 1. 名灵 Skill 详情页
+- 创建 `SpiritDetailPage`，展示蒸馏人物的 skill 描述（名称、领域、描述、专家提示词、搜索来源等）
+- 在 `app_router.dart` 中注册路由 `/spirit/detail/:spiritId`
+- 画廊页点击卡片跳转详情页，长按进入对话
+
+### 2. 蒸馏完成弹窗自动关闭
+- 修改 `spirit_create_page.dart`：蒸馏完成后 SnackBar 3秒自动关闭
+- "查看"按钮点击跳转到 `/spirit/detail/{persona.id}`
+- 3秒后自动 `context.pop(persona.id)` 返回画廊页
+
+### 3. 蒸馏人物对话引用验证
+- 确认 `SkillDispatcher` 为单例模式，注册的 skill 不会丢失
+- 确认 `DialogueEngine` 正确通过 `session.enabledSkill` 获取 `SpiritExpertSkill` 并注入 `expertPrompt`
+- 确认 `SpiritChatPage` 和 `SpiritVoiceChatPage` 都正确设置 `enabledSkill` 为 `spirit.{persona.id}`
+
+### 4. 首次选择模型+音色，后续直接进入对话
+- 在 `SpiritPersona` 模型中新增 `lastUsedModelId` 和 `lastUsedVoiceId` 字段
+- 重写 `SpiritChatPage`：
+  - 首次使用（无 `lastUsedModelId`）：显示模型选择+MIMO音色选择界面
+  - 保存选择后进入语音对话
+  - 后续使用（有 `lastUsedModelId`）：直接 `pushReplacement` 进入语音对话
+- 新增 MIMO 音色选择器（6种音色：Chloe/Alex/Bella/Marcus/Emily/Ethan）
+
+### 5. 语音对话页配置按钮
+- 修改 `SpiritVoiceChatPage` AppBar：将关闭按钮替换为配置按钮（Settings 图标）
+- 新增 `_showConfigDialog`：弹出对话框可切换模型和音色
+- 新增 `_applyConfig`：应用配置变更（更新 persona 保存、更新会话模型、重新初始化 TTS 服务）
+
+### 6. 上下文历史保持
+- `SpiritVoiceChatPage` 已有 `_loadHistoryMessages` 方法，从数据库加载历史消息
+- 同一个名灵只创建一个会话（通过 `findSpiritSession` 查找），多次进入看到之前的聊天内容
+
+**主要技术栈**：Flutter/Dart, Riverpod, go_router, SharedPreferences, SkillDispatcher 单例模式
+
+**关键决策和解决方案**：
+- **`SpiritPersona` 扩展字段**：新增 `lastUsedModelId`/`lastUsedVoiceId` 保存用户选择，避免每次进入都要重新选择
+- **首次/后续分流**：`SpiritChatPage._loadPersona` 中检查 `persona.lastUsedModelId`，有值则 `pushReplacement` 直接进入语音对话
+- **配置按钮替代关闭按钮**：用户在语音对话页可通过配置按钮切换模型/音色，返回通过左上角返回键
+- **MIMO 音色列表常量化**：在 `spirit_chat_page.dart` 和 `spirit_voice_chat_page.dart` 中共享相同的音色列表
+
+**会话中主要使用的工具**：Read, Edit, Write, Grep, Glob, RunCommand (flutter analyze)
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `spirit_persona.dart` | 新增 `lastUsedModelId`、`lastUsedVoiceId` 字段及 copyWith/toJson/fromJson | 保存用户选择的模型和音色 |
+| `spirit_chat_page.dart` | 重写：首次选择模型+音色，后续直接进入语音对话；新增MIMO音色选择器 | 实现首次配置+后续直接进入的流程 |
+| `spirit_voice_chat_page.dart` | AppBar 右上角关闭按钮改为配置按钮；新增 `_showConfigDialog` 和 `_applyConfig` | 支持在对话中切换模型和音色 |
+| `spirit_detail_page.dart` | （前次会话已创建）展示蒸馏人物 skill 详情 | 查看人物 skill 描述 |
+| `spirit_create_page.dart` | （前次会话已修改）蒸馏完成弹窗3秒自动关闭+查看跳转 | 改善弹窗交互体验 |
+| `spirit_gallery_page.dart` | （前次会话已修改）点击跳转详情，长按进入对话 | 分离查看和对话操作 |
+| `app_router.dart` | （前次会话已修改）注册 `/spirit/detail/:spiritId` 路由 | 支持详情页导航 |
+
+**验证结果**：
+- `flutter analyze lib/features/spirit/`：No issues found（0 errors, 0 warnings）
+
+---
+
+### Session #35 — 骁龙 8 Elite 5 大模型推理性能优化 (2026-06-05)
+
+**会话背景**：用户发现骁龙 8 Elite 5 芯片虽然性能极强，但在运行大模型推理时速度很差。核心原因包括：1) 纯 CPU "裸奔"未调用 GPU/NPU；2) 内存超限触发 Android ZRAM/Swap 导致速度暴跌 20x；3) Android EAS 调度把推理任务分配给小核；4) 模型选择不当导致内存不足。
+
+**会话主要目的**：针对骁龙 8 Elite 5 及同类旗舰 Android 芯片，全面优化大模型推理性能，包括 Vulkan GPU 加速、内存管理优化、大核绑定策略、模型推荐优化。
+
+**完成的主要任务**：
+
+1. **Vulkan GPU 后端显式启用**
+   - 修改 `PlatformProfile.toLlamadartGpuBackend()`，Android 设备显式返回 `GpuBackend.vulkan`
+   - llamadart 默认 Android 使用 CPU，必须显式指定 Vulkan 才能启用 Adreno GPU 加速
+   - 预期推理速度提升 3-5 倍
+
+2. **Android Swap/ZRAM 防护机制**
+   - 在 `LocalFFIEngine._buildModelParams()` 中增加 Android 专用内存预检
+   - 安全阈值设为可用内存的 75%，超过则自动降低配置
+   - 策略1：降低 contextSize（KV Cache 是内存大头），降至原值的 60%
+   - 策略2：若仍超限，降低 GPU offload 层数（减少显存占用）
+   - 一旦触发 Swap，推理速度从 20 tokens/s 暴跌到 1 tokens/s
+
+3. **大核绑定策略**
+   - Android 端新增 `getBigCoreInfo()` 原生方法（Kotlin），通过读取 `/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq` 检测大核数
+   - Dart 端新增 `BigCoreInfo` 数据类和 `CpuFeatureDetector.getBigCoreInfo()` 方法
+   - `LocalFFIEngine` 的 Android 线程数优先使用原生检测的大核数，回退到经验值（totalCores * 0.75）
+   - 骁龙 8 Elite 5: 2×超大核(P) + 4×大核(M) + 2×小核(E) → 推理线程数 = 6
+
+4. **GPU 层数推荐优化**
+   - `HardwareProfiler._recommendGpuLayers()` 增加详细注释和分级优化
+   - 16GB 旗舰设备 GPU offload 从 35 层提升到 60 层
+   - 12GB 设备从 35 层提升到 40 层
+   - 更多 GPU offload = 更快推理（Adreno GPU 通过 Vulkan 加速效果显著）
+
+5. **Vulkan 检测增强**
+   - `HardwareCheckerPlugin.checkVulkanSupport()` 从单一路径检测改为三重检测
+   - 方法1：`System.loadLibrary("vulkan")`（最可靠）
+   - 方法2：检查 `/system/lib64/libvulkan.so`
+   - 方法3：检查 `/vendor/lib64/libvulkan.so`（部分设备驱动在 vendor 分区）
+
+6. **模型推荐列表优化**
+   - 新增详细的移动端量化格式推荐策略注释
+   - 按内存分级推荐：16GB/12GB/8GB/6GB 以下
+   - 模型分三档：旗舰级（7B-9B）、中端级（3B-4B）、入门级（1.5B）
+   - 新增 Qwen2.5-1.5B-Instruct-GGUF 入门级模型
+   - 标注 2B 以下模型需开启 Repetition Penalty + Min P 防止重复循环
+
+**主要技术栈**：
+- Flutter + Dart（Riverpod 状态管理）
+- Kotlin（Android 原生硬件检测）
+- llama.cpp / llamadart 0.6.16（Vulkan GPU 后端）
+- Android big.LITTLE 架构 + EAS 调度
+- Android ZRAM/Swap 内存管理机制
+
+**关键决策和解决方案**：
+- **Vulkan 显式指定**：llamadart 默认 Android 回退到 CPU，必须显式设置 `GpuBackend.vulkan`，这是最关键的优化
+- **Swap 防护阈值 75%**：大模型推理是内存带宽受限任务，一旦触发 Swap（闪存比 LPDDR5X 慢几十倍），性能暴跌 20x
+- **大核检测三重策略**：原生频率检测 > 经验值（75%核心数）> 固定值
+- **GPU offload 层数提升**：骁龙 8 Elite 的 Adreno GPU 通过 Vulkan 加速效果显著，应尽可能多卸载
+
+**会话中主要使用的工具**：
+- Flutter Analyze（静态代码检查）
+- SearchCodebase / Grep / Glob（代码搜索）
+- Read / Edit（代码编辑）
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `platform_detector.dart` | `toLlamadartGpuBackend()` 中 Android 显式返回 `GpuBackend.vulkan` | llamadart 默认 Android 使用 CPU，必须显式启用 Vulkan |
+| `local_ffi_engine.dart` | 增加 Android Swap 防护（contextSize + GPU 层数自动降级）；Android 线程数使用原生大核检测 | 防止内存超限触发 Swap；避免 EAS 调度到小核 |
+| `sandbox_config.dart` | 更新 GPU 后端选择注释，说明 Android Vulkan 优化策略 | 文档化 Vulkan 优化决策 |
+| `hardware_profiler.dart` | GPU 层数推荐增加注释，16GB 设备从 35→60 层，12GB 从 35→40 层 | Adreno GPU Vulkan 加速效果显著，应多卸载 |
+| `HardwareCheckerPlugin.kt` | 新增 `getBigCoreInfo()` 原生方法（频率检测大核数）；Vulkan 检测改为三重策略 | 精确检测大核数用于线程绑定；提高 Vulkan 检测可靠性 |
+| `hardware_feature_detector.dart` | 新增 `BigCoreInfo` 数据类和 `getBigCoreInfo()` 方法 | Dart 端支持大核信息检测，用于推理线程数优化 |
+| `model_market_page.dart` | 新增移动端量化格式推荐策略注释；模型分三档（旗舰/中端/入门）；新增 1.5B 入门模型 | 指导用户选择适合设备的模型和量化格式 |
+
+**Bug 修复**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `hardware_feature_detector.dart` | MethodChannel 从 `com.example.ai_assistant/hardware` 改为 `hardware_checker` | Channel 名称与 Kotlin 端不匹配，导致 `MissingPluginException` |
+| `hardware_detector.dart` | MethodChannel 从 `com.example.ai_assistant/hardware` 改为 `hardware_checker` | 同上，统一 channel 名称 |
+
+---
+
+### Session #36 — 骁龙 8 Elite 推理参数深度优化 (2026-06-05)
+
+**会话背景**：在 Session #35 完成了 Vulkan GPU 加速、Swap 防护、大核绑定等架构优化后，用户反馈首字延迟仍高达 1 分钟。经分析发现核心原因是 `batchSize=512` 在移动端 GPU 内存带宽不足时导致 Prefill 极慢，以及线程数 4 被系统调度到小核。
+
+**会话主要目的**：针对骁龙 8 Elite 5 的硬件特性，深度优化推理参数（batch size、threads、micro batch），解决首字延迟问题，并添加控制变量测试功能。
+
+**完成的主要任务**：
+
+1. **Batch Size 深度优化（最关键）**
+   - `batchSize` 从 512 降为 128（Android），桌面端保持 512
+   - `microBatchSize` 从 512 降为 64（Android），桌面端保持 512
+   - 原因：大 batch 在 Prefill 阶段需要一次性处理大量 token，移动端 GPU 内存带宽不足导致 Prefill 极慢
+   - 修改了 `local_ffi_engine.dart` 中所有 4 处硬编码的 batchSize=512
+
+2. **Android 线程数优化**
+   - `LocalModelParams.cpuThreads` 默认值从 4 改为 2
+   - 骁龙 8 Elite 有 2 个超大核，2 线程可强制只在超大核上运行
+   - 避免系统 EAS 调度把任务分配给省电小核
+
+3. **纯 CPU 测试模式**
+   - 在模型参数对话框中新增「纯 CPU 测试」开关
+   - 一键设置 gpuLayers=0 + cpuThreads=2
+   - 方便用户对比纯 CPU vs Vulkan GPU 的推理速度，排查 Vulkan 问题
+
+4. **设备能力推荐优化**
+   - `device_capabilities.dart` 中移动端 batchSize 固定为 128
+   - `hardware_compatibility_checker.dart` 回退默认值从 512/4 改为 128/2
+
+5. **MethodChannel 名称统一（Bug 修复）**
+   - `hardware_feature_detector.dart` 和 `hardware_detector.dart` 的 channel 从 `com.example.ai_assistant/hardware` 改为 `hardware_checker`
+   - 修复了 `MissingPluginException` 导致 CPU 特性、芯片厂商、NPU 可用性检测全部失败的问题
+
+**主要技术栈**：Flutter + Dart、llamadart 0.6.16（ModelParams.batchSize/microBatchSize）、Android big.LITTLE 架构
+
+**关键决策和解决方案**：
+- **batchSize=128**：这是解决首字延迟 1 分钟的最关键参数。512 在移动端 Prefill 阶段太慢
+- **threads=2**：骁龙 8 Elite 有 2 个超大核(P核)，2 线程绑定 P 核效果最佳
+- **纯 CPU 测试开关**：让用户可以快速对比 CPU vs GPU 性能，定位 Vulkan 驱动问题
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `local_ffi_engine.dart` | 所有 batchSize 从 512→128(Android)，microBatchSize 从 512→64(Android)；forceCpuMode 线程数 Android→2 | 大 batch 导致移动端首字延迟 1 分钟；2 线程绑定超大核 |
+| `model_entry.dart` | `LocalModelParams.cpuThreads` 默认值从 4→2 | 骁龙 8 Elite 超大核绑定 |
+| `model_params_dialog.dart` | 新增「纯 CPU 测试」开关 | 方便用户一键对比 CPU vs Vulkan 性能 |
+| `device_capabilities.dart` | 移动端 batchSize 固定 128 | 避免移动端大 batch 首字延迟 |
+| `hardware_compatibility_checker.dart` | 回退默认值 batchSize=128, threads=2 | 统一移动端默认参数 |
+| `hardware_feature_detector.dart` | MethodChannel 名称修正 | 修复 MissingPluginException |
+| `hardware_detector.dart` | MethodChannel 名称修正 | 同上 |
+
+---
+
+### Session #37 — Prefill 卡死诊断 + Vulkan 排查 (2026-06-05)
+
+**会话背景**：Session #36 完成了 batchSize/threads 优化后，用户反馈第一轮推理仍然好几分钟无输出。日志显示推理卡在 `engine.create()` 的 Prefill 阶段，第一个 token 都未返回。
+
+**会话主要目的**：定位 Vulkan Prefill 卡死根因，添加诊断日志和排查工具。
+
+**完成的主要任务**：
+
+1. **Prefill 阶段诊断日志**
+   - 在 `generate()` 和 `generateStream()` 的 `engine.create()` 调用前后添加计时日志
+   - 记录 Prefill 完成时间（首 token 耗时），帮助区分"Prefill 慢"vs"Decode 慢"
+   - 在模型加载时打印完整参数（gpuLayers, contextSize, threads, batchSize, preferredBackend 等）
+
+2. **关键发现：Web 搜索注入导致上下文膨胀**
+   - 日志显示 `Web search succeeded with 5 results` + `TTS 控制指令 (预算=2011tokens)`
+   - 在 `contextSize=2457` 的限制下，5 条搜索结果 + TTS 提示词可能占满大部分上下文
+   - Prefill 需要一次性编码所有 token，上下文越满越慢
+
+3. **纯 CPU 测试开关**（Session #36 已完成）
+   - 用户可通过「纯 CPU 测试」开关一键设置 gpuLayers=0 对比速度
+   - 如果纯 CPU 更快 → Vulkan 驱动有问题
+
+**主要技术栈**：Flutter + Dart、llamadart ModelParams、Vulkan GPU 后端
+
+**关键决策和解决方案**：
+- **Prefill 计时日志**：在 `engine.create()` 前后记录耗时，直接定位卡死阶段
+- **模型加载参数日志**：打印所有 ModelParams 字段，确认实际使用的 batchSize/threads/gpuLayers
+- **Web 搜索上下文膨胀**：5 条搜索结果 + TTS 指令在 2457 token 上下文中占比过大
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `local_ffi_engine.dart` | generate() 和 generateStream() 添加 Prefill 计时日志 | 定位 Vulkan Prefill 卡死阶段 |
+| `local_ffi_engine.dart` | loadModel 前打印完整 ModelParams | 确认实际使用的推理参数 |
+| `device_capabilities.dart` | 添加 `import 'dart:io'` | 修复 Platform 引用编译错误 |
+
+---
+
+### Session #38 — 名灵回响 UI 修复 + 语音失效修复 (2026-06-05)
+
+**会话背景**：用户反馈名灵回响列表项底部溢出、缺少快捷操作按钮、音色选择不完整、语音对话失效等问题。
+
+**会话主要目的**：修复名灵回响的 UI 和功能问题，包括列表项溢出、按钮交互、音色选择、克隆音色 TTS 失效。
+
+**完成的主要任务**：
+
+1. **修复列表项底部溢出**
+   - 重写 `_buildPersonaCard`，使用 `Stack` + `Flexible` 布局
+   - 描述文本用 `Flexible` 包裹，防止溢出
+   - 调整 `childAspectRatio` 从 0.72 → 0.78，给卡片更合适的比例
+
+2. **添加卡片操作按钮**
+   - 右上角：`i` 图标按钮 → 查看名灵详情
+   - 底部中间：对话按钮（语音/文字）→ 进入对话
+   - 就绪状态显示 `FilledButton.tonalIcon`，失败状态显示 `OutlinedButton`
+
+3. **音色选择改进**
+   - 替换硬编码的 6 个音色为 `MiMoVoice` 枚举（Chloe, mimo_default, default_zh, default_en）
+   - 新增克隆音色列表（从 `VoiceCloneService` 动态加载）
+   - 克隆音色显示 `克隆` 标签，预设音色显示描述
+
+4. **修复克隆音色 TTS 失效（关键 Bug）**
+   - **根因**：`persona.clonedVoiceId` 存储的是 UUID（如 `abc123`），但代码检查 `ttsVoice.startsWith('clone_')` 永远不匹配
+   - 导致 `cloneRefAudioPath` 始终为 null，TTS 回退到 `MiMoVoice.Chloe` 而非克隆音色
+   - **修复**：优先通过 `persona.clonedVoiceId` 直接在 `VoiceCloneService` 中查找克隆音色，获取参考音频路径
+   - 兼容旧的 `clone_` 前缀格式
+
+**主要技术栈**：Flutter + Dart、MiMo TTS API、VoiceCloneService
+
+**关键决策和解决方案**：
+- **克隆音色 ID 格式不匹配**：`clonedVoiceId` 是 UUID 而非 `clone_xxx`，需要通过 `VoiceCloneService.getClonedVoices()` 查找
+- **音色选择统一**：克隆音色 + Mimo 预设音色在同一个下拉列表中选择
+- **卡片布局**：使用 `Stack` 实现右上角浮动按钮，`Spacer` 确保底部按钮始终在底部
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `spirit_gallery_page.dart` | 重写 `_buildPersonaCard`，修复溢出，添加 i 按钮和对话按钮 | 底部溢出 + 缺少快捷操作 |
+| `spirit_gallery_page.dart` | `childAspectRatio` 0.72→0.78 | 卡片比例调整 |
+| `spirit_chat_page.dart` | 替换硬编码音色列表为 `MiMoVoice` 枚举 + 克隆音色 | 音色选择不完整 |
+| `spirit_chat_page.dart` | 添加 `_clonedVoices` 字段和 `_loadClonedVoices()` | 动态加载克隆音色 |
+| `spirit_chat_page.dart` | 重写 `_buildVoiceSelectorSection` | 统一克隆+预设音色选择 |
+| `spirit_voice_chat_page.dart` | 修复克隆音色 ID 匹配逻辑 | clonedVoiceId 是 UUID 不是 clone_ 前缀 |
+
+### Session #39 — 名灵回响 Pad 适配 + 二次蒸馏 + 蒸馏质量修复 (2026-06-05)
+
+**会话背景**：用户反馈名灵回响在 Pad 端显示不佳、缺少二次蒸馏功能、蒸馏结果缺少核心心智模型内容。
+
+**会话主要目的**：优化 Pad 端布局、添加二次蒸馏功能、修复蒸馏输出截断问题。
+
+**完成的主要任务**：
+
+1. **按钮文字修改**
+   - 将名灵卡片底部按钮从"文字对话"改为"对话"
+
+2. **Pad 端侧边栏布局**
+   - 使用 `ResponsiveLayout.isTablet/isDesktop` 判断设备类型
+   - Pad/桌面端：左侧 280px 侧边栏（人物列表）+ 右侧详情面板
+   - 手机端：保持原有网格卡片布局
+   - 右侧面板展示：emoji + 昵称 + 领域 + 状态 + 描述 + 蒸馏 Prompt + 来源 + 音色 + 操作按钮
+
+3. **二次蒸馏功能**
+   - 在侧边栏头部添加刷新按钮（二次蒸馏）
+   - 在右侧详情面板添加"二次蒸馏"按钮
+   - 在手机端选项菜单添加"二次蒸馏"选项
+   - `SpiritDistillationService.redistillPersona()` 方法：保留原 ID，重新搜索+提炼
+
+4. **修复蒸馏缺少核心心智模型（关键 Bug）**
+   - **根因**：`generateChat` 调用时未指定 `maxTokens`，默认 2048 tokens
+   - 蒸馏 prompt 要求输出心智模型3-7个+决策启发式5-10条+表达DNA等，2048 tokens 远远不够
+   - **修复**：设置 `ChatOptions(maxTokens: 8192)`，确保 LLM 有足够 token 空间输出完整内容
+
+**会话中主要使用的技术栈**：Flutter、Riverpod、ResponsiveLayout、ChatOptions
+
+**关键决策和解决方案**：
+- Pad 适配使用 `ResponsiveLayout` 而非 `LayoutBuilder`，与项目现有方式一致
+- 二次蒸馏复用 `_nuwaPhase1Research` 和 `_nuwaPhase2Synthesize`，但保留原 ID 和基础信息
+- 蒸馏输出截断通过增大 `maxTokens` 到 8192 解决
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `spirit_gallery_page.dart` | 按钮文字"文字对话"→"对话" | 用户要求简化 |
+| `spirit_gallery_page.dart` | 重写为双布局（手机网格+Pad侧边栏） | Pad 端显示不佳 |
+| `spirit_gallery_page.dart` | 添加 `_selectedPersonaId` 状态和侧边栏/详情面板 | Pad 端交互 |
+| `spirit_gallery_page.dart` | 添加 `_redistill()` 二次蒸馏方法 | 支持重新蒸馏 |
+| `spirit_gallery_page.dart` | 侧边栏头部添加刷新按钮 | 快捷二次蒸馏 |
+| `spirit_distillation_service.dart` | 添加 `redistillPersona()` 方法 | 二次蒸馏核心逻辑 |
+| `spirit_distillation_service.dart` | `ChatOptions(maxTokens: 8192)` | 修复蒸馏输出截断 |
+| `spirit_distillation_service.dart` | 导入 `ChatOptions` | 编译依赖 |
+| `spirit_gallery_page.dart` | 手机端卡片 `GestureDetector` 长按删除 | 快捷删除操作 |
+| `spirit_gallery_page.dart` | Pad端侧边栏 `ListTile.onLongPress` 长按删除 | 快捷删除操作 |
+| `spirit_gallery_page.dart` | 添加 `_confirmAndDelete()` 方法 | 长按删除确认+执行 |
+| `spirit_chat_page.dart` | `_selectedVoiceId` 初始化改为 `clone_` 前缀格式 | 修复克隆音色不显示 |
+| `spirit_chat_page.dart` | 添加 `_resolveVoiceId()` 方法 | clone_前缀→UUID转换 |
+| `spirit_chat_page.dart` | `_enterVoiceChat`/`_enterTextChat` 同步 `clonedVoiceId` | 音色保存一致性 |
+| `spirit_chat_page.dart` | `enableVoiceOutput: true` 名灵对话始终启用 | TTS标签注入 |
+| `spirit_chat_page.dart` | `_initDefaultVoice()` 读取语音设置中的音色 | 音色默认值与设置同步 |
+| `spirit_voice_chat_page.dart` | 创建会话时 `enableVoiceOutput: true` | 注入TTS控制标签 |
+| `spirit_voice_chat_page.dart` | 已有会话补设 `enableVoiceOutput` | 兼容旧会话 |
+| `tts_service.dart` | `speakLongText` V3流水线模式 | 边合成边播放，降低延迟 |
+| `spirit_gallery_page.dart` | 去掉侧边栏+号按钮 | 简化UI |
+| `spirit_gallery_page.dart` | 右侧面板标题改为"xx详情" | 更直观的信息展示 |
+| `spirit_gallery_page.dart` | 头部行简化：去掉重复昵称 | 标题已含昵称 |
+| `session_list_page.dart` | 侧边栏删除模型和知识库导航项 | 设置中已包含 |
+| `model_entry.dart` | `RemoteModelConfig.maxTokens` 默认值 4096→8192 | 远程模型更大输出 |
+| `model_inference_engine.dart` | 新增 `isLocalModel()` 方法 | 支持模型类型判断 |
+| `spirit_distillation_service.dart` | 蒸馏时远程模型 maxTokens=16384 | 更饱满的人物蒸馏 |
+
+### Session #40 — 名灵回响二次蒸馏模型选择+进度条+对话配置保存修复 (2026-06-05)
+
+**会话背景**：用户反馈名灵回响的二次蒸馏缺少模型选择和进度展示、对话配置修改后不保存、TTS标签未覆盖所有语音对话。
+
+**会话主要目的**：优化二次蒸馏交互、修复对话配置保存问题、确保TTS标签完整覆盖。
+
+**完成的主要任务**：
+
+1. **二次蒸馏模型选择+进度条**
+   - 去掉左侧侧边栏的刷新按钮
+   - 右侧详情面板的"二次蒸馏"按钮点击后弹出模型选择对话框
+   - 下拉菜单默认选中上次蒸馏使用的模型，可切换其他模型
+   - 确认后显示进度条（CircularProgressIndicator + LinearProgressIndicator），效果同首次蒸馏
+   - 蒸馏期间禁用二次蒸馏按钮
+
+2. **对话配置保存修复**
+   - 修复已有会话修改模型/音色后不生效的问题
+   - 已有会话更新时同步更新 `enableVoiceOutput` 和 TTS 音色设置
+   - 不再自动跳过配置页面（删除 `_enterVoiceChatDirectly`），始终显示配置页面
+   - `_initDefaults` 优先使用已保存的模型和音色（`lastUsedModelId`/`lastUsedVoiceId`）
+   - `_initDefaultVoice` 优先级：已保存音色 > 克隆音色 > 语音设置 > Chloe
+
+3. **TTS标签覆盖确认**
+   - 确认 `dialogue_engine` 在 `enableVoiceOutput=true` 时注入完整TTS控制指令
+   - 名灵回响文字对话和语音对话均设置 `enableVoiceOutput: true`
+   - TTS提示词模板已包含完整语调标签库（含傲娇/病娇/御姐/萝莉等角色声线+情欲场景声学标签）
+
+4. **`redistillPersona` 支持指定模型**
+   - 新增可选参数 `modelId`，优先使用传入的模型，其次上次使用的模型
+
+**会话中主要使用的技术栈**：Flutter、Riverpod、StatefulBuilder、DropdownButtonFormField、StreamController
+
+**关键决策和解决方案**：
+- 二次蒸馏使用 `StatefulBuilder` 在对话框内管理模型选择状态
+- 进度条订阅 `distillService.progressStream`，按 `spiritId` 过滤
+- 对话配置保存：不再自动跳过配置页，让用户每次都能修改设置
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `spirit_gallery_page.dart` | 去掉左侧刷新按钮 | 用户要求去除 |
+| `spirit_gallery_page.dart` | 二次蒸馏按钮改为弹出模型选择对话框 | 支持选择蒸馏模型 |
+| `spirit_gallery_page.dart` | 添加蒸馏进度条（Circular+Linear） | 展示蒸馏进度 |
+| `spirit_gallery_page.dart` | 添加 `_isRedistilling`/`_redistillMessage`/`_redistillProgress` 状态 | 进度跟踪 |
+| `spirit_gallery_page.dart` | 导入 `model_provider.dart` | 获取模型列表 |
+| `spirit_distillation_service.dart` | `redistillPersona` 新增 `modelId` 可选参数 | 支持指定蒸馏模型 |
+| `spirit_distillation_service.dart` | 使用 `effectiveModelId` 替代硬编码 `modelId` | 优先使用传入模型 |
+| `spirit_chat_page.dart` | 删除 `_enterVoiceChatDirectly` 方法 | 不再自动跳过配置页 |
+| `spirit_chat_page.dart` | `_initDefaults` 优先使用已保存的模型 | 配置预填 |
+| `spirit_chat_page.dart` | `_initDefaultVoice` 优先使用已保存的音色 | 配置预填 |
+| `spirit_chat_page.dart` | 已有会话更新时同步更新 `enableVoiceOutput` 和 TTS 音色 | 修复配置不保存 |
+| `spirit_chat_page.dart` | 已有会话更新 TTS provider/voice_id 到 SharedPreferences | 修复音色不生效 |
+
+---
+
+### Session #77 — TTS 多段合成两两合并策略优化 (2026-06-05)
+
+**会话背景**：用户反馈 MiMo TTS 多标签分段合成时所有段落均因 429 限流失败。5 个段落连续请求导致 API 限流，即使有重试机制也无法成功。用户提出将段落两两合并发送的策略。
+
+**会话主要目的**：优化 TTS 多段合成策略，将相邻段落两两合并为一次 API 请求，从根源上减少请求次数，避免 429 限流。
+
+**完成的主要任务**：
+
+1. **MiMo 预设音色分段合成两两合并**（`_synthesizeMultipleSegments`）
+   - 将相邻 2 个段落的 `originalContent` 合并为一次 API 请求
+   - 5段→3次请求(2+2+1)，4段→2次(2+2)，3段→2次(2+1)
+   - 批次间延迟从 1.5s+500ms/段 改为 2s+1s/批次
+   - 接收超时从 60s 增加到 90s（合并后文本更长）
+
+2. **VoiceClone 分段合成两两合并**（`_synthesizeMultipleCloneSegments`）
+   - 同样采用两两合并策略
+   - 批次间延迟和重试策略与预设音色模式一致
+   - 接收超时从 60s 增加到 90s
+
+**关键决策和解决方案**：
+- **两两合并而非逐段请求**：直接减少 API 调用次数，5段从5次请求减为3次，429 触发概率大幅降低
+- **合并方式**：将两段 `originalContent`（含 TTS 标签）用空格连接，MiMo API 支持一次请求中包含多个 `[tts:...]...[/tts]` 标签
+- **保留重试和延迟机制**：合并后请求次数减少，但仍有批次间延迟和 429 重试作为双重保障
+
+**会话中主要使用的技术栈**：Flutter/Dart, MiMo TTS API, Dio HTTP
+
+**会话中主要使用的工具**：Read, Edit
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `tts_service.dart` | `_synthesizeMultipleSegments` 重写为两两合并策略 | 减少 API 调用次数避免 429 |
+| `tts_service.dart` | `_synthesizeMultipleCloneSegments` 重写为两两合并策略 | 同上 |
+| `tts_service.dart` | 批次间延迟调整为 2s+1s/批次 | 合并后请求更少，间隔可稍长 |
+| `tts_service.dart` | 接收超时从 60s 增加到 90s | 合并后文本更长，合成时间增加 |
+| `spirit_gallery_page.dart` | 二次蒸馏对话框 `DropdownButtonFormField` 改为 `DropdownButton` | 修复 Flutter 3.38 下 `initialValue`/`value` 兼容问题导致对话框无法弹出 |
+| `spirit_gallery_page.dart` | 添加 `selectedModelId` 列表内校验 | 防止默认值不在 items 中导致断言失败 |
+| `spirit_gallery_page.dart` | 添加二次蒸馏点击调试日志 | 方便排查 |
+| `tts_prompt_template.dart` | 核心原则和使用原则中添加"整段回复最多 2 个 TTS 标签"限制 | 从源头限制 AI 输出标签数量，保证情绪一致性+减少 API 调用 |
+| `tts_service.dart` | `_synthesizeWithMiMo` 和 `synthesizeWithMiMoClone` 添加标签数量限制 | 超过 2 个标签时自动合并到第 2 个标签，健壮性保障 |
+| `tts_style_parser.dart` | `buildMiMoRequest`/`buildMiMoCloneRequest`/`buildMiMoDesignRequest` 改用 `parseAll` | 支持多标签合并场景，多标签时直接用原始文本作为 assistant content |
+| `README.md` | 追加 Session #77 会话记录 | 按要求记录 |
+
+---
+
+### Session #78 — TTS 混合降级策略 + Edge TTS WebSocket 集成 + 蒸馏人员按钮直接跳转 (2026-06-05)
+
+**会话背景**：用户反馈 MiMo TTS 合成时间过长，希望实现秒级语音输出。同时要求蒸馏人员页面的"语音对话"按钮点击后不弹窗，直接跳转到对话模式选择界面。
+
+**会话主要目的**：
+1. 实现 TTS 混合降级策略：MiMo 优先 + 超时自动降级到 Edge TTS（有网）/ Sherpa 本地 TTS（无网）
+2. 集成 Edge TTS 作为降级方案（通过 WebSocket 直接实现，无需第三方包）
+3. 蒸馏人员页面"语音对话"按钮改为直接跳转到对话模式选择界面
+
+**完成的主要任务**：
+
+1. **TTS 混合降级策略实现**（`tts_service.dart` 的 `synthesize` 方法）
+   - MiMo 优先：默认使用 MiMo TTS 合成
+   - 超时降级：MiMo 合成超时 15 秒后自动降级到 Edge TTS
+   - 智能记忆：`_lastMiMoTimedOut` 标记上次是否超时，超时后下次直接用 Edge TTS
+   - Edge TTS 失败时进一步降级到 Sherpa 本地 TTS
+   - 所有 TTS 失败时最终降级到系统 TTS
+   - 完整降级链路：MiMo → Edge TTS → Sherpa → 系统 TTS
+
+2. **Edge TTS WebSocket 直接实现**（`_synthesizeWithEdge` 方法）
+   - 通过 `web_socket_channel` 直接连接微软 Edge TTS WebSocket 服务
+   - 无需第三方包（`edge_tts` 包要求 SDK >=3.10.8，当前项目为 3.10.7）
+   - 支持中文 16 种音色（Xiaoxiao/Xiaoyi/Yunjian/Xiaochen 等）
+   - 输出 MP3 格式（just_audio 支持），速度快（1-2秒）
+   - 支持语速调节（通过 SSML prosody rate）
+   - 自动清洗 TTS 控制标签（Edge TTS 不支持项目自定义标签）
+
+3. **蒸馏人员页面"语音对话"按钮改为直接跳转**
+   - 移除 `_enterChat` 方法中的 `showModalBottomSheet` 弹窗
+   - 改为直接 `context.push('/spirit/chat/${persona.id}')` 跳转到对话模式选择界面
+   - 对话模式选择界面（`SpiritChatPage`）已包含：模型选择、音色选择、语音/文字对话模式选择
+
+4. **`speak` 方法补全 `TTSProvider.edge` 分支**
+   - Edge TTS 与 OpenAI/MiMo/Sherpa 一样走 synthesize + _playAudio 路径
+
+5. **错误降级链路完善**
+   - `synthesize` 方法的 catch 块中，Edge TTS 失败降级到 Sherpa → 系统 TTS
+   - MiMo 失败降级到 Edge TTS → Sherpa → 系统 TTS（完整链路）
+   - Sherpa 失败降级到系统 TTS
+
+**主要技术栈**：
+- Flutter/Dart, WebSocket (web_socket_channel), MiMo TTS API
+- Edge TTS WebSocket 协议（微软免费神经网络语音）
+- Sherpa-ONNX 本地离线 TTS
+- just_audio 音频播放, go_router 路由导航
+
+**关键决策和解决方案**：
+- **不使用 `edge_tts` 第三方包**：该包要求 Dart SDK >=3.10.8，当前项目为 3.10.7。直接通过 WebSocket 实现微软 Edge TTS 协议，零外部依赖
+- **MiMo 超时 15 秒降级**：MiMo TTS 在 429 限流时可能等待极长时间，15 秒超时后自动切换到 Edge TTS（1-2秒响应）
+- **智能记忆超时状态**：`_lastMiMoTimedOut` 静态变量，上次 MiMo 超时后下次直接用 Edge TTS，避免用户反复等待
+- **Edge TTS 音频格式 MP3**：输出 MP3 而非 WAV，just_audio 原生支持 MP3 播放，且 MP3 体积更小
+- **直接跳转而非弹窗**：用户明确要求"语音对话"按钮不弹窗，直接跳转到 `SpiritChatPage`（已包含模型/音色/模式选择）
+
+**会话中主要使用的工具**：
+- Read, Edit, Grep, RunCommand (flutter pub get, flutter analyze)
+
+**修改的文件**：
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `tts_service.dart` | 新增 `TTSProvider.edge` 枚举值 | 支持 Edge TTS 提供商 |
+| `tts_service.dart` | 新增 `EdgeVoice` 枚举和 `_edgeVoiceNames` 映射（16种中文音色） | Edge TTS 音色选择 |
+| `tts_service.dart` | 新增 `_edgeVoice` 字段和构造函数参数 | Edge TTS 音色配置 |
+| `tts_service.dart` | 新增 `_mimoTimeoutSeconds`（15秒）和 `_lastMiMoTimedOut` 静态变量 | 超时降级机制 |
+| `tts_service.dart` | 重写 `synthesize` 方法的 MiMo 分支：超时降级 Edge → Sherpa | MiMo 优先 + 超时自动降级 |
+| `tts_service.dart` | 新增 `case TTSProvider.edge` 分支 | 直接使用 Edge TTS |
+| `tts_service.dart` | 完善 catch 块降级链路：Edge→Sherpa→系统, MiMo→Edge→Sherpa→系统 | 全链路容错 |
+| `tts_service.dart` | `speak` 方法新增 `case TTSProvider.edge` | Edge TTS 播放路径 |
+| `tts_service.dart` | 新增 `_synthesizeWithEdge` 方法（WebSocket 直接实现） | Edge TTS 合成核心逻辑 |
+| `tts_service.dart` | 新增 `_generateRequestId`、`_formatDate`、`_escapeXml` 辅助方法 | Edge TTS 协议支持 |
+| `tts_service.dart` | import 从 `edge_tts` 改为 `web_socket_channel` | 去除不兼容的第三方包依赖 |
+| `pubspec.yaml` | 移除 `edge_tts: ^0.1.5` 依赖（SDK 版本不兼容） | 改用 WebSocket 直接实现 |
+| `spirit_gallery_page.dart` | `_enterChat` 方法移除 `showModalBottomSheet`，改为直接 `context.push` | 用户要求不弹窗直接跳转 |
+
+---
+
+### Session #79 — TTS 混合降级策略代码验证 (2026-06-05)
+
+**会话背景**：延续 Session #78 的 TTS 混合降级策略和蒸馏人员按钮跳转修改，需要验证代码编译无误。
+
+**会话主要目的**：验证 Session #78 中所有修改的代码是否通过 Flutter 静态分析。
+
+**完成的主要任务**：
+1. 审阅 `tts_service.dart` 中 Edge TTS WebSocket 实现（`_synthesizeWithEdge` 方法）——代码完整，包含 WebSocket 连接、SSML 消息发送、音频数据收集、MP3 保存
+2. 审阅 `spirit_gallery_page.dart` 中 `_enterChat` 方法——已从 `showModalBottomSheet` 改为直接 `context.push('/spirit/chat/${persona.id}')`
+3. 确认 `pubspec.yaml` 中 `web_socket_channel: ^3.0.3` 依赖已正确添加，`edge_tts` 已移除
+4. 运行 `flutter analyze` 对 `tts_service.dart` 和 `spirit_gallery_page.dart` 进行静态分析——**No issues found!**
+
+**主要技术栈**：Flutter/Dart, flutter analyze 静态代码分析
+
+**关键决策和解决方案**：
+- 代码验证通过，Session #78 的所有修改均无编译错误
+- Edge TTS WebSocket 实现完整：连接 → 配置消息 → SSML 消息 → 收集音频 → 保存 MP3
+- 降级链路完整：MiMo → Edge TTS → Sherpa → 系统 TTS
+
+**会话中主要使用的工具**：Read, Grep, RunCommand (flutter analyze)
+
+**修改的文件**：无（本次会话为纯验证，未修改任何文件）
+
+---
+
+### Session #80 — Edge TTS 语音设置入口 + MiMo TTS 单标签优化 (2026-06-05)
+
+**会话背景**：Edge TTS 已实现 WebSocket 合成功能，但在语音设置页面缺少配置入口，用户无法选择 Edge TTS 提供商和音色。同时 MiMo TTS 对多标签文本采用分段合成策略，速度慢且容易触发 429 限流。
+
+**会话主要目的**：
+1. 在语音设置页面添加 Edge TTS 配置入口（提供商选择 + 音色选择）
+2. 优化 MiMo TTS 多标签文本处理，改为单次 API 调用
+
+**完成的主要任务**：
+1. 在 `voice_settings_page.dart` 中添加 Edge TTS 到提供商选项列表
+2. 添加 Edge TTS 音色选择 UI（16 种中文音色，含 RadioListTile 对话框）
+3. 添加 `setEdgeVoice()` 方法到 `VoiceSettingsNotifier`，支持持久化
+4. 在 `spirit_voice_chat_page.dart`、`realtime_voice_page.dart`、`session_detail_page.dart` 中添加 `edge` provider 映射和 `edgeVoice` 参数
+5. 优化 MiMo TTS 合成：移除分段合成逻辑，改为单次 API 调用（MiMo 引擎原生支持多标签解析）
+
+**主要技术栈**：Flutter/Dart, Riverpod 状态管理, SharedPreferences 持久化, MiMo TTS API
+
+**关键决策和解决方案**：
+- **Edge TTS 音色选择**：提供 16 种中文音色（晓晓、云健、晓涵等），使用 `RadioListTile` 对话框选择
+- **MiMo TTS 单标签优化**：MiMo 引擎本身支持解析多个 `[tts:...]` 标签，分段合成反而更慢且容易触发 429 限流。改为直接将原始文本（保留所有标签）作为一次 API 调用发送
+- **持久化 key**：Edge TTS 音色使用 `edge_voice` key 存储在 SharedPreferences
+
+**会话中主要使用的工具**：Read, Grep, Edit, RunCommand (flutter analyze)
+
+**修改的文件**：
+| 文件 | 修改内容 | 原因 |
+|------|---------|------|
+| `voice_settings_page.dart` | 添加 Edge TTS 到 `ttsProviderOptions`；添加 `edgeVoice` 字段到 `VoiceSettings`；添加 `_edgeVoiceKey` 持久化 key；添加 `setEdgeVoice()` 方法；添加 Edge TTS 音色选择 UI 区域；添加 `_edgeVoiceDisplayNames` 16 种音色映射；添加 `_getEdgeVoiceName()` 和 `_showEdgeVoiceSelectDialog()` 方法 | Edge TTS 缺少配置入口 |
+| `tts_service.dart` | 移除 MiMo TTS 多标签分段合成逻辑（`_synthesizeMultipleSegments` 调用和标签数量限制），改为单次 API 调用 | 多标签分段合成速度慢且易触发 429 限流 |
+| `spirit_voice_chat_page.dart` | 添加 `edge` provider 映射；添加 `edgeVoice` 参数读取和传递 | 支持 Edge TTS 提供商 |
+| `realtime_voice_page.dart` | 添加 `edge` provider 映射；添加 `edgeVoice` 参数读取和传递 | 支持 Edge TTS 提供商 |
+| `session_detail_page.dart` | 添加 `edge` provider 映射和 switch case；添加 `edgeVoice` 参数读取和传递 | 支持 Edge TTS 提供商 |

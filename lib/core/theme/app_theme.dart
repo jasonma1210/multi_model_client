@@ -98,42 +98,64 @@ class ResponsiveLayout {
   }
 }
 
-/// Cherry Studio inspired design system — 得物「性冷淡」多平台适配版
+/// MJ Nexus Design System — 克制科技风多平台适配版
+///
+/// 设计理念：
+/// - 保留得物风的克制与中性基调
+/// - 融入科技蓝强调色，增强 AI 客户端定位
+/// - 遵循 Material Design 3 规范
+/// - 深色/浅色双主题，统一视觉语言
 class AppTheme {
   // =====================================================
-  // 设计令牌 - 得物风「性冷淡」中性调色板
+  // 设计令牌 - 强调色系统（科技蓝）
   // =====================================================
 
-  /// 主强调色：深沉中性 - 非纯黑，微带暖感
+  /// 主强调色：科技蓝
+  static const Color accentPrimary = Color(0xFF3B82F6);
+  /// 次强调色：靛蓝
+  static const Color accentSecondary = Color(0xFF6366F1);
+  /// 强调色 Hover 状态
+  static const Color accentHover = Color(0xFF2563EB);
+  /// 强调色极浅变体（背景用，10% 透明度）
+  static const Color accentSubtle = Color(0x1A3B82F6);
+
+  // =====================================================
+  // 设计令牌 - 中性色基底
+  // =====================================================
+
+  /// 主色：深沉中性 - 非纯黑，微带暖感
   static const Color _primaryColor = Color(0xFF1A1A1A);
-  /// 次要强调色：中灰
+  /// 次要色：中灰
   static const Color _accentColor = Color(0xFF6B6B6B);
-  static const Color _successColor = Color(0xFF4CAF50);
+  static const Color _successColor = Color(0xFF22C55E);
+  static const Color _warningColor = Color(0xFFF59E0B);
   static const Color _errorColor = Color(0xFFEF4444);
 
   // =====================================================
-  // 深色主题调色板 - 得物深色风
+  // 深色主题调色板
   // =====================================================
 
-  static const Color _darkBg = Color(0xFF111111);        // 最深背景（近纯黑）
-  static const Color _darkSurface = Color(0xFF181818);   // 卡片/表面
-  static const Color _darkCard = Color(0xFF1E1E1E);      // 卡片内容区
-  static const Color _darkBorder = Color(0xFF2A2A2A);    // 极细边框
-  static const Color _darkHover = Color(0xFF252525);     // Hover 状态
+  static const Color _darkBg = Color(0xFF0F1117);        // 最深背景（微带蓝调）
+  static const Color _darkSurface = Color(0xFF161822);   // 卡片/表面
+  static const Color _darkCard = Color(0xFF1C1E2A);      // 卡片内容区
+  static const Color _darkBorder = Color(0xFF2A2D3A);    // 极细边框
+  static const Color _darkHover = Color(0xFF222536);     // Hover 状态
+  static const Color _darkActive = Color(0xFF2A3048);    // Active/Selected 状态
 
   // 文字颜色
-  static const Color _darkTextPrimary = Color(0xFFE8E8E8);    // 主要文字
-  static const Color _darkTextSecondary = Color(0xFF999999);  // 次要文字
-  static const Color _darkTextMuted = Color(0xFF555555);      // 暗示文字
+  static const Color _darkTextPrimary = Color(0xFFE8EAF0);    // 主要文字
+  static const Color _darkTextSecondary = Color(0xFF8B8FA3);  // 次要文字
+  static const Color _darkTextMuted = Color(0xFF555770);      // 暗示文字
 
   // =====================================================
-  // 浅色主题调色板 - 得物浅色风
+  // 浅色主题调色板
   // =====================================================
 
-  static const Color _lightBg = Color(0xFFF7F7F7);       // 背景（冷白）
+  static const Color _lightBg = Color(0xFFF8F9FA);       // 背景（微带蓝调冷白）
   static const Color _lightSurface = Color(0xFFFFFFFF);  // 表面
   static const Color _lightCard = Color(0xFFFFFFFF);     // 卡片
-  static const Color _lightBorder = Color(0xFFEAEAEA);   // 边框
+  static const Color _lightBorder = Color(0xFFE5E7EB);   // 边框
+  static const Color _lightHover = Color(0xFFF3F4F6);    // Hover 状态
 
   // =====================================================
   // 设计间距系统 - 4pt 基准
@@ -147,37 +169,97 @@ class AppTheme {
   static const double spacingXXL = 32.0;
   static const double spacingXXXL = 48.0;
 
-  // 圆角系统 - 得物风适中圆角，不过分圆润
+  // =====================================================
+  // 圆角系统
+  // =====================================================
+
   static const double radiusS = 6.0;
-  static const double radiusM = 10.0;
-  static const double radiusL = 14.0;
-  static const double radiusXL = 18.0;
+  static const double radiusM = 8.0;
+  static const double radiusL = 12.0;
+  static const double radiusXL = 16.0;
   static const double radiusXXL = 24.0;
 
-  // 阴影 - 极轻，得物风几乎无阴影
+  // =====================================================
+  // 阴影系统 - 分层阴影
+  // =====================================================
+
+  /// 轻微阴影（卡片默认）
   static List<BoxShadow> shadowS = [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.06),
-      blurRadius: 6,
+      color: Colors.black.withValues(alpha: 0.04),
+      blurRadius: 8,
       offset: const Offset(0, 2),
     ),
   ];
 
+  /// 中等阴影（悬浮卡片、下拉菜单）
   static List<BoxShadow> shadowM = [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.08),
-      blurRadius: 12,
+      color: Colors.black.withValues(alpha: 0.06),
+      blurRadius: 16,
+      offset: const Offset(0, 4),
+    ),
+    BoxShadow(
+      color: Colors.black.withValues(alpha: 0.03),
+      blurRadius: 4,
+      offset: const Offset(0, 1),
+    ),
+  ];
+
+  /// 重阴影（模态框、弹窗）
+  static List<BoxShadow> shadowL = [
+    BoxShadow(
+      color: Colors.black.withValues(alpha: 0.10),
+      blurRadius: 32,
+      offset: const Offset(0, 8),
+    ),
+    BoxShadow(
+      color: Colors.black.withValues(alpha: 0.05),
+      blurRadius: 8,
+      offset: const Offset(0, 2),
+    ),
+  ];
+
+  /// 超重阴影（全屏覆盖层）
+  static List<BoxShadow> shadowXL = [
+    BoxShadow(
+      color: Colors.black.withValues(alpha: 0.15),
+      blurRadius: 48,
+      offset: const Offset(0, 16),
+    ),
+  ];
+
+  /// 强调色发光阴影（FAB、主按钮）
+  static List<BoxShadow> shadowAccent = [
+    BoxShadow(
+      color: accentPrimary.withValues(alpha: 0.25),
+      blurRadius: 16,
       offset: const Offset(0, 4),
     ),
   ];
 
-  static List<BoxShadow> shadowL = [
-    BoxShadow(
-      color: Colors.black.withValues(alpha: 0.12),
-      blurRadius: 20,
-      offset: const Offset(0, 6),
-    ),
-  ];
+  // =====================================================
+  // 渐变系统
+  // =====================================================
+
+  /// 主渐变（科技蓝到靛蓝）
+  static const LinearGradient gradientPrimary = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF3B82F6), Color(0xFF6366F1)],
+  );
+
+  /// 表面渐变（深色主题微层次）
+  static const LinearGradient gradientSurfaceDark = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFF1C1E2A), Color(0xFF161822)],
+  );
+
+  /// 强调渐变（紫粉）
+  static const LinearGradient gradientAccent = LinearGradient(
+    colors: [Color(0xFF8B5CF6), Color(0xFFEC4899)],
+  );
 
   // =====================================================
   // 浅色主题
@@ -188,7 +270,7 @@ class AppTheme {
       useMaterial3: true,
       brightness: Brightness.light,
       colorScheme: const ColorScheme.light(
-        primary: _primaryColor,
+        primary: accentPrimary,
         secondary: _accentColor,
         surface: _lightSurface,
         error: _errorColor,
@@ -196,11 +278,11 @@ class AppTheme {
         onSecondary: Colors.white,
         onSurface: Color(0xFF1A1A1A),
         onError: Colors.white,
-        // 得物风：surfaceContainerHighest 用极浅的灰
-        surfaceContainerHighest: Color(0xFFF2F2F2),
-        surfaceContainerHigh: Color(0xFFF7F7F7),
-        outlineVariant: Color(0xFFEAEAEA),
-        onSurfaceVariant: Color(0xFF6B6B6B),
+        surfaceContainerHighest: Color(0xFFF0F2F5),
+        surfaceContainerHigh: Color(0xFFF5F6F8),
+        surfaceContainerLow: Color(0xFFFAFBFC),
+        outlineVariant: _lightBorder,
+        onSurfaceVariant: Color(0xFF6B7280),
       ),
       scaffoldBackgroundColor: _lightBg,
       appBarTheme: const AppBarTheme(
@@ -212,7 +294,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
           color: Color(0xFF1A1A1A),
-          fontSize: 16,
+          fontSize: 17,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.2,
         ),
@@ -221,10 +303,46 @@ class AppTheme {
         color: _lightCard,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(radiusM),
-          side: const BorderSide(color: _lightBorder, width: 1),
+          borderRadius: BorderRadius.circular(radiusL),
+          side: const BorderSide(color: _lightBorder, width: 0.5),
         ),
         margin: const EdgeInsets.all(spacingS),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: _lightSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusXL),
+        ),
+        titleTextStyle: const TextStyle(
+          color: Color(0xFF1A1A1A),
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.2,
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: _lightSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(radiusXL),
+          ),
+        ),
+        showDragHandle: true,
+        dragHandleColor: Color(0xFFD1D5DB),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: const Color(0xFF1A1A1A),
+        contentTextStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusM),
+        ),
+        behavior: SnackBarBehavior.floating,
+        elevation: 0,
       ),
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(
@@ -237,7 +355,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusM),
-          borderSide: const BorderSide(color: Color(0xFF333333), width: 1.5),
+          borderSide: const BorderSide(color: accentPrimary, width: 1.5),
         ),
         filled: true,
         fillColor: _lightSurface,
@@ -246,13 +364,13 @@ class AppTheme {
           vertical: spacingM,
         ),
         hintStyle: const TextStyle(
-          color: Color(0xFFBBBBBB),
+          color: Color(0xFFB0B5BF),
           fontSize: 14,
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: _primaryColor,
+          backgroundColor: accentPrimary,
           foregroundColor: Colors.white,
           elevation: 0,
           padding: const EdgeInsets.symmetric(
@@ -269,9 +387,23 @@ class AppTheme {
           ),
         ),
       ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: accentPrimary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(
+            horizontal: spacingXL,
+            vertical: spacingM,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusM),
+          ),
+        ),
+      ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: _primaryColor,
+          foregroundColor: accentPrimary,
           padding: const EdgeInsets.symmetric(
             horizontal: spacingL,
             vertical: spacingS,
@@ -287,8 +419,8 @@ class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: _primaryColor,
-          side: const BorderSide(color: _lightBorder, width: 1.5),
+          foregroundColor: const Color(0xFF1A1A1A),
+          side: const BorderSide(color: _lightBorder, width: 1),
           padding: const EdgeInsets.symmetric(
             horizontal: spacingXL,
             vertical: spacingM,
@@ -303,7 +435,7 @@ class AppTheme {
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: _primaryColor,
+        backgroundColor: accentPrimary,
         foregroundColor: Colors.white,
         elevation: 0,
         highlightElevation: 2,
@@ -313,7 +445,7 @@ class AppTheme {
       ),
       dividerTheme: const DividerThemeData(
         color: _lightBorder,
-        thickness: 1,
+        thickness: 0.5,
         space: spacingL,
       ),
       listTileTheme: ListTileThemeData(
@@ -326,19 +458,19 @@ class AppTheme {
         ),
       ),
       iconTheme: const IconThemeData(
-        color: Color(0xFF555555),
+        color: Color(0xFF6B7280),
         size: 20,
       ),
       textTheme: _buildTextTheme(
         primary: const Color(0xFF1A1A1A),
-        secondary: const Color(0xFF6B6B6B),
-        muted: const Color(0xFFAAAAAA),
+        secondary: const Color(0xFF6B7280),
+        muted: const Color(0xFF9CA3AF),
       ),
     );
   }
 
   // =====================================================
-  // 深色主题 - 得物深色「冷淡」风
+  // 深色主题 - 克制科技风
   // =====================================================
 
   static ThemeData get darkTheme {
@@ -346,18 +478,19 @@ class AppTheme {
       useMaterial3: true,
       brightness: Brightness.dark,
       colorScheme: const ColorScheme.dark(
-        primary: Color(0xFFE8E8E8),    // 深色模式主色：浅灰白（而非蓝色）
-        secondary: Color(0xFF888888),
+        primary: accentPrimary,
+        secondary: Color(0xFF8B8FA3),
         surface: _darkSurface,
         error: _errorColor,
-        onPrimary: Color(0xFF111111),
+        onPrimary: Colors.white,
         onSecondary: Colors.white,
         onSurface: _darkTextPrimary,
         onError: Colors.white,
-        surfaceContainerHighest: Color(0xFF222222),
-        surfaceContainerHigh: Color(0xFF1C1C1C),
-        outlineVariant: Color(0xFF2A2A2A),
-        onSurfaceVariant: Color(0xFF888888),
+        surfaceContainerHighest: _darkCard,
+        surfaceContainerHigh: Color(0xFF1A1E2A),
+        surfaceContainerLow: Color(0xFF121520),
+        outlineVariant: _darkBorder,
+        onSurfaceVariant: _darkTextSecondary,
       ),
       scaffoldBackgroundColor: _darkBg,
       appBarTheme: const AppBarTheme(
@@ -369,7 +502,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
           color: _darkTextPrimary,
-          fontSize: 16,
+          fontSize: 17,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.2,
         ),
@@ -378,23 +511,61 @@ class AppTheme {
         color: _darkCard,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(radiusM),
-          side: const BorderSide(color: _darkBorder, width: 1),
+          borderRadius: BorderRadius.circular(radiusL),
+          side: BorderSide(color: _darkBorder.withValues(alpha: 0.5), width: 0.5),
         ),
         margin: const EdgeInsets.all(spacingS),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: _darkCard,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusXL),
+          side: BorderSide(color: _darkBorder.withValues(alpha: 0.3), width: 0.5),
+        ),
+        titleTextStyle: const TextStyle(
+          color: _darkTextPrimary,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.2,
+        ),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: _darkCard,
+        elevation: 0,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(radiusXL),
+          ),
+        ),
+        showDragHandle: true,
+        dragHandleColor: _darkTextMuted,
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: _darkCard,
+        contentTextStyle: const TextStyle(
+          color: _darkTextPrimary,
+          fontSize: 14,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusM),
+          side: BorderSide(color: _darkBorder.withValues(alpha: 0.5), width: 0.5),
+        ),
+        behavior: SnackBarBehavior.floating,
+        elevation: 0,
       ),
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusM),
-          borderSide: const BorderSide(color: _darkBorder),
+          borderSide: BorderSide(color: _darkBorder.withValues(alpha: 0.8)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusM),
-          borderSide: const BorderSide(color: _darkBorder),
+          borderSide: BorderSide(color: _darkBorder.withValues(alpha: 0.8)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusM),
-          borderSide: const BorderSide(color: Color(0xFF555555), width: 1.5),
+          borderSide: const BorderSide(color: accentPrimary, width: 1.5),
         ),
         filled: true,
         fillColor: _darkSurface,
@@ -402,15 +573,15 @@ class AppTheme {
           horizontal: spacingL,
           vertical: spacingM,
         ),
-        hintStyle: const TextStyle(
+        hintStyle: TextStyle(
           color: _darkTextMuted,
           fontSize: 14,
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFE8E8E8),
-          foregroundColor: const Color(0xFF111111),
+          backgroundColor: accentPrimary,
+          foregroundColor: Colors.white,
           elevation: 0,
           padding: const EdgeInsets.symmetric(
             horizontal: spacingXL,
@@ -426,9 +597,23 @@ class AppTheme {
           ),
         ),
       ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: accentPrimary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(
+            horizontal: spacingXL,
+            vertical: spacingM,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusM),
+          ),
+        ),
+      ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: _darkTextPrimary,
+          foregroundColor: accentPrimary,
           padding: const EdgeInsets.symmetric(
             horizontal: spacingL,
             vertical: spacingS,
@@ -445,7 +630,7 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: _darkTextPrimary,
-          side: const BorderSide(color: _darkBorder, width: 1.5),
+          side: BorderSide(color: _darkBorder.withValues(alpha: 0.8), width: 1),
           padding: const EdgeInsets.symmetric(
             horizontal: spacingXL,
             vertical: spacingM,
@@ -460,17 +645,17 @@ class AppTheme {
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: const Color(0xFFE8E8E8),
-        foregroundColor: const Color(0xFF111111),
+        backgroundColor: accentPrimary,
+        foregroundColor: Colors.white,
         elevation: 0,
         highlightElevation: 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusL),
         ),
       ),
-      dividerTheme: const DividerThemeData(
-        color: _darkBorder,
-        thickness: 1,
+      dividerTheme: DividerThemeData(
+        color: _darkBorder.withValues(alpha: 0.5),
+        thickness: 0.5,
         space: spacingL,
       ),
       listTileTheme: ListTileThemeData(
@@ -484,7 +669,7 @@ class AppTheme {
         iconColor: _darkTextSecondary,
         textColor: _darkTextPrimary,
       ),
-      iconTheme: const IconThemeData(
+      iconTheme: IconThemeData(
         color: _darkTextSecondary,
         size: 20,
       ),
@@ -604,28 +789,21 @@ class AppTheme {
   // HELPER WIDGETS
   // =====================================================
 
-  /// Model avatar — 得物风：方形圆角，单色背景，简洁字母
+  /// Model avatar — 方形圆角，渐变背景，简洁字母
   static Widget buildModelAvatar({
     required String modelId,
     double size = 48,
   }) {
     final hash = modelId.hashCode;
-    // 得物风调色板：中性色为主，偶尔有低饱和度点缀
-    final bgColors = [
-      const Color(0xFF2A2A2A),
-      const Color(0xFF1E2A2A),
-      const Color(0xFF2A1E2A),
-      const Color(0xFF2A2A1E),
-      const Color(0xFF1E1E2A),
+    final gradients = [
+      [const Color(0xFF3B82F6), const Color(0xFF6366F1)], // 蓝-靛
+      [const Color(0xFF8B5CF6), const Color(0xFFEC4899)], // 紫-粉
+      [const Color(0xFF22C55E), const Color(0xFF14B8A6)], // 绿-青
+      [const Color(0xFFF59E0B), const Color(0xFFF97316)], // 黄-橙
+      [const Color(0xFF06B6D4), const Color(0xFF3B82F6)], // 天蓝-蓝
+      [const Color(0xFFEF4444), const Color(0xFFF43F5E)], // 红-玫红
     ];
-    final textColors = [
-      const Color(0xFFAAAAAA),
-      const Color(0xFF7EC8A8),
-      const Color(0xFFB89FD4),
-      const Color(0xFFD4C87A),
-      const Color(0xFF8AB4D4),
-    ];
-    final idx = hash.abs() % bgColors.length;
+    final idx = hash.abs() % gradients.length;
 
     final initials = modelId
         .split(RegExp(r'[-_/]'))
@@ -637,18 +815,18 @@ class AppTheme {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: bgColors[idx],
-        borderRadius: BorderRadius.circular(size * 0.25),
-        border: Border.all(
-          color: textColors[idx].withValues(alpha: 0.2),
-          width: 1,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: gradients[idx],
         ),
+        borderRadius: BorderRadius.circular(size * 0.28),
       ),
       child: Center(
         child: Text(
           initials.isEmpty ? 'AI' : initials,
           style: TextStyle(
-            color: textColors[idx],
+            color: Colors.white,
             fontSize: size / 2.8,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.5,
@@ -669,11 +847,14 @@ class AppTheme {
       decoration: BoxDecoration(
         color: isActive ? _successColor : _darkTextMuted,
         shape: BoxShape.circle,
+        boxShadow: isActive
+            ? [BoxShadow(color: _successColor.withValues(alpha: 0.4), blurRadius: 4)]
+            : null,
       ),
     );
   }
 
-  /// Nav item（侧边栏）
+  /// Nav item（侧边栏）— 支持主题自适应
   static Widget buildNavItem({
     required IconData icon,
     required String label,
@@ -685,25 +866,27 @@ class AppTheme {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(radiusM),
-        child: Container(
+        hoverColor: _darkHover,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(
             horizontal: spacingL,
             vertical: spacingM,
           ),
           decoration: BoxDecoration(
-            color: isSelected
-                ? _darkHover
-                : Colors.transparent,
+            color: isSelected ? _darkActive : Colors.transparent,
             borderRadius: BorderRadius.circular(radiusM),
+            border: isSelected
+                ? Border.all(color: accentPrimary.withValues(alpha: 0.15), width: 0.5)
+                : null,
           ),
           child: Row(
             children: [
               Icon(
                 icon,
                 size: 18,
-                color: isSelected
-                    ? _darkTextPrimary
-                    : _darkTextSecondary,
+                color: isSelected ? accentPrimary : _darkTextSecondary,
               ),
               const SizedBox(width: spacingM),
               Text(
@@ -711,9 +894,7 @@ class AppTheme {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  color: isSelected
-                      ? _darkTextPrimary
-                      : _darkTextSecondary,
+                  color: isSelected ? _darkTextPrimary : _darkTextSecondary,
                   letterSpacing: 0.1,
                 ),
               ),
@@ -734,7 +915,7 @@ class AppTheme {
       decoration: BoxDecoration(
         color: _darkCard,
         borderRadius: BorderRadius.circular(radiusM),
-        border: Border.all(color: _darkBorder),
+        border: Border.all(color: _darkBorder.withValues(alpha: 0.5)),
       ),
       child: Row(
         children: [
@@ -745,7 +926,7 @@ class AppTheme {
                 vertical: spacingXS,
               ),
               decoration: BoxDecoration(
-                color: _darkBorder,
+                color: accentPrimary.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(radiusS),
               ),
               child: Text(
@@ -753,7 +934,7 @@ class AppTheme {
                 style: const TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: _darkTextSecondary,
+                  color: accentPrimary,
                   letterSpacing: 0.5,
                 ),
               ),
@@ -774,5 +955,64 @@ class AppTheme {
         ],
       ),
     );
+  }
+
+  // =====================================================
+  // 装饰工具方法
+  // =====================================================
+
+  /// 设置页面图标容器（带强调色背景）
+  static BoxDecoration settingsIconDecoration(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return BoxDecoration(
+      color: accentPrimary.withValues(alpha: isDark ? 0.15 : 0.1),
+      borderRadius: BorderRadius.circular(radiusS),
+    );
+  }
+
+  /// 玻璃态卡片装饰（深色主题）
+  static BoxDecoration glassCardDecoration({
+    required bool isDark,
+    double blur = 10,
+  }) {
+    return BoxDecoration(
+      color: (isDark ? _darkCard : _lightCard).withValues(alpha: isDark ? 0.7 : 0.9),
+      borderRadius: BorderRadius.circular(radiusL),
+      border: Border.all(
+        color: (isDark ? _darkBorder : _lightBorder).withValues(alpha: 0.3),
+        width: 0.5,
+      ),
+    );
+  }
+
+  /// 获取当前主题下的强调色
+  static Color accent(BuildContext context) => accentPrimary;
+
+  /// 获取当前主题下的表面色
+  static Color surfaceColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? _darkSurface
+        : _lightSurface;
+  }
+
+  /// 获取当前主题下的卡片色
+  static Color cardColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? _darkCard
+        : _lightCard;
+  }
+
+  /// 获取当前主题下的边框色
+  static Color borderColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? _darkBorder
+        : _lightBorder;
+  }
+
+  /// 获取当前主题下的 Hover 色
+  static Color hoverColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? _darkHover
+        : _lightHover;
   }
 }

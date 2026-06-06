@@ -34,6 +34,7 @@ class Sessions extends Table {
   BoolColumn get enableCamera => boolean().withDefault(const Constant(false))(); // 摄像头
   BoolColumn get enableFileUpload => boolean().withDefault(const Constant(true))(); // 文件上传（默认开启）
   TextColumn get enabledKnowledgeBaseId => text().nullable()(); // 当前关联的知识库 ID
+  BoolColumn get isSpirit => boolean().withDefault(const Constant(false))(); // 名灵回响会话标记
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 

@@ -55,11 +55,9 @@ class AsrInputService {
   final ASRService? _fallbackAsrService;
 
   /// 是否使用系统语音识别（实时识别模式）
-  bool get _isSystemAsr {
-    final provider = _asrService.provider;
-    debugPrint('[AsrInputService] _isSystemAsr 检查: provider = $provider, 是否为 system: ${provider == ASRProvider.system}');
-    return provider == ASRProvider.system;
-  }
+  /// ★ 修复：移除 getter 内的 debugPrint，避免每 100ms 打印一次造成「死循环」假象
+  /// 此 getter 会在 _updateAmplitude 定时器中被频繁访问
+  bool get _isSystemAsr => _asrService.provider == ASRProvider.system;
 
   /// Sherpa 模式需要 WAV 格式（Sherpa 只支持 WAV/PCM 输入）
   /// 系统模式支持 AAC/m4a
@@ -484,8 +482,11 @@ class AsrInputService {
     final length = await file.length();
     debugPrint('[AsrInputService] 录音文件大小: $length bytes, path: $path');
     if (length < 1000) {
-      // 录音太短，可能是误触，忽略
-      debugPrint('[AsrInputService] 录音太短 ($length bytes)，忽略');
+      // ★ 修复：录音太短时不再静默忽略，给用户提示
+      // 之前：直接 return null，用户感受是「按了没反应」
+      // 现在：发送错误事件给用户
+      debugPrint('[AsrInputService] 录音太短 ($length bytes)');
+      _errorController.add('录音时间过短，请长按说话按钮再说一遍');
       _cleanupRecordingAsync();
       return null;
     }

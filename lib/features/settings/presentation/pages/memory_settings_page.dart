@@ -8,8 +8,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/storage/database_connection.dart';
+import '../../../../core/services/memory_palace_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../generated/app_localizations.dart';
+
+/// 记忆宫殿服务 Provider（用于清理共享/全局记忆）
+final memoryPalaceServiceProvider = Provider<MemoryPalaceService>((ref) {
+  return MemoryPalaceService();
+});
 
 // 记忆设置 Provider
 final memorySettingsProvider =
@@ -183,6 +189,16 @@ class _MemorySettingsPageState extends ConsumerState<MemorySettingsPage> {
             _SettingsSection(
               title: '数据管理',
               children: [
+                ListTile(
+                  leading: Icon(
+                    Icons.cleaning_services_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  title: const Text('清理共享/全局记忆'),
+                  subtitle: const Text(
+                      '仅删除 isGlobal=true 的共享记忆（脏数据清理），不影响当前会话的记忆'),
+                  onTap: () => _showClearGlobalMemoriesDialog(context, ref),
+                ),
                 ListTile(
                   leading: Icon(
                     Icons.delete_outline,
@@ -374,6 +390,42 @@ class _MemorySettingsPageState extends ConsumerState<MemorySettingsPage> {
             ).showSnackBar(const SnackBar(content: Text('已清除所有记忆和聊天记录')));
           }
         },
+      ),
+    );
+  }
+
+  /// 【修复 V72】清理"共享/全局"记忆（isGlobal=true 的脏数据）
+  ///
+  /// 一次轻量级确认，不带 5 秒倒计时（删除仅限 isGlobal 字段为 true 的少量行）
+  void _showClearGlobalMemoriesDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清理共享/全局记忆'),
+        content: const Text(
+          '此操作将删除所有 isGlobal=true 的共享记忆（属于脏数据），'
+          '不影响任何会话的会话级记忆。是否继续？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final deleted =
+                  await ref.read(memoryPalaceServiceProvider).clearGlobalMemories();
+              ref.invalidate(memoryStatsProvider);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('已清理 $deleted 条共享记忆')),
+                );
+              }
+            },
+            child: const Text('确认清理'),
+          ),
+        ],
       ),
     );
   }
