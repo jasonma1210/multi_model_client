@@ -417,11 +417,11 @@ class TTSService {
   /// [onProgress] 可选回调：(当前块序号, 总块数) → 可用于 UI 进度展示
   /// 返回是否正常播完（被打断返回 false）
   /// 
-  /// 【V3 流水线模式】边合成边播放：
-  /// - 先合成前 2-3 块后立即开始播放
-  /// - 后续块在播放期间并行合成
-  /// - 播放完一块后立即播放下一块（无缝衔接）
-  /// - 大幅降低首字播放延迟
+  /// 【V4 流式分句合成】边合成边播放：
+  /// - MiMo 模式：1-2句/100字细粒度分块，首块即播（等1块即开始播放）
+  /// - 其他模式：3句/200字分块，等2块后开始播放
+  /// - 播放第N块时，并行合成第N+1块（流水线无缝衔接）
+  /// - 大幅降低首字播放延迟（MiMo 短文本约2-5秒即可合成完成）
   Future<bool> speakLongText(
     String text, {
     void Function(int current, int total)? onProgress,
@@ -460,40 +460,38 @@ class TTSService {
       return true;
     }
 
-    // 2. 将短句合并成块（每块最多 3 句或 200 字，更细粒度以降低延迟）
-    final chunks = <String>[];
-    const chunkSentenceCount = 3; // 每块3句，2-3句即开始合成
-    const chunkMaxChars = 200;
-    for (var i = 0; i < sentences.length; i += chunkSentenceCount) {
-      final chunk = sentences.skip(i).take(chunkSentenceCount).join('');
-      if (chunk.length > chunkMaxChars) {
-        final trimmed = chunk.substring(0, chunkMaxChars);
-        final lastPunct = trimmed.lastIndexOf(RegExp(r'[，。、；：！……？]'));
-        final cutoff = lastPunct > 80 ? lastPunct + 1 : chunkMaxChars;
-        chunks.add(trimmed.substring(0, cutoff));
-      } else {
-        chunks.add(chunk);
-      }
-    }
-    debugPrint('[$_tag] speakLongText() 分块结果: ${chunks.length}块');
+    // ★ 2. 根据 TTS 提供商选择分块策略
+    // MiMo：细粒度分块（1-2句/100字），短文本合成快（2-5秒），首块即播
+    // 其他：粗粒度分块（3句/200字），等2块后播放
+    final isMiMo = _provider == TTSProvider.mimo;
+    final chunkSentenceCount = isMiMo ? 2 : 3;
+    final chunkMaxChars = isMiMo ? 100 : 200;
+    final preSynthCount = isMiMo ? 1 : 2; // MiMo: 只等1块即播；其他: 等2块
+    
+    debugPrint('[$_tag] speakLongText() 分块策略: provider=$_provider, isMiMo=$isMiMo, '
+        'chunkSentenceCount=$chunkSentenceCount, chunkMaxChars=$chunkMaxChars, preSynthCount=$preSynthCount');
+
+    // 3. 将短句合并成块
+    final chunks = _buildChunks(sentences, chunkSentenceCount, chunkMaxChars);
+    debugPrint('[$_tag] speakLongText() 分块结果: ${chunks.length}块, 各块字数: ${chunks.map((c) => c.length).toList()}');
 
     // 重置停止标志
     _stopRequested = false;
 
     // ============================
-    // V3 流水线模式：边合成边播放
+    // V4 流水线模式：边合成边播放
     // ============================
-    const preSynthCount = 2; // 先合成前2块再开始播放
-    final synthFutures = <Future<String>>[]; // 合成中的 Future
     final readyPaths = <String?>[]; // 已合成完成的路径（按序）
     final allTempFiles = <String>[]; // 所有临时文件（用于清理）
+    final synthCompleters = <int, Completer<String?>>{}; // 正在合成的块的 Completer
     
     // 启动前 N 块的合成
     final initialCount = chunks.length < preSynthCount ? chunks.length : preSynthCount;
     for (var i = 0; i < initialCount; i++) {
-      synthFutures.add(_synthChunk(chunks[i], i, chunks.length));
+      synthCompleters[i] = Completer<String?>();
+      _synthChunkAsync(chunks[i], i, chunks.length, synthCompleters[i]!, allTempFiles);
     }
-    int nextSynthIndex = initialCount; // 下一个需要启动合成的块索引
+    int nextSynthIndex = initialCount;
 
     // 等待前 N 块合成完成
     for (var i = 0; i < initialCount; i++) {
@@ -502,52 +500,66 @@ class TTSService {
         return false;
       }
       try {
-        final path = await synthFutures[i];
-        readyPaths.add(path.isNotEmpty ? path : null);
-        if (path.isNotEmpty) allTempFiles.add(path);
+        final path = await synthCompleters[i]!.future;
+        readyPaths.add(path);
+        if (path != null) allTempFiles.add(path);
         onProgress?.call(i + 1, chunks.length);
       } catch (e) {
         debugPrint('[$_tag] ❌ chunk[$i] 合成失败: $e');
         readyPaths.add(null);
       }
     }
-    synthFutures.clear();
 
     debugPrint('[$_tag] 前 $initialCount 块合成完成，开始流水线播放');
 
-    // 流水线播放：播放第 i 块时，同时合成第 i+preSynthCount 块
+    // 流水线播放：播放第 i 块时，同时启动第 i+preSynthCount 块的合成
     for (var i = 0; i < chunks.length; i++) {
       if (_stopRequested) {
         await _cleanupFiles(allTempFiles);
         return false;
       }
 
-      // 启动后续块的合成（如果还没启动）
+      // ★ 启动后续块的合成（提前 preSynthCount 块开始合成）
       final futureIndex = i + preSynthCount;
-      if (futureIndex < chunks.length && futureIndex >= nextSynthIndex) {
-        // 需要启动新的合成
-        final newFutures = <Future<String>>[];
-        for (var fi = nextSynthIndex; fi <= futureIndex && fi < chunks.length; fi++) {
-          newFutures.add(_synthChunk(chunks[fi], fi, chunks.length));
-        }
+      if (futureIndex < chunks.length && !synthCompleters.containsKey(futureIndex)) {
+        synthCompleters[futureIndex] = Completer<String?>();
+        _synthChunkAsync(chunks[futureIndex], futureIndex, chunks.length, 
+            synthCompleters[futureIndex]!, allTempFiles);
         nextSynthIndex = futureIndex + 1;
+      }
 
-        // 等待这些块合成完成
-        for (var fi = 0; fi < newFutures.length; fi++) {
-          final chunkIdx = futureIndex - newFutures.length + 1 + fi;
-          if (chunkIdx < readyPaths.length) continue; // 已经有了
+      // ★ 等待当前块合成完成（如果还没完成）
+      if (i >= readyPaths.length) {
+        if (synthCompleters.containsKey(i)) {
           try {
-            final path = await newFutures[fi];
-            // 确保 readyPaths 有足够空间
-            while (readyPaths.length <= chunkIdx) {
+            final path = await synthCompleters[i]!.future;
+            while (readyPaths.length <= i) {
               readyPaths.add(null);
             }
-            readyPaths[chunkIdx] = path.isNotEmpty ? path : null;
-            if (path.isNotEmpty) allTempFiles.add(path);
-            onProgress?.call(chunkIdx + 1, chunks.length);
+            readyPaths[i] = path;
+            if (path != null && !allTempFiles.contains(path)) allTempFiles.add(path);
+            onProgress?.call(i + 1, chunks.length);
           } catch (e) {
-            debugPrint('[$_tag] ❌ chunk[$chunkIdx] 合成失败: $e');
-            while (readyPaths.length <= chunkIdx) {
+            debugPrint('[$_tag] ❌ chunk[$i] 合成失败: $e');
+            while (readyPaths.length <= i) {
+              readyPaths.add(null);
+            }
+          }
+        } else {
+          // 还没启动合成，现在启动
+          synthCompleters[i] = Completer<String?>();
+          _synthChunkAsync(chunks[i], i, chunks.length, synthCompleters[i]!, allTempFiles);
+          try {
+            final path = await synthCompleters[i]!.future;
+            while (readyPaths.length <= i) {
+              readyPaths.add(null);
+            }
+            readyPaths[i] = path;
+            if (path != null && !allTempFiles.contains(path)) allTempFiles.add(path);
+            onProgress?.call(i + 1, chunks.length);
+          } catch (e) {
+            debugPrint('[$_tag] ❌ chunk[$i] 合成失败: $e');
+            while (readyPaths.length <= i) {
               readyPaths.add(null);
             }
           }
@@ -556,7 +568,7 @@ class TTSService {
 
       // 播放当前块
       if (i < readyPaths.length && readyPaths[i] != null) {
-        debugPrint('[$_tag] 播放 chunk[$i/${chunks.length}]');
+        debugPrint('[$_tag] 播放 chunk[$i/${chunks.length}] (${chunks[i].length}字)');
         try {
           await _playAudio(readyPaths[i]!);
         } catch (e) {
@@ -573,31 +585,54 @@ class TTSService {
     return true;
   }
 
-  /// 合成单个文本块（带超时和错误处理）
-  Future<String> _synthChunk(String text, int index, int total) async {
-    const timeout = Duration(seconds: 20);
-    debugPrint('[$_tag] 合成 chunk[$index/$total]');
-    try {
-      final path = await synthesize(text).timeout(
-        timeout,
-        onTimeout: () {
-          debugPrint('[$_tag] ⚠️ chunk[$index] 合成超时, 跳过');
-          return '';
-        },
-      );
-      if (path.isNotEmpty) {
-        final file = File(path);
-        if (await file.exists() && await file.length() > 0) {
-          debugPrint('[$_tag] chunk[$index] 合成成功: $path');
-          return path;
-        }
+  /// 将短句合并成块
+  List<String> _buildChunks(List<String> sentences, int chunkSentenceCount, int chunkMaxChars) {
+    final chunks = <String>[];
+    for (var i = 0; i < sentences.length; i += chunkSentenceCount) {
+      final chunk = sentences.skip(i).take(chunkSentenceCount).join('');
+      if (chunk.length > chunkMaxChars) {
+        // 超长块在标点处截断
+        final trimmed = chunk.substring(0, chunkMaxChars);
+        final lastPunct = trimmed.lastIndexOf(RegExp(r'[，。、；：！……？,.]'));
+        final cutoff = lastPunct > chunkMaxChars ~/ 2 ? lastPunct + 1 : chunkMaxChars;
+        chunks.add(trimmed.substring(0, cutoff));
+      } else {
+        chunks.add(chunk);
       }
-      debugPrint('[$_tag] ⚠️ chunk[$index] 合成结果无效，跳过');
-      return '';
-    } catch (e) {
-      debugPrint('[$_tag] ❌ chunk[$index] 合成失败: $e');
-      return '';
     }
+    return chunks;
+  }
+
+  /// 异步合成单个文本块（通过 Completer 通知完成）
+  void _synthChunkAsync(String text, int index, int total, 
+      Completer<String?> completer, List<String> allTempFiles) {
+    // MiMo 短文本用15秒超时，其他用20秒
+    final timeout = _provider == TTSProvider.mimo 
+        ? const Duration(seconds: 15) 
+        : const Duration(seconds: 20);
+    debugPrint('[$_tag] 异步合成 chunk[$index/$total] (${text.length}字)');
+    
+    () async {
+      try {
+        String path = await synthesize(text).timeout(timeout, onTimeout: () {
+          debugPrint('[$_tag] ⚠️ chunk[$index] 合成超时(${timeout.inSeconds}s), 跳过');
+          return '';
+        });
+        if (path.isNotEmpty) {
+          final file = File(path);
+          if (await file.exists() && await file.length() > 0) {
+            debugPrint('[$_tag] chunk[$index] 合成成功: $path');
+            if (!completer.isCompleted) completer.complete(path);
+            return;
+          }
+        }
+        debugPrint('[$_tag] ⚠️ chunk[$index] 合成结果无效，跳过');
+        if (!completer.isCompleted) completer.complete(null);
+      } catch (e) {
+        debugPrint('[$_tag] ❌ chunk[$index] 合成失败: $e');
+        if (!completer.isCompleted) completer.complete(null);
+      }
+    }();
   }
 
   /// 清理临时音频文件
@@ -618,10 +653,40 @@ class TTSService {
     // 按句子结束标点分割（保留标点）
     // 支持中文标点：。！？；  和英文标点：.?!;  以及换行符 \n
     final parts = cleaned.split(RegExp(r'[。！？；.?!;\n]'));
-    return parts
+    final sentences = parts
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty && s.length > 1)
         .toList();
+    
+    // ★ MiMo 流式优化：对超长句子（>80字）按逗号二次分句
+    // 避免单个长句占用过多合成时间
+    if (_provider == TTSProvider.mimo) {
+      final refined = <String>[];
+      for (final s in sentences) {
+        if (s.length > 80) {
+          // 按逗号分句
+          final subParts = s.split(RegExp(r'[，,]'));
+          var buffer = '';
+          for (final sub in subParts) {
+            final trimmed = sub.trim();
+            if (trimmed.isEmpty) continue;
+            if (buffer.isNotEmpty) buffer += '，';
+            buffer += trimmed;
+            // 累积到40字以上就切分
+            if (buffer.length >= 40) {
+              refined.add(buffer);
+              buffer = '';
+            }
+          }
+          if (buffer.isNotEmpty) refined.add(buffer);
+        } else {
+          refined.add(s);
+        }
+      }
+      return refined;
+    }
+    
+    return sentences;
   }
   
   /// 清洗 <think>...</think> 标签内容
@@ -1642,9 +1707,16 @@ class TTSService {
     
     try {
       final dio = Dio();
-      // ★ 添加连接超时和接收超时，防止网络卡死
+      // ★ 动态超时：短文本（≤100字）用15秒，中等文本用30秒，长文本用60秒
+      // 流式分句合成时每块约50-100字，15秒足够
+      final receiveTimeout = text.length <= 100 
+          ? const Duration(seconds: 15) 
+          : text.length <= 300 
+              ? const Duration(seconds: 30) 
+              : const Duration(seconds: 60);
       dio.options.connectTimeout = const Duration(seconds: 10);
-      dio.options.receiveTimeout = const Duration(seconds: 30);
+      dio.options.receiveTimeout = receiveTimeout;
+      debugPrint('[$_tag] MiMo TTS 超时设置: receiveTimeout=${receiveTimeout.inSeconds}s (textLen=${text.length})');
       
       // 构建请求数据
       final requestData = TTSStyleParser.buildMiMoRequest(
