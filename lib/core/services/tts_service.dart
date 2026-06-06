@@ -221,10 +221,6 @@ class TTSService {
   final int _speakerId;
   /// ★ 系统 TTS 音色 ID（SharedPreferences 中的 tts_voice_id）
   final String? _systemVoiceId;
-  /// ★ MiMo 合成超时阈值（秒），超时后降级到 Edge TTS / Sherpa
-  static const int _mimoTimeoutSeconds = 15;
-  /// ★ 上次 MiMo 合成是否超时（用于智能降级判断）
-  static bool _lastMiMoTimedOut = false;
   static const String _tag = 'TTSService';
   static const String _defaultMiMoBaseUrl = 'https://api.xiaomimimo.com/v1';
 
@@ -324,63 +320,37 @@ class TTSService {
   }
 
   /// 内部合成方法（不含超时包装）
+  /// ★ 切换权完全交给用户，不自动降级
   Future<String> _synthesizeInternal(String text, {String? outputPath}) async {
-    String path;
-    switch (_provider) {
-      case TTSProvider.openai:
-        debugPrint('[$_tag] synthesize() → _synthesizeWithOpenAI');
-        path = await _synthesizeWithOpenAI(text, outputPath: outputPath);
-        break;
-      case TTSProvider.mimo:
-        debugPrint('[$_tag] synthesize() → _synthesizeWithMiMo');
-        path = await _synthesizeWithMiMo(text, outputPath: outputPath);
-        break;
-      case TTSProvider.edge:
-        debugPrint('[$_tag] synthesize() → _synthesizeWithEdge');
-        path = await _synthesizeWithEdge(text, outputPath: outputPath);
-        break;
-      case TTSProvider.sherpa:
-        debugPrint('[$_tag] synthesize() → _synthesizeWithSherpa');
-        path = await _synthesizeWithSherpa(text, outputPath: outputPath);
-        break;
-      case TTSProvider.system:
-        debugPrint('[$_tag] synthesize() → _synthesizeWithSystem');
-        path = await _synthesizeWithSystem(text, outputPath: outputPath);
-        break;
+    try {
+      String path;
+      switch (_provider) {
+        case TTSProvider.openai:
+          debugPrint('[$_tag] synthesize() → _synthesizeWithOpenAI');
+          path = await _synthesizeWithOpenAI(text, outputPath: outputPath);
+          break;
+        case TTSProvider.mimo:
+          debugPrint('[$_tag] synthesize() → _synthesizeWithMiMo');
+          path = await _synthesizeWithMiMo(text, outputPath: outputPath);
+          break;
+        case TTSProvider.edge:
+          debugPrint('[$_tag] synthesize() → _synthesizeWithEdge');
+          path = await _synthesizeWithEdge(text, outputPath: outputPath);
+          break;
+        case TTSProvider.sherpa:
+          debugPrint('[$_tag] synthesize() → _synthesizeWithSherpa');
+          path = await _synthesizeWithSherpa(text, outputPath: outputPath);
+          break;
+        case TTSProvider.system:
+          debugPrint('[$_tag] synthesize() → _synthesizeWithSystem');
+          path = await _synthesizeWithSystem(text, outputPath: outputPath);
+          break;
       }
       debugPrint('[$_tag] synthesize() ✅ 完成: path=$path');
       return path;
     } catch (e, stack) {
       debugPrint('[$_tag] synthesize() ❌ 异常: $e');
       debugPrint('[$_tag] synthesize() 堆栈: $stack');
-      // Edge TTS 失败时降级到 Sherpa
-      if (_provider == TTSProvider.edge) {
-        debugPrint('[$_tag] Edge TTS 合成失败，降级到 Sherpa: $e');
-        try {
-          return await _synthesizeWithSherpa(text, outputPath: outputPath);
-        } catch (_) {
-          return await _synthesizeWithSystem(text, outputPath: outputPath);
-        }
-      }
-      // Sherpa 失败时（如移动端 OOM 保护），自动降级到系统 TTS
-      if (_provider == TTSProvider.sherpa) {
-        debugPrint('[$_tag] Sherpa 合成失败，自动降级到系统 TTS: $e');
-        return await _synthesizeWithSystem(text, outputPath: outputPath);
-      }
-      // MiMo 失败时降级到 Edge TTS → Sherpa → 系统 TTS
-      if (_provider == TTSProvider.mimo) {
-        debugPrint('[$_tag] MiMo 合成失败，降级到 Edge TTS: $e');
-        try {
-          return await _synthesizeWithEdge(text, outputPath: outputPath);
-        } catch (edgeError) {
-          debugPrint('[$_tag] Edge TTS 也失败，降级到 Sherpa: $edgeError');
-          try {
-            return await _synthesizeWithSherpa(text, outputPath: outputPath);
-          } catch (_) {
-            return await _synthesizeWithSystem(text, outputPath: outputPath);
-          }
-        }
-      }
       rethrow;
     }
   }
