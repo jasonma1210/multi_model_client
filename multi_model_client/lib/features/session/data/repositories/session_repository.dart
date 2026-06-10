@@ -15,6 +15,7 @@ class SessionRepository {
     String? folderId,
     String? systemPrompt,
     Map<String, dynamic>? inferenceParams,
+    bool isSpirit = false,
   }) async {
     final id = _uuid.v4();
     final now = DateTime.now();
@@ -26,6 +27,7 @@ class SessionRepository {
       folderId: Value(folderId),
       systemPrompt: Value(systemPrompt),
       inferenceParams: Value(inferenceParams?.toString()),
+      isSpirit: Value(isSpirit),
       createdAt: Value(now),
       updatedAt: Value(now),
     );
@@ -145,5 +147,25 @@ class SessionRepository {
     );
 
     await _db.updateSession(updates);
+  }
+
+  /// 查找名灵会话（按 enabledSkill 匹配 spiritId）
+  /// 同一个名灵角色只会有一个会话
+  Future<Session?> findSpiritSession(String spiritId) async {
+    final all = await getAllSessions();
+    final skillId = 'spirit.$spiritId';
+    try {
+      return all.firstWhere(
+        (s) => s.isSpirit && s.enabledSkill == skillId,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 获取所有非名灵会话（首页列表使用）
+  Future<List<Session>> getNonSpiritSessions() async {
+    final all = await getAllSessions();
+    return all.where((s) => !s.isSpirit).toList();
   }
 }

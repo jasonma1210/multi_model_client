@@ -1895,6 +1895,43 @@ lib/
 
 ---
 
+## 会话记录
+
+### 2026-06-04 v0.35.0-beta 发布会话
+
+**会话背景**：完成 v0.35.0-beta 版本的发布流程，包括代码同步、构建打包和 GitHub Release 发布。
+
+**会话主要目的**：将代码同步到 Git 仓库，打包 DMG/APK 版本 0.35.0-beta，发布到 GitHub Release，更新中英文 README 版本信息。
+
+**完成的主要任务**：
+1. 更新 README_EN.md 英文版本历史（新增 v0.35.0-beta 详细更新日志）
+2. Git 提交并推送到 GitHub 远程仓库（处理了 .workbuddy 敏感信息问题）
+3. 使用 filter-branch 从 git 历史中移除包含 secret 的 .workbuddy 目录
+4. 将 .workbuddy 添加到 .gitignore
+5. 构建 macOS Release 版本并打包 DMG（91MB）
+6. 构建 Android APK Release 版本（131MB）
+7. 创建 GitHub Release v0.35.0-beta 并上传 DMG 和 APK 产物
+
+**技术栈**：Flutter/Dart、GitHub CLI (gh)、Git、hdiutil (DMG 打包)、Gradle (Android 构建)
+
+**关键决策和解决方案**：
+- GitHub Push Protection 检测到 .workbuddy/memory/MEMORY.md 中包含 Personal Access Token，阻止推送
+- 解决方案：使用 `git filter-branch` 从历史中移除 .workbuddy 目录，并添加到 .gitignore
+- Gitee 远程仓库不可用（404），改用 GitHub 远程推送
+- SSH key 认证失败，使用 `gh auth setup-git` 配置 HTTPS + token 认证成功推送
+- 使用 `--notes-file` 方式创建 Release（避免 HEREDOC 在终端中的编码问题）
+
+**主要使用的工具**：git、gh CLI、flutter build、hdiutil
+
+**修改的文件**：
+- `README_EN.md`：新增 v0.35.0-beta 英文版本历史（新功能/改进/修复）
+- `.gitignore`：新增 .workbuddy/ 忽略规则
+- 从 git 追踪中移除 .workbuddy/ 目录（34个文件）
+
+**Release 地址**：https://github.com/jasonma1210/multi_model_client/releases/tag/v0.35.0-beta
+
+---
+
 <div align="center">
 
 **⭐ 如果这个项目对你有帮助，请给个 Star 支持一下！⭐**
@@ -1963,3 +2000,1417 @@ lib/
 | `dialogue_engine.dart` | 新增 `_generateFullSummary` 和 `_generateRuleBasedFullSummary` 方法 | 支持将所有消息压缩为一条总结描述 |
 | `dialogue_engine.dart` | 修复 `_buildStructuredMessagesWithContent` 中 system 消息被跳过 | 压缩总结是 system 角色，被跳过后后续对话不带总结描述 |
 | `dialogue_engine.dart` | 修复 `_buildStructuredMessages` 中同样的问题 | 同上，确保两个消息构建方法都能正确处理压缩总结 |
+
+---
+
+## 会话记录 - 2026-06-05：名灵回响功能实现
+
+### 会话背景
+在 MJ Nexus 项目中新增"名灵回响"功能模块，实现通过大模型+网络搜索蒸馏公众人物思想风格，创建可交互的数字分身。
+
+### 会话的主要目的
+实现"名灵回响"功能，包括：人物蒸馏、黑名单机制、语音克隆绑定、角色交互对话。
+
+### 完成的主要任务
+1. 创建 SpiritPersona 数据模型（名灵角色状态、蒸馏进度）
+2. 创建 NameBlacklistService 黑名单+昵称映射服务（Release/Debug 模式区分）
+3. 创建 SpiritDistillationService 蒸馏服务（搜索→LLM提取→声音搜索→克隆→完成）
+4. 创建 SpiritRepository 持久化存储
+5. 创建 SpiritExpertSkill 专家技能（动态注册到 SkillDispatcher）
+6. 创建 SpiritCreatePage 创建名灵页面（含黑名单验证、模型选择、进度显示）
+7. 创建 SpiritGalleryPage 名灵画廊页面（角色列表、状态展示、删除管理）
+8. 创建 SpiritChatPage 名灵对话页面（自动创建会话、绑定技能和音色）
+9. 添加路由配置（/spirit、/spirit/create、/spirit/chat/:spiritId）
+10. 在侧边栏添加"名灵回响"导航入口
+
+### 会话中主要使用的技术栈
+- Flutter + Dart
+- Riverpod 状态管理
+- GoRouter 路由
+- SharedPreferences 持久化
+- DuckDuckGo API 网络搜索
+- MiMo API 语音克隆
+- ExpertSkill 技能系统
+
+### 关键决策和解决方案
+1. **黑名单机制**：Release 版本内置黑名单（19条），Debug/Test 版本空黑名单可自定义配置；政治人物完全禁止，其他人物用昵称替代
+2. **蒸馏流程**：异步执行，通过 StreamController 推送进度通知，不阻塞 UI
+3. **音色绑定**：默认使用 MiMo 音色，有克隆音色时自动设置 TTS 配置
+4. **技能注册**：名灵技能继承 ExpertSkill，通过 SpiritSkillManager 动态注册/注销到 SkillDispatcher
+5. **降级策略**：LLM 蒸馏失败时使用基础 prompt 模板；声音搜索失败时使用默认 MiMo 音色
+
+### 会话中主要使用的工具
+- Read / Edit / Write（文件读写）
+- Grep / SearchCodebase（代码搜索）
+- RunCommand（flutter analyze 编译检查）
+- TodoWrite（任务管理）
+
+### 修改了哪些文件
+
+#### 新增文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `lib/features/spirit/domain/spirit_persona.dart` | 名灵角色数据模型，包含 SpiritPersona、SpiritStatus、SpiritDistillProgress、SpiritDistillPhase | 核心数据模型，定义名灵角色状态和蒸馏进度 |
+| `lib/features/spirit/domain/name_blacklist_service.dart` | 黑名单与昵称映射服务，支持 Release/Debug 模式区分 | 实现真名过滤和昵称替代机制 |
+| `lib/features/spirit/domain/spirit_distillation_service.dart` | 蒸馏服务，包含搜索→LLM提取→声音搜索→克隆完整流程 | 核心业务逻辑，异步蒸馏人物特征 |
+| `lib/features/spirit/data/spirit_repository.dart` | 名灵角色持久化存储仓库 + Riverpod Providers | 角色数据持久化和状态管理 |
+| `lib/features/spirit/domain/spirit_skill.dart` | SpiritExpertSkill 专家技能 + SpiritSkillManager 管理器 | 将蒸馏角色动态注册为可调用的 ExpertSkill |
+| `lib/features/spirit/presentation/pages/spirit_create_page.dart` | 创建名灵页面，含昵称输入、领域选择、模型选择、蒸馏进度 | 用户创建名灵角色的交互界面 |
+| `lib/features/spirit/presentation/pages/spirit_gallery_page.dart` | 名灵画廊页面，展示已创建角色列表 | 用户查看和管理名灵角色 |
+| `lib/features/spirit/presentation/pages/spirit_chat_page.dart` | 名灵对话页面，自动创建会话并绑定技能和音色 | 与名灵角色进行对话交互 |
+
+#### 修改的已有文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `lib/core/router/app_router.dart` | 添加名灵回响路由（/spirit、/spirit/create、/spirit/chat/:spiritId）及对应页面 import | 支持名灵功能的页面导航 |
+| `lib/features/session/presentation/pages/session_list_page.dart` | 在侧边栏"灵感一瞬"入口后添加"名灵回响"导航入口 | 提供名灵功能的入口点 |
+
+---
+
+## 会话记录 - 2026-06-05：名灵回响语音对话与实时打断功能
+
+### 会话背景
+在已完成的"名灵回响"功能基础上，增加语音对话和实时打断功能，参考项目中已有的 RealtimeVoicePage 实现模式，为名灵角色提供沉浸式语音交互体验。
+
+### 会话的主要目的
+为名灵回响功能添加语音对话支持，包括：按住说话（Press-to-Talk）、ASR 语音识别、LLM 流式推理、TTS 语音合成（克隆音色）、实时打断、上滑取消录音。
+
+### 完成的主要任务
+1. 创建 SpiritVoiceChatPage 语音对话页面（参考 RealtimeVoicePage 完整实现）
+2. 重构 SpiritChatPage 为对话模式选择页面（语音对话 / 文字对话）
+3. 更新路由添加 `/spirit/voice-chat/:spiritId`
+4. 修改 SpiritGalleryPage 支持语音对话入口（卡片点击弹出模式选择、长按菜单添加语音对话选项）
+
+### 会话中主要使用的技术栈
+- Flutter + Dart
+- Riverpod 状态管理
+- GoRouter 路由
+- ASR 语音识别服务（Sherpa/OpenAI/阿里云/腾讯云）
+- TTS 语音合成服务（MiMo 克隆音色/Sherpa/OpenAI/系统）
+- AudioRecorder + AudioPlayer（录音与播放）
+- AnimationController（脉冲/涟漪动画）
+- GestureDetector（按住说话 + 上滑取消）
+
+### 关键决策和解决方案
+1. **语音对话独立页面**：创建 SpiritVoiceChatPage 而非复用 RealtimeVoicePage，因为名灵对话需要加载 SpiritPersona、注册 SpiritExpertSkill、使用克隆音色等特有逻辑
+2. **实时打断机制**：AI 说话时（_VoiceState.speaking），用户按住按钮立即调用 `_interruptTTS()` 停止音频播放，重置状态为 idle，实现无缝打断
+3. **克隆音色优先**：名灵角色有 clonedVoiceId 时强制使用 mimo + 克隆音色，确保语音输出与角色一致
+4. **模式选择设计**：SpiritChatPage 改为模式选择页面，提供语音对话和文字对话两个入口卡片；GalleryPage 点击角色也弹出模式选择底部菜单
+5. **状态机管理**：使用 _VoiceState 枚举（idle/recording/recognizing/thinking/speaking/error）管理完整的语音对话生命周期
+
+### 会话中主要使用的工具
+- Read（阅读 RealtimeVoicePage 参考实现）
+- Write（创建 SpiritVoiceChatPage）
+- Edit（修改 SpiritChatPage、SpiritGalleryPage、app_router.dart）
+- RunCommand（flutter analyze 编译检查）
+- TodoWrite（任务管理）
+
+### 修改了哪些文件
+
+#### 新增文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `lib/features/spirit/presentation/pages/spirit_voice_chat_page.dart` | 名灵语音对话页面，包含按住说话、ASR识别、LLM流式推理、TTS克隆音色播放、实时打断、上滑取消、脉冲涟漪动画 | 实现名灵角色的沉浸式语音对话交互 |
+
+#### 修改的已有文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `lib/features/spirit/presentation/pages/spirit_chat_page.dart` | 重构为对话模式选择页面，提供语音对话和文字对话两个入口卡片，移除自动跳转逻辑 | 用户需要选择对话模式（语音/文字）再进入对话 |
+| `lib/features/spirit/presentation/pages/spirit_gallery_page.dart` | 点击角色卡片弹出模式选择底部菜单（语音对话/文字对话），长按菜单添加语音对话选项 | 支持从画廊直接进入语音对话 |
+| `lib/core/router/app_router.dart` | 添加 `/spirit/voice-chat/:spiritId` 路由及 SpiritVoiceChatPage import | 支持语音对话页面导航 |
+
+## 会话记录 - 2026-06-05：搜索服务切换 Tavily 及模型选择优化
+
+### 会话背景
+名灵回响功能中 DuckDuckGo 搜索 API 在国内环境下经常失败，需要切换到更稳定的搜索服务；同时模型选择功能不够完善，需要支持从已配置的本地模型和远程 API 模型中选择。
+
+### 会话的主要目的
+1. 将蒸馏服务中的 DuckDuckGo 搜索替换为 Tavily API（支持首次配置 API Key）
+2. 模型选择改为下拉选择已配置的本地/API 模型
+3. 对话界面支持选择预设模型进行对话
+
+### 完成的主要任务
+1. 修改蒸馏服务：DuckDuckGo 替换为 Tavily（优先），DuckDuckGo 降级
+2. 添加 Tavily API Key 首次配置功能（SharedPreferences 持久化存储）
+3. 创建页面模型选择改为下拉选择（本地模型显示加载状态，远程模型显示协议类型）
+4. 对话页面添加模型选择下拉框，语音/文字对话均使用选中的模型
+5. 语音对话页面接收 modelId 参数，创建会话时使用选中模型
+6. 画廊页面语音对话入口统一走对话页面（含模型选择）
+
+### 会话中主要使用的技术栈
+- Flutter + Dart
+- Riverpod 状态管理
+- Tavily Search API（免费 AI 搜索）
+- SharedPreferences（API Key 持久化）
+- ModelProvider + ModelEntry（模型列表状态管理）
+- GoRouter 路由参数传递
+
+### 关键决策和解决方案
+1. **Tavily 优先 + DuckDuckGo 降级**：搜索优先使用 Tavily API（需要 API Key），失败时自动降级到 DuckDuckGo（无需 Key 但结果有限）
+2. **API Key 首次配置**：在创建页面添加可折叠的 Tavily 配置区域，首次使用时自动展开提示配置；未配置时点击蒸馏按钮弹出确认对话框
+3. **模型下拉分组显示**：本地模型显示电脑图标+加载状态标签，远程模型显示云图标+协议类型标签（OPENAI/ANTHROPIC/OLLAMA）
+4. **模型选择传递**：SpiritChatPage 选中的模型通过 URL query 参数传递给 SpiritVoiceChatPage，文字对话通过 SessionRepository.createSession 的 modelId 参数传递
+5. **统一入口**：画廊页面的语音对话入口改为跳转到对话页面（含模型选择），避免用户跳过模型选择
+
+### 会话中主要使用的工具
+- Read（阅读蒸馏服务、创建页面、对话页面、模型提供者代码）
+- Write（重写蒸馏服务和创建页面）
+- Edit（修改对话页面、画廊页面、路由配置、语音对话页面）
+- RunCommand（flutter analyze 编译检查）
+- TodoWrite（任务管理）
+
+### 修改了哪些文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `lib/features/spirit/domain/spirit_distillation_service.dart` | 搜索从 DuckDuckGo 替换为 Tavily（优先），添加 API Key 管理（getTavilyApiKey/setTavilyApiKey/isTavilyConfigured），DuckDuckGo 保留为降级方案 | DuckDuckGo 搜索在国内经常失败，Tavily 更稳定且免费 |
+| `lib/features/spirit/presentation/pages/spirit_create_page.dart` | 添加 Tavily API Key 配置区域（可折叠），模型选择改为下拉选择（本地模型+远程模型分组显示，显示加载状态和协议类型），未配置 API Key 时蒸馏前弹出确认对话框 | 支持首次配置 API Key，模型选择更直观 |
+| `lib/features/spirit/presentation/pages/spirit_chat_page.dart` | 添加对话模型选择下拉框（本地模型+远程模型分组），语音/文字对话均使用选中的模型，未选择模型时禁用对话按钮，语音对话通过 URL query 参数传递 modelId | 用户需要在对话前选择模型 |
+| `lib/features/spirit/presentation/pages/spirit_voice_chat_page.dart` | 添加 modelId 参数，创建会话时使用传入的 modelId | 接收从对话页面选择的模型 |
+| `lib/features/spirit/presentation/pages/spirit_gallery_page.dart` | 语音对话入口改为跳转到对话页面（含模型选择），移除直接跳转到 voice-chat 的逻辑 | 统一入口，确保用户可以选择模型 |
+| `lib/core/router/app_router.dart` | voice-chat 路由添加 modelId query 参数解析，传递给 SpiritVoiceChatPage | 支持模型选择参数传递 |
+
+## 会话记录 - 2026-06-05：名灵回响会话隔离与记忆持久化
+
+### 会话背景
+名灵回响功能的会话与普通会话混在一起，每次进入语音对话都创建新会话导致历史记忆丢失，侧边栏导航顺序需要调整。
+
+### 会话的主要目的
+1. 名灵回响会话不出现在首页会话列表中
+2. 确认女娲 skill 集成情况
+3. 同一个名人只生成一个会话 sessionID
+4. 上下文记忆持久化，重新进入能看到之前的会话记录
+5. 侧边栏顺序调整
+
+### 完成的主要任务
+1. Session 表添加 `isSpirit` 布尔字段，区分名灵会话和普通会话
+2. 数据库迁移：ALTER TABLE sessions ADD COLUMN is_spirit
+3. SessionRepository 添加 `findSpiritSession` 和 `getNonSpiritSessions` 方法
+4. 首页会话列表过滤掉 isSpirit=true 的会话
+5. SpiritVoiceChatPage 查找已有会话而非每次新建，加载历史消息到语音界面
+6. SpiritChatPage 文字对话也复用已有会话
+7. 侧边栏顺序调整为：会话、灵感一瞬、名灵回响、模型、知识库、下载管理、设置
+
+### 会话中主要使用的技术栈
+- Flutter + Dart + Drift ORM
+- 数据库迁移（ALTER TABLE）
+- 会话去重（按 enabledSkill 匹配 spiritId）
+- 历史消息加载
+
+### 关键决策和解决方案
+1. **isSpirit 字段**：在 Session 表添加布尔字段标记名灵会话，首页过滤时不显示，避免修改复杂的查询逻辑
+2. **会话去重**：通过 `findSpiritSession(spiritId)` 按 `enabledSkill == 'spirit.{spiritId}'` 查找已有会话，确保同一个名灵角色只有一个会话
+3. **历史消息加载**：语音对话页面初始化时从数据库加载历史消息到 `_messages` 列表，用户可以看到之前的对话记录
+4. **女娲 skill**：确认项目中未集成女娲 skill，当前蒸馏功能使用 Tavily 搜索 + LLM 蒸馏实现
+
+### 会话中主要使用的工具
+- Read（阅读数据库表定义、会话仓库、语音对话页面代码）
+- Edit（修改数据库表、迁移脚本、会话仓库、首页列表、语音对话页面、侧边栏）
+- RunCommand（build_runner 生成代码、flutter analyze 检查）
+- TodoWrite（任务管理）
+
+### 修改了哪些文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `lib/core/storage/database.dart` | Sessions 表添加 `isSpirit` 布尔字段 | 区分名灵会话和普通会话 |
+| `lib/core/storage/database_connection.dart` | 添加 ALTER TABLE sessions ADD COLUMN is_spirit 迁移 | 确保旧数据库升级后包含新字段 |
+| `lib/core/storage/database.g.dart` | build_runner 自动重新生成 | 包含 isSpirit 字段的生成代码 |
+| `lib/features/session/data/repositories/session_repository.dart` | createSession 添加 isSpirit 参数，添加 findSpiritSession 和 getNonSpiritSessions 方法 | 支持名灵会话标记和查找 |
+| `lib/features/session/presentation/pages/session_list_page.dart` | _getSessions 过滤掉 isSpirit 会话，侧边栏顺序调整为：会话、灵感一瞬、名灵回响、模型、知识库、下载管理、设置 | 名灵会话不出现在首页，侧边栏顺序优化 |
+| `lib/features/spirit/presentation/pages/spirit_voice_chat_page.dart` | 初始化时查找已有会话而非新建，添加 _loadHistoryMessages 加载历史消息 | 同一个名灵只有一个会话，重新进入能看到之前的记录 |
+| `lib/features/spirit/presentation/pages/spirit_chat_page.dart` | 文字对话查找已有会话而非新建，标记 isSpirit=true | 同一个名灵只有一个会话 |
+
+## 会话记录 - 2026-06-05：集成女娲 skill 实现人物蒸馏
+
+### 会话背景
+用户要求集成女娲 skill (https://github.com/alchaincyf/nuwa-skill) 来实现人物信息蒸馏功能，替换原有的简单搜索+LLM蒸馏方案。
+
+### 会话的主要目的
+集成女娲 skill 的核心方法论到名灵回响的蒸馏服务中，提升蒸馏质量。
+
+### 完成的主要任务
+1. 研究女娲 skill 仓库结构，理解其 SKILL.md、extraction-framework.md、skill-template.md 核心文档
+2. 重写 SpiritDistillationService，集成女娲 skill 的六维度信息采集方法论
+3. 实现女娲三重验证框架提炼（跨域复现、生成力、排他性）
+4. 生成 SKILL.md 风格的 system prompt（包含心智模型、决策启发式、表达DNA、价值观、诚实边界）
+5. 更新 SpiritDistillPhase 枚举，新增 researchReview、buildingSkill、qualityCheck 阶段
+
+### 会话中主要使用的技术栈
+- Flutter + Dart
+- 女娲 skill 方法论（Agent Skills 协议）
+- Tavily API + DuckDuckGo 搜索
+- LLM 蒸馏（本地/远程模型）
+
+### 关键决策和解决方案
+1. **六维度搜索**：将女娲的6个并行Agent搜索适配为移动端的顺序搜索（6维度：著作、对话、表达、他者视角、决策、时间线）
+2. **三重验证**：在LLM蒸馏prompt中嵌入女娲的三重验证标准（跨域复现、生成力、排他性），确保提炼的是心智模型而非表面观点
+3. **SKILL.md 模板**：蒸馏输出采用女娲的SKILL.md模板格式，包含角色扮演规则、身份卡、心智模型、决策启发式、表达DNA、价值观与反模式、诚实边界
+4. **降级方案**：LLM不可用时生成基于女娲模板结构的fallback prompt
+
+### 会话中主要使用的工具
+- WebFetch（获取女娲 skill 仓库的 SKILL.md、extraction-framework.md、skill-template.md）
+- Read（阅读现有蒸馏服务代码）
+- Write（重写蒸馏服务）
+- Edit（更新 SpiritDistillPhase 枚举）
+- RunCommand（flutter analyze 检查）
+
+### 修改了哪些文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `lib/features/spirit/domain/spirit_distillation_service.dart` | 完全重写：集成女娲skill六维度搜索、三重验证框架提炼、SKILL.md模板生成；新增NuwaResearchResult/NuwaMentalModel/NuwaExpressionDNA数据结构 | 集成女娲skill方法论，提升蒸馏质量 |
+| `lib/features/spirit/domain/spirit_persona.dart` | SpiritDistillPhase枚举新增researchReview、buildingSkill、qualityCheck三个阶段 | 支持女娲多阶段蒸馏流程的进度通知 |
+
+### 会话 #N - 修复名灵回响页面 RenderFlex 溢出问题
+
+**日期**: 2026-06-05
+
+#### 背景
+名灵回响（Spirit Gallery）页面中每个蒸馏人物图标的卡片出现底部溢出错误：`A RenderFlex overflowed by 34 pixels on the bottom`。
+
+#### 主要目的
+- 修复名灵回响页面中蒸馏人物卡片 Column 内容溢出的问题
+
+#### 完成的主要任务
+1. **定位问题**: 在 `_buildPersonaCard` 方法中，`Column` 内的子元素（emoji头部、昵称、领域标签、描述文本、Spacer、状态行）总高度超过了 GridView 分配的卡片高度
+2. **修复溢出**: 
+   - 将 `childAspectRatio` 从 `0.85` 调整为 `0.72`，给卡片更多垂直空间
+   - 将 `Spacer()` 替换为 `Flexible(child: Spacer())`，使 Spacer 在空间不足时能收缩而非溢出
+
+#### 技术栈
+- Flutter / Dart
+- Riverpod 状态管理
+
+#### 关键决策和解决方案
+1. **调整 childAspectRatio**: 从 0.85 调为 0.72，使卡片高度增加约 18%，容纳所有子元素
+2. **Flexible 包裹 Spacer**: `Spacer()` 在 `Column` 中会强制占用剩余空间，如果空间不足则溢出。用 `Flexible` 包裹后，Spacer 在空间不足时会收缩为 0，避免溢出
+
+#### 使用的工具
+- Grep（代码搜索）
+- Read（文件读取）
+- Edit（文件编辑）
+
+## 会话记录 - 2026-06-07：CosyVoice 速度优化与情感控制实现
+
+### 会话背景
+用户本地部署了 CosyVoice TTS 服务，但发现处理速度极慢。同时用户指出 CosyVoice 应该支持情感控制功能，希望一并实现。
+
+### 会话的主要目的
+1. 诊断并优化 CosyVoice TTS 处理速度
+2. 实现 CosyVoice 情感控制功能（通过 instruct2 模式）
+
+### 完成的主要任务
+1. **后端 speed 参数支持**：为所有 CosyVoice 推理端点（zero_shot、cross_lingual、instruct2）添加 `speed` 参数
+2. **后端流式指标增强**：`generate_data` 函数输出每个 chunk 的音频时长、生成耗时和 RTF
+3. **前端情感控制实现**：当 TTS 标签检测到情感信息时，自动切换到 instruct2 模式，将情感描述映射为 `instruct_text`
+4. **性能测试**：使用 curl 测试各模式推理速度，确认 RTF=3.58（CPU 模式）
+
+### 会话中主要使用的技术栈
+- Python + FastAPI（CosyVoice 后端服务）
+- Flutter + Dart（前端 TTS 服务）
+- Docker（CosyVoice 容器部署）
+- CosyVoice2-0.5B 模型（zero_shot / cross_lingual / instruct2 三种推理模式）
+- TTSStyleParser（前端 TTS 控制标签解析器）
+
+### 关键决策和解决方案
+
+1. **速度慢的根本原因**：Mac Docker 不支持 GPU 直通（nvidia runtime），CosyVoice 容器只能使用 CPU 推理，RTF=3.58（生成1秒音频需3.58秒）。这是 Mac 平台的固有限制，无法在 Docker 内解决。可选方案：
+   - 使用 Linux + NVIDIA GPU 服务器部署（RTF 可降至 0.1-0.2）
+   - 使用 Apple MLX 框架在 Mac 上直接运行（绕过 Docker）
+   - 前端实现流式播放，边生成边播放，降低感知延迟
+
+2. **情感控制方案**：利用 CosyVoice 的 instruct2 模式，将 TTS 标签中的情感描述（如 `[tts:style=开心]`）提取为 `instruct_text` 参数（如"用开心的语气说话"），自动切换到 instruct2 模式进行推理。这样 LLM 生成的情感标签可以自然地映射到 CosyVoice 的情感控制能力。
+
+3. **speed 参数**：为所有推理端点添加 speed 参数（默认 1.0），允许前端控制语速，间接影响生成速度。
+
+### 会话中主要使用的工具
+- Read（阅读后端 server.py 和前端 tts_service.dart）
+- Edit（修改后端和前端代码）
+- RunCommand（Docker 部署和 curl 测试）
+- Grep（搜索 GPU 配置和 docker-compose）
+
+### 修改了哪些文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `CosyVoice/runtime/python/fastapi/server.py` | 1. `inference_cross_lingual` 端点添加 `speed` 参数并传递给模型<br>2. `inference_instruct2` 端点添加 `speed` 参数并传递给模型<br>3. 日志中增加 speed 参数输出 | 统一所有推理模式的 speed 参数支持，允许前端控制语速 |
+| `multi_model_client/lib/core/services/tts_service.dart` | 1. `_synthesizeWithCosyVoice` 方法新增 TTS 标签解析逻辑<br>2. 检测到情感标签时自动切换到 instruct2 模式<br>3. 将情感描述映射为 `instruct_text` 参数<br>4. 使用 `effectiveMode` 和 `effectiveInstructText` 替代硬编码变量<br>5. 传递 `cleanText`（清洗标签后的纯文本）给 `tts_text` | 实现 CosyVoice 情感控制功能，让 LLM 生成的情感标签自动映射到 instruct2 模式 |
+
+### 性能测试结果
+
+| 模式 | 耗时 | RTF | 说明 |
+|------|------|-----|------|
+| cross_lingual | 8.45s | ~2.1 | 基础模式，无情感控制 |
+| instruct2（开心） | 13.44s | ~3.4 | 情感控制，额外5秒 |
+| instruct2（悲伤） | 14.44s | ~3.6 | 情感控制，额外6秒 |
+
+> 注：RTF 值基于 CPU 推理，GPU 推理可降至 0.1-0.2
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `multi_model_client/lib/features/spirit/presentation/pages/spirit_gallery_page.dart` | 1. `childAspectRatio` 从 0.85 改为 0.72；2. `Spacer()` 替换为 `Flexible(child: Spacer())` | 修复蒸馏人物卡片底部 34 像素溢出问题 |
+
+---
+
+### 会话 #41：名灵回响功能增强（清除上下文/英文翻译/音色绑定/TTS标签修复）
+
+#### 会话背景
+用户要求对名灵回响功能进行多项增强，包括清除上下文、英文对话翻译、音色绑定和TTS标签修复。
+
+#### 会话的主要目的
+1. 名灵回响所有会话（文字+语音）添加一键清除上下文功能
+2. 英文对话支持+一键翻译功能（类似微信翻译）
+3. 蒸馏人物音色绑定：一个人物一个音色，支持所有克隆音色
+4. 修复TTS标签缺失问题，增强情感支撑
+
+#### 完成的主要任务
+1. 在语音对话配置对话框中添加"清除上下文"按钮，带确认对话框
+2. 在AI消息气泡中检测英文内容，显示"翻译"按钮，点击后调用LLM翻译为中文
+3. 修改音色选择逻辑，使用MiMoVoice枚举+所有克隆音色，音色绑定到persona
+4. 增强TTS提示词，强制要求模型输出标签，添加英文标签支持
+
+#### 会话中主要使用的技术栈
+- Flutter / Dart
+- Riverpod 状态管理
+- LLM 翻译（通过 DialogueEngine.translateText）
+- TTS 控制指令标签系统
+
+#### 关键决策和解决方案
+1. **翻译功能**：使用 `DialogueEngine.translateText` 方法，通过 LLM 进行翻译，优先使用远程模型（速度快）
+2. **英文检测**：通过统计英文字符和中文字符比例判断，英文占比>中文2倍且>10个字符时显示翻译按钮
+3. **音色绑定**：`lastUsedVoiceId` 使用 `clone_` 前缀标识克隆音色，`_initVoiceServices` 优先使用 `lastUsedVoiceId`
+4. **TTS标签增强**：在提示词中添加"必须遵守"和"强制要求"措辞，确保模型输出标签
+
+#### 使用的工具
+- Grep（代码搜索）
+- Read（文件读取）
+- Edit（文件编辑）
+- RunCommand（编译验证）
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `spirit_voice_chat_page.dart` | 1. 配置对话框添加"清除上下文"按钮；2. 添加`_clearContext`方法；3. 音色选择改为MiMoVoice枚举+所有克隆音色；4. `_initVoiceServices`音色优先级改为lastUsedVoiceId>clonedVoiceId>默认；5. 消息气泡添加翻译按钮；6. 添加`_translateVoiceMessage`方法；7. `_VoiceMessage`添加`translatedText`和`isMainlyEnglish`；8. 添加`_clonedVoices`和`_loadClonedVoices` | 一键清除上下文、英文翻译、音色绑定 |
+| `message_bubble.dart` | 1. `_AssistantBubble`改为StatefulWidget；2. 添加英文检测和翻译按钮；3. 添加`_translate`方法调用`DialogueEngine.translateText`；4. 添加`flutter_riverpod`和`dialogue_engine`导入 | 文字对话中英文翻译功能 |
+| `dialogue_engine.dart` | 添加`translateText`方法，使用LLM翻译文本，优先使用远程模型 | 为翻译功能提供后端支持 |
+| `tts_prompt_template.dart` | 1. 完整版提示词添加"必须遵守"强制约束；2. 简化版提示词添加"强制要求"措辞；3. 风格列表添加性感/色情/挑逗/呻吟/娇喘等；4. 使用原则添加"每段回复必须包裹标签"和"英文支持" | 修复TTS标签缺失，增强情感支撑 |
+
+### 会话 #42：iOS 模型下载修复 & Metal GPU 加速 & Release 模式部署
+
+**日期**: 2026-06-08
+
+#### 背景
+用户在 iOS 设备上遇到多个问题：1) 删除模型后重新下载，点击模型所在文件夹发现没有模型文件；2) 下载完成模型后创建新会话直接跳转到下载页面而非模型选择页面；3) iOS llama.cpp 没有使用 Apple Metal GPU/NPU 加速；4) iOS 断开数据线后应用白屏。
+
+#### 主要目的
+- 修复删除模型后重新下载时目标目录不存在导致文件保存失败的问题
+- 确保下载完成事件流正确触发模型注册
+- 确保 iOS 使用 Metal GPU 加速
+- 解决 iOS 断开数据线后白屏问题
+
+#### 完成的主要任务
+1. **修复重新下载模型时目标目录不存在的问题**：在 `startDownload` 方法和 `model_market_page.dart` 中添加目录创建逻辑
+2. **验证下载完成事件流**：确认 `DownloadTaskManager.onDownloadCompleted` 事件流和 `ModelProvider._listenDownloadCompletion` 监听器正确工作
+3. **iOS Metal GPU 加速配置**：在 `pubspec.yaml` 中显式配置 `ios-arm64` 平台使用 `metal` 后端
+4. **iOS Release 模式部署**：使用 release 模式构建并安装到 iPhone，解决断开数据线后白屏问题
+
+#### 技术栈
+- **Flutter**: 跨平台框架
+- **llamadart**: llama.cpp Dart 绑定，支持 Metal/Vulkan GPU 加速
+- **background_downloader**: 后台下载库
+- **Riverpod**: 状态管理
+
+#### 关键决策和解决方案
+1. **目录创建修复**：删除模型时 `downloads_page.dart` 会递归删除整个模型目录（`dir.delete(recursive: true)`），重新下载时目录不存在导致 `background_downloader` 无法保存文件。在 `startDownload` 和 `model_market_page` 中添加 `Directory.create(recursive: true)` 确保目录存在
+2. **iOS Metal 配置**：在 `pubspec.yaml` 的 `llamadart_native_backends` 中显式添加 `ios-arm64: backends: [cpu, metal]`，确保 iOS 设备使用 Metal GPU 加速
+3. **Release 模式部署**：debug 模式下 Flutter 应用需要连接开发机器的 Dart VM，断开后无法运行是正常行为。使用 `flutter build ios --release` + `xcrun devicectl device install app` 部署 release 版本
+
+#### 使用的工具
+- Read（文件读取）
+- Grep（代码搜索）
+- Edit（文件编辑）
+- RunCommand（构建和部署）
+- CheckCommandStatus（构建状态检查）
+
+#### 修改的文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|----------|----------|
+| `download_task_manager.dart` | 在 `startDownload` 方法中添加目标目录创建逻辑：`Directory(saveDir).create(recursive: true)` | 删除模型后重新下载时，目标目录可能已被删除，background_downloader 不会自动创建目录 |
+| `model_market_page.dart` | 在创建下载任务前添加目录创建逻辑：`Directory(modelDir).create(recursive: true)` | 双重保障，确保下载开始前目录已存在 |
+| `pubspec.yaml` | 在 `llamadart_native_backends.platforms` 中添加 `ios-arm64: backends: [cpu, metal]` | 显式指定 iOS 使用 Metal GPU 后端，确保推理加速 |
+
+#### 文件修改详细内容
+
+**1. download_task_manager.dart（修改）**
+- **位置**: `startDownload` 方法，约第 764-773 行
+- **内容**: 在检查文件是否存在之前，先确保目标目录存在
+```dart
+// ★★★ 确保目标目录存在 ★★★
+if (task.savePath.isNotEmpty) {
+  final saveDir = task.savePath.substring(0, task.savePath.lastIndexOf('/'));
+  final dir = Directory(saveDir);
+  if (!await dir.exists()) {
+    await dir.create(recursive: true);
+    debugPrint('[DownloadTaskManager] 📁 已创建目标目录: $saveDir');
+  }
+}
+```
+- **原因**: 删除模型时整个目录被递归删除，重新下载时目录不存在导致文件保存失败
+
+**2. model_market_page.dart（修改）**
+- **位置**: 下载流程中，创建任务之前，约第 603-607 行
+- **内容**: 在创建下载任务前确保目录存在
+```dart
+// ★ 确保目标目录存在（删除模型后重新下载时目录可能已被删除）
+final modelDirObj = Directory(modelDir);
+if (!await modelDirObj.exists()) {
+  await modelDirObj.create(recursive: true);
+  debugPrint('[ModelMarket] 已创建下载目录: $modelDir');
+}
+```
+- **原因**: 双重保障，在 UI 层也确保目录存在
+
+**3. pubspec.yaml（修改）**
+- **位置**: `hooks.user_defines.llamadart.llamadart_native_backends.platforms` 配置
+- **内容**: 添加 iOS 平台的 Metal 后端配置
+```yaml
+ios-arm64:
+  backends: [cpu, metal]
+```
+- **原因**: 显式指定 iOS 使用 Metal GPU 后端，确保 llama.cpp 在 iOS 上使用 Apple GPU/NPU 加速推理
+| `tts_service.dart` | 1. MiMo预设音色多标签分段合成添加段落间延迟(1.5s递增)和429重试(3次,3s/6s/12s退避)；2. VoiceClone多标签分段合成同样添加段落间延迟和增强429重试 | 修复MIMO API 429限流导致语音输出失败 |
+
+### 会话 #8 - iOS 录音闪退修复与 Metal GPU 加速启用
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈两个关键问题：
+1. iOS 上点击录音功能闪退
+2. 当前 iOS 使用纯 CPU 推理，无法发挥 iPhone 性能
+
+#### 主要目的
+- 修复 iOS 录音功能闪退问题
+- 启用 iOS Metal GPU 加速推理
+
+#### 完成的主要任务
+
+1. **录音闪退根因分析与修复**
+   - 发现 iOS 上 `just_audio`（TTS 播放）和 `record`（录音）插件共享 `AVAudioSession`
+   - `just_audio` 将音频会话设置为 `.playback` 类别，而 `record` 需要 `.playAndRecord` 类别
+   - 未正确切换音频会话类别导致 iOS 崩溃
+   - 在所有录音入口添加 `AVAudioSession` 配置，录音前切换为 `playAndRecord`，录音结束后恢复为 `playback`
+
+2. **iOS Metal GPU 加速启用**
+   - 之前因 debug 模式崩溃（Xcode 26.4 LLDB bug）而禁用了 Metal 后端
+   - 确认 Release 模式下 Metal 正常工作
+   - 将 `defaultGpuLayers` 从 0 改为 99（大部分层卸载到 GPU）
+   - 将 `preferredBackend` 从 `GpuBackend.auto` 改为 `GpuBackend.metal`
+   - 在 `pubspec.yaml` 中恢复 iOS Metal 后端：`backends: [cpu, metal]`
+
+3. **录音代码增强**
+   - 在 `startRecording` 和 `_startRecordingFile` 方法中添加详细日志
+   - 在 `_recorder.start()` 调用前后添加 try-catch 和日志
+   - 确保所有平台（macOS/Windows/iOS/Android）的录音功能正常
+
+#### 技术栈
+- **音频会话管理**: audio_session 0.2.3
+- **录音**: record 插件
+- **播放**: just_audio 插件
+- **GPU 加速**: llamadart (llama.cpp Metal backend)
+
+#### 关键决策和解决方案
+1. **AVAudioSession 类别切换**: 录音前配置为 `playAndRecord` + `defaultToSpeaker` + `measurement` 模式，录音结束后恢复为 `playback`
+2. **Metal GPU 层数**: 设置为 99（而非 999），保留少量层给 CPU 处理，避免 GPU 内存溢出
+3. **Debug 模式限制**: 确认 debug 模式下 LLDB bug 导致崩溃是已知问题（Flutter 3.41.7 修复），不影响 release 模式
+
+#### 使用的工具
+- Read（文件读取）
+- Grep（代码搜索）
+- Edit（文件编辑）
+- RunCommand（构建和安装）
+- WebSearch（技术调研）
+- CheckCommandStatus（构建状态检查）
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `lib/core/services/asr_input_service.dart` | 1. 添加 `audio_session` 导入；2. 在 `startRecording` 方法中添加详细日志；3. 在 `_startSystemAsr` 方法中添加 AVAudioSession 配置；4. 在 `_startRecordingFile` 方法中添加 AVAudioSession 配置和 `_recorder.start()` 的 try-catch；5. 在 `stopRecording` 方法中添加 AVAudioSession 恢复 | 修复 iOS 录音闪退，正确管理音频会话生命周期 |
+| `lib/core/engines/local_ffi_engine.dart` | 1. 将 iOS `defaultGpuLayers` 从 0 改为 99；2. 将 iOS `preferredBackend` 从 `GpuBackend.auto` 改为 `GpuBackend.metal` | 启用 iOS Metal GPU 加速推理 |
+| `pubspec.yaml` | 将 iOS 后端配置从 `backends: [cpu]` 改为 `backends: [cpu, metal]` | 启用 iOS Metal 后端 |
+| `lib/features/session/presentation/pages/realtime_voice_page.dart` | 1. 添加 `audio_session` 导入；2. 在 `_startRecording` 方法中添加 AVAudioSession 配置 | 修复实时语音页面录音闪退 |
+| `lib/features/spirit/presentation/pages/spirit_voice_chat_page.dart` | 1. 添加 `audio_session` 导入；2. 在 `_startRecording` 方法中添加 AVAudioSession 配置 | 修复名灵语音对话页面录音闪退 |
+
+---
+
+### 会话 #9 - 跨平台录音与推理兼容性修复
+
+**日期**: 2026-06-08
+
+#### 背景
+会话 #8 修复了 iOS 录音闪退和 Metal GPU 加速问题，但存在跨平台兼容性缺陷：
+1. 两个语音页面（realtime_voice_page、spirit_voice_chat_page）录音结束后未恢复 AVAudioSession 为 `.playback`，导致 TTS 无法正常播放
+2. `local_ffi_engine.dart` 中 `preferredBackend` 逻辑错误，Windows/Linux 被错误地设为 `GpuBackend.metal`
+3. `pubspec.yaml` 缺少 macOS/Windows/Linux 的后端配置
+
+#### 主要目的
+- 确保所有录音入口点在 macOS、Windows x86、iOS、Android 上均可用
+- 修复 AVAudioSession 生命周期管理（录音→播放的完整切换）
+- 修复 GPU 后端选择逻辑，确保每个平台使用正确的加速后端
+- 补全 pubspec.yaml 中缺失的平台后端配置
+
+#### 完成的主要任务
+1. **修复 AVAudioSession 恢复逻辑**：在 realtime_voice_page 和 spirit_voice_chat_page 的 `_stopRecordingAndProcess` 和 `_cancelRecording` 方法中添加 AVAudioSession 恢复为 `.playback`
+2. **修复 GPU 后端选择逻辑**：将 `preferredBackend` 从简单的三元表达式改为完整的 if-else 分支，确保每个平台使用正确的后端
+3. **补全 pubspec.yaml 平台配置**：添加 macOS-arm64、Windows-x86_64、Linux-x86_64 的后端配置
+
+#### 技术栈
+- **AVAudioSession**: Apple 平台音频会话管理
+- **llamadart**: llama.cpp Dart 绑定，支持 Metal/Vulkan/CUDA 后端
+- **GpuBackend**: llamadart 的 GPU 后端枚举（metal/vulkan/cuda/cpu）
+
+#### 关键决策和解决方案
+1. **AVAudioSession 完整生命周期**：录音前切换为 `.playAndRecord`，录音结束后（包括取消）恢复为 `.playback`，确保 TTS 正常播放
+2. **跨平台 GPU 后端映射**：
+   - macOS/iOS → `GpuBackend.metal`
+   - Android → `GpuBackend.vulkan`
+   - Windows/Linux → `GpuBackend.cuda`（llamadart 自动回退到 Vulkan/CPU）
+3. **pubspec.yaml 后端配置**：
+   - macOS-arm64: `[cpu, metal]`
+   - Windows-x86_64: `[cpu, vulkan]`
+   - Linux-x86_64: `[cpu, vulkan]`
+
+#### 使用的工具
+- Read（文件读取）
+- Grep（代码搜索）
+- Edit（文件编辑）
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `lib/features/session/presentation/pages/realtime_voice_page.dart` | 1. 在 `_stopRecordingAndProcess` 方法中添加 AVAudioSession 恢复为 `.playback`；2. 在 `_cancelRecording` 方法中添加 AVAudioSession 恢复 | 录音结束后恢复音频会话，确保 TTS 可正常播放 |
+| `lib/features/spirit/presentation/pages/spirit_voice_chat_page.dart` | 1. 在 `_stopRecordingAndProcess` 方法中添加 AVAudioSession 恢复为 `.playback`；2. 在 `_cancelRecording` 方法中添加 AVAudioSession 恢复 | 录音结束后恢复音频会话，确保 TTS 可正常播放 |
+| `lib/core/engines/local_ffi_engine.dart` | 将 `preferredBackend` 从 `Platform.isAndroid ? vulkan : Platform.isIOS ? metal : metal` 改为完整的 if-else 分支：macOS/iOS→metal，Android→vulkan，Windows/Linux→cuda，其他→cpu | 修复 Windows/Linux 被错误设为 metal 的问题 |
+| `pubspec.yaml` | 添加 `macos-arm64: [cpu, metal]`、`windows-x86_64: [cpu, vulkan]`、`linux-x86_64: [cpu, vulkan]` 后端配置 | 补全缺失的桌面平台后端配置，确保 GPU 加速在所有平台可用 |
+
+---
+
+### 会话 #10 - Xcode 打包 Pods_Runner Framework 未找到修复
+
+**日期**: 2026-06-08
+
+#### 背景
+用户使用 Xcode 打包 iOS 应用时遇到链接错误：`Framework 'Pods_Runner' not found`，导致 `Linker command failed with exit code 1`。
+
+#### 主要目的
+- 修复 Xcode 打包时 Pods_Runner framework 找不到的问题
+
+#### 完成的主要任务
+1. **诊断问题根因**：用户在 Xcode 中直接打开了 `Runner.xcodeproj`，而使用 CocoaPods 的项目必须通过 `Runner.xcworkspace` 打开
+2. **清理并重新安装 Pods**：执行 `rm -rf Pods Podfile.lock && pod install`，确保 Pods 项目正确生成
+3. **验证构建**：执行 `flutter build ios --release` 成功构建（297.2MB）
+
+#### 技术栈
+- **CocoaPods**: iOS 依赖管理工具
+- **Xcode workspace**: 包含 Runner.xcodeproj 和 Pods.xcodeproj 的工作空间
+
+#### 关键决策和解决方案
+1. **问题根因**：使用 CocoaPods 的项目必须通过 `.xcworkspace` 打开，而非 `.xcodeproj`。`.xcworkspace` 包含了 Runner 项目和 Pods 项目，Xcode 才能正确链接 Pods_Runner framework
+2. **解决方案**：
+   - 方案一：在 Xcode 中打开 `Runner.xcworkspace`（而非 `Runner.xcodeproj`）
+   - 方案二（推荐）：使用 `flutter build ipa --release` 命令打包，Flutter 会自动使用正确的 workspace
+
+#### 使用的工具
+- RunCommand（pod install、flutter build）
+- Read（检查 xcworkspace 内容）
+- Glob（查找 workspace 文件）
+
+#### 修改的文件
+
+无代码文件修改。此问题为 Xcode 使用方式错误，非代码缺陷。
+
+---
+
+### 会话 #11 - iOS 录音闪退修复（NSSpeechRecognitionUsageDescription 缺失）
+
+**日期**: 2026-06-08
+
+#### 背景
+用户在 iPhone 上点击录音按钮时应用闪退。之前会话已添加 AVAudioSession 配置修复，但闪退仍然发生。
+
+#### 主要目的
+- 修复 iOS 录音按钮闪退问题
+
+#### 完成的主要任务
+1. **通过崩溃日志定位根因**：使用 `pymobiledevice3 crash pull` 从 iPhone 拉取崩溃日志
+2. **发现根因**：崩溃日志明确指出 `This app has crashed because it attempted to access privacy-sensitive data without a usage description. The app's Info.plist must contain an NSSpeechRecognitionUsageDescription key`
+3. **修复**：在 `Info.plist` 中添加 `NSSpeechRecognitionUsageDescription` 权限声明
+4. **验证**：重新构建部署后录音功能正常
+
+#### 技术栈
+- **iOS TCC (Transparency, Consent, and Control)**: Apple 的隐私权限框架，缺少权限声明会直接 SIGABRT 崩溃
+- **pymobiledevice3**: Python 工具，用于从 iOS 设备拉取崩溃日志
+- **speech_to_text**: Flutter 插件，使用 iOS 原生 SFSpeechRecognizer，需要 `NSSpeechRecognitionUsageDescription` 权限
+
+#### 关键决策和解决方案
+1. **问题根因**：`speech_to_text` 插件使用 iOS 原生 `SFSpeechRecognizer` 进行语音识别，iOS 要求必须在 Info.plist 中声明 `NSSpeechRecognitionUsageDescription`，否则直接 SIGABRT 崩溃（不是简单的权限拒绝，而是直接崩溃）
+2. **诊断过程**：由于 release 模式下 Flutter 不输出日志，debug 模式因 LLDB bug 无法连接，最终通过 `pymobiledevice3` 从设备拉取崩溃日志定位问题
+3. **解决方案**：在 Info.plist 中添加 `NSSpeechRecognitionUsageDescription` 权限声明
+
+#### 使用的工具
+- RunCommand（pymobiledevice3 crash pull、flutter run）
+- Read（读取崩溃日志）
+- Grep（搜索崩溃日志中的关键信息）
+
+#### 修改的文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|---------|---------|
+| `ios/Runner/Info.plist` | 添加 `NSSpeechRecognitionUsageDescription` 权限声明，描述为"需要语音识别功能来将您的语音转换为文字" | iOS TCC 要求：使用 SFSpeechRecognizer 必须声明此权限，否则直接 SIGABRT 崩溃 |
+
+---
+
+### 会话 #12 - iOS 语音打断/权限/TTS 修复
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈三个问题：
+1. 语音 ASR 后发文本，想再发新文本必须等 AI 回复完，无法打断
+2. 语音克隆和灵感一瞬页面录音显示无麦克风权限（但 ASR 录音正常）
+3. MiMo TTS 设置后完全无法使用，没有语音输出
+
+#### 主要目的
+- 修复语音输入时无法打断 AI 回复的问题
+- 修复非 ASR 录音功能无麦克风权限的问题
+- 修复 TTS 无法播放的问题
+
+#### 完成的主要任务
+1. **修改 `_sendMessage` 逻辑**：当 AI 正在生成回复时，先取消当前生成再发送新消息（而非直接丢弃新消息）
+2. **修改 `_stopGeneration`**：增加停止 TTS 播放逻辑
+3. **修改 `realtime_voice_page` 和 `spirit_voice_chat_page`**：当 AI 处于 thinking/recognizing 状态时，允许打断并重新录音
+4. **修复 TTS 播放问题**：在 `_doPlayAssistantVoice` 中添加 AVAudioSession 恢复为 `.playback`，确保录音后 TTS 可以正常播放
+5. **修复权限问题**：在 Podfile 中添加 `permission_handler` 的 `GCC_PREPROCESSOR_DEFINITIONS` 配置
+
+#### 技术栈
+- **AVAudioSession**：iOS 音频会话管理，录音需 `.playAndRecord`，TTS 播放需 `.playback`
+- **permission_handler**：Flutter 权限管理插件，iOS 需要在 Podfile 中配置权限宏
+- **GCC_PREPROCESSOR_DEFINITIONS**：Xcode 预处理器宏，用于启用/禁用 permission_handler 的权限
+
+#### 关键决策和解决方案
+1. **语音打断**：原代码 `_isGenerating` 为 true 时直接 `return` 丢弃新消息，改为先调用 `_stopGeneration()` 打断当前生成，再继续发送新消息
+2. **TTS 无法播放**：录音后 AVAudioSession 处于 `.playAndRecord` 模式，`just_audio` 在此模式下可能无法正常播放。在 TTS 播放前恢复为 `.playback` 模式
+3. **权限问题根因**：`permission_handler` 插件在 iOS 上需要在 Podfile 的 `post_install` 中通过 `GCC_PREPROCESSOR_DEFINITIONS` 显式启用权限宏（如 `PERMISSION_MICROPHONE=1`），否则 `Permission.microphone.request()` 无法正常弹出系统权限对话框
+
+#### 使用的工具
+- RunCommand（flutter build、pod install）
+- Read/Edit（代码修改）
+- Grep（代码搜索）
+- WebSearch（permission_handler iOS 配置文档）
+
+#### 修改的文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|---------|---------|
+| `session_detail_page.dart` | 1. `_sendMessage` 中将 `if (_isGenerating) return` 改为先 `_stopGeneration()` 再继续发送；2. `_stopGeneration` 增加停止 TTS 播放逻辑；3. `_doPlayAssistantVoice` 开头添加 AVAudioSession 恢复为 `.playback`；4. 添加 `audio_session` import | 1. 允许用户打断 AI 回复发送新消息；2. 打断时同时停止 TTS；3. 修复录音后 TTS 无法播放；4. 编译依赖 |
+| `realtime_voice_page.dart` | 将 `_state == thinking/recognizing` 时的 `return` 改为打断当前生成后继续录音 | 允许用户在 AI 思考时打断并重新说话 |
+| `spirit_voice_chat_page.dart` | 同上，将 `return` 改为打断后继续录音；修复 `widget.sessionId` 为 `_sessionId!` | 同上；修复编译错误 |
+| `ios/Podfile` | 在 `post_install` 中添加 `GCC_PREPROCESSOR_DEFINITIONS` 配置，启用 `PERMISSION_MICROPHONE=1`、`PERMISSION_SPEECH_RECOGNIZER=1`、`PERMISSION_CAMERA=1`、`PERMISSION_PHOTOS=1`、`PERMISSION_NOTIFICATIONS=1`、`PERMISSION_LOCATION=1` | permission_handler iOS 端必须在 Podfile 中显式启用权限宏，否则无法正常请求权限 |
+
+---
+
+### 会话 #13 - 恢复会话消息气泡中的 TTS 播放按钮
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈会话中的语音播放按钮消失了，无法手动播放 AI 回复的 TTS 语音。
+
+#### 主要目的
+在每条 AI 消息气泡底部添加 TTS 播放按钮，点击后使用设置中配置的 TTS 引擎播放该条消息。
+
+#### 完成的主要任务
+1. 在 `MessageBubble` 中添加 `onPlayVoice` 回调参数
+2. 在 `_AssistantBubble` 中传递 `onPlayVoice` 给 `_BubbleFooter`
+3. 在 `_BubbleFooter` 中添加播放语音按钮（`Icons.volume_up_outlined`），仅在 `onPlayVoice != null` 时显示
+4. 在 `session_detail_page` 中为 AI 消息传入 `_playAssistantVoice` 回调
+
+#### 技术栈
+- **MessageBubble**：消息气泡组件，通过 `onPlayVoice` 回调与 TTS 服务解耦
+- **TTSService**：通过 `_playAssistantVoice` 调用，支持 MiMo/OpenAI/Sherpa/Edge/CosyVoice/System 等多种 TTS 引擎
+
+#### 关键决策和解决方案
+- 采用回调模式而非直接在 MessageBubble 中注入 TTS 服务，保持组件解耦
+- 仅 AI 消息（`role == 'assistant'`）显示播放按钮，用户消息不显示
+- 播放按钮使用 `volume_up_outlined` 图标，与复制按钮风格一致
+
+#### 使用的工具
+- Read/Edit（代码修改）
+- RunCommand（flutter build/install）
+
+#### 修改的文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|---------|---------|
+| `message_bubble.dart` | 1. `MessageBubble` 添加 `onPlayVoice` 参数；2. `_AssistantBubble` 添加 `onPlayVoice` 参数并传递给 `_BubbleFooter`；3. `_BubbleFooter` 添加 `onPlayVoice` 参数和播放按钮 | 在 AI 消息气泡底部添加 TTS 播放按钮 |
+| `session_detail_page.dart` | 在 `MessageBubble` 构造时为 AI 消息传入 `onPlayVoice: () => _playAssistantVoice(message.content)` | 连接播放按钮与 TTS 服务 |
+
+---
+
+### 会话 #14 - iOS 侧边栏 UI 优化
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈 iOS 侧边栏存在三个 UI 问题：
+1. 竖屏侧边栏中"多模型 AI 助手"文字出现了两次（重复）
+2. 侧边栏标题太靠上，与手机状态栏重叠
+3. 侧边栏中"下载管理"名称需要去除，只保留图标
+
+#### 主要目的
+修复 iOS 侧边栏的 UI 问题，提升视觉体验。
+
+#### 完成的主要任务
+1. 删除竖屏侧边栏（`_buildSidebarContent`）中重复的"多模型 AI 助手"文本块
+2. 为竖屏侧边栏（`_buildSidebarContent`）和横屏侧边栏（`_buildSidebar`）都包裹 `SafeArea`，确保标题不被状态栏遮挡
+3. 移除 `_DownloadNavItem` 中的文字标签，只保留下载图标和角标
+
+#### 技术栈
+- **SafeArea**：Flutter 组件，自动为子组件添加安全区域内边距，避免被系统状态栏/刘海遮挡
+- **_DownloadNavItem**：自定义下载管理导航项组件，含图标和角标
+
+#### 关键决策和解决方案
+1. **重复文字**：竖屏侧边栏的 Logo 行中已有"多模型 AI 助手"，下方又有一个额外的 Padding 块重复显示，直接删除多余的 Padding 块
+2. **标题被遮挡**：使用 `SafeArea` 包裹整个侧边栏 Column，自动处理顶部安全区域（刘海/灵动岛/状态栏），无需手动计算偏移
+3. **下载管理名称**：移除 `_DownloadNavItem` 中的 `Text` 组件，只保留 `Stack`（图标+角标），使侧边栏更简洁
+
+#### 使用的工具
+- Read/Edit（代码修改）
+- RunCommand（flutter build/install）
+
+#### 修改的文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|---------|---------|
+| `session_list_page.dart` | 1. 删除 `_buildSidebarContent` 中重复的"多模型 AI 助手" Padding 块；2. `_buildSidebarContent` 的 Column 外包裹 `SafeArea`；3. `_buildSidebar` 的 Column 外包裹 `SafeArea`；4. `_DownloadNavItem` 中移除文字标签，只保留图标+角标 | 1. 消除重复文字；2. 避免标题与状态栏重叠；3. 侧边栏更简洁 |
+
+---
+
+### 会话 #15 - MiMo TTS 播放修复 / 侧边栏下载管理移除 / 新建会话跳转优化
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈三个问题：
+1. MiMo TTS 配置了 API Key 但无法语音播报
+2. 侧边栏的下载管理图标仍存在，需要完全移除
+3. 首页无会话时点击+号跳转的是本地模型下载界面，应跳转模型管理页面
+
+#### 主要目的
+- 修复手动点击 TTS 播放按钮时无法播报的问题
+- 从侧边栏完全移除下载管理入口
+- 优化新建会话的跳转逻辑
+
+#### 完成的主要任务
+1. 为 `_playAssistantVoice` 和 `_doPlayAssistantVoice` 添加 `manualTrigger` 参数，手动触发时跳过 `enableVoiceOutput` 检查
+2. 从竖屏和横屏侧边栏中完全移除 `_DownloadNavItem`（包括图标和角标）
+3. 将无模型时+号跳转目标从 `/model-market`（模型市场/下载界面）改为 `/settings/models`（模型管理页面）
+
+#### 技术栈
+- **manualTrigger 参数**：区分手动点击播放和自动播报，手动触发不受会话语音开关限制
+- **_DownloadNavItem**：自定义下载管理导航项组件，已从侧边栏中完全移除
+- **GoRouter**：Flutter 路由管理，`/settings/models` 为模型管理页面路由
+
+#### 关键决策和解决方案
+1. **MiMo TTS 无法播报**：根因是 `_doPlayAssistantVoice` 中检查了 `session.enableVoiceOutput`，当会话未开启语音输出时，即使手动点击播放按钮也无法播报。添加 `manualTrigger` 参数，手动触发时跳过此检查
+2. **下载管理移除**：从 `_buildSidebarContent`（竖屏覆盖层）和 `_buildSidebar`（横屏常驻）中均移除 `_DownloadNavItem`
+3. **跳转优化**：`/model-market` 是模型下载市场界面，`/settings/models` 是模型管理（配置/添加模型）页面，后者更符合用户"第一次没有会话"时的需求
+
+#### 使用的工具
+- Read/Edit（代码修改）
+- RunCommand（flutter build/install）
+
+#### 修改的文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|---------|---------|
+| `session_detail_page.dart` | 1. `_playAssistantVoice` 添加 `manualTrigger` 参数；2. `_doPlayAssistantVoice` 添加 `manualTrigger` 参数；3. `enableVoiceOutput` 检查改为 `!manualTrigger` 时才检查；4. `onPlayVoice` 回调传入 `manualTrigger: true` | 手动点击播放按钮时不受会话语音开关限制 |
+| `session_list_page.dart` | 1. 竖屏和横屏侧边栏中移除 `_DownloadNavItem`；2. 无模型时+号跳转从 `/model-market` 改为 `/settings/models` | 1. 完全移除下载管理入口；2. 跳转到模型管理页面而非下载界面 |
+
+---
+
+## 会话 2026-06-08：MiMo TTS 语音无声音 + Recorder 闪退修复
+
+### 会话背景
+用户反馈 MiMo TTS 配置 API Key 后仍无声音输出，灵感一瞬中 Recorder 重复初始化导致闪退，以及默认音色配置错误导致语音对话功能异常。
+
+### 会话主要目的
+1. 修复 MiMo TTS 配置后无声音输出的问题
+2. 修复灵感一瞬中 `RecorderInitializeFailException` 导致闪退
+3. 修复默认音色配置错误（`Chloe` → `mimo_default`）
+
+### 完成的主要任务
+1. **MiMo TTS 音色 ID 传递修复**：在 `tts_service.dart` 中添加 `_mimoVoiceId` 字符串字段，优先于枚举传给 API
+2. **默认音色从 Chloe 改为 mimo_default**：全局替换所有 `MiMoVoice.Chloe` 为 `MiMoVoice.mimo_default`
+3. **session_detail_page 音色读取逻辑修复**：直接使用字符串音色 ID 传给 API，不再依赖枚举匹配
+4. **voice_settings_page 默认音色修复**：MiMo Provider 默认音色改为 `mimo_default`，切换 Provider 时自动更新默认音色
+5. **Recorder 重复初始化修复**：在 `inspiration_page.dart` 和 `voice_clone_page.dart` 中添加初始化前状态检查和失败重试机制
+6. **全局 MiMoVoice.Chloe 残留清理**：修复 spirit_voice_chat_page、realtime_voice_page、spirit_chat_page 中的残留引用
+
+### 技术栈
+- Flutter / Dart
+- MiMo TTS API（小米语音合成服务）
+- flutter_recorder 插件（录音功能）
+- SharedPreferences（本地配置存储）
+
+### 关键决策和解决方案
+1. **音色 ID 传递方式**：使用字符串 `mimoVoiceId` 直接传给 API，而非通过枚举 `MiMoVoice.values.firstWhere` 匹配，避免枚举不完整导致回退到错误默认值
+2. **默认音色选择**：`mimo_default` 是 MiMo 官方推荐的默认音色，会根据部署集群自动选择（中国集群默认冰糖，其他集群默认 Mia），比硬编码 `Chloe` 更合理
+3. **Recorder 初始化策略**：先检查是否已初始化，如果已初始化则先 deinit 并等待 C++ 端释放资源，如果 init 仍然失败则等待后重试一次
+
+### 修改的文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|---------|---------|
+| `tts_service.dart` | 1. MiMoVoice 枚举扩展（添加 bingtang, moli, suda, baihua, Mia, Milo, Dean）；2. 添加 `_mimoVoiceId` 字符串字段；3. `_synthesizeWithMiMo` 中使用 `voiceId` 替代 `_mimoVoice.name`；4. `_synthesizeMultipleSegments` 添加 `voiceId` 参数；5. 默认音色从 `Chloe` 改为 `mimo_default` | 1. 支持完整 MiMo 官方音色列表；2. 字符串音色 ID 直接传给 API 避免枚举匹配失败；3. 确保正确音色 ID 传给 API；4. 多标签合成也使用正确音色；5. 使用 MiMo 官方推荐默认音色 |
+| `session_detail_page.dart` | 1. MiMo 音色读取逻辑改为直接使用字符串 `mimoVoiceId`；2. 默认音色从 `Chloe` 改为 `mimo_default`；3. TTSService 构造传入 `mimoVoiceId` 参数 | 1. 避免枚举匹配失败导致音色回退；2. 使用官方推荐默认音色；3. 确保字符串音色 ID 传给 TTS 服务 |
+| `voice_settings_page.dart` | 1. 初始化时 MiMo 默认音色改为 `mimo_default`；2. `setTtsProvider` 切换 Provider 时自动更新默认音色 | 1. MiMo Provider 默认音色不应为 Sherpa 的 `'0'`；2. 切换 Provider 后音色应匹配对应引擎 |
+| `inspiration_page.dart` | `_startRecording` 中添加 Recorder 初始化前状态检查和失败重试机制 | 修复 `RecorderInitializeFailException` 导致闪退 |
+| `voice_clone_page.dart` | `_startRecording` 中添加 Recorder 初始化前状态检查和失败重试机制 | 修复 `RecorderInitializeFailException` 导致闪退 |
+| `spirit_voice_chat_page.dart` | 1. 默认音色从 `Chloe` 改为 `mimo_default`；2. `effectiveVoiceId` 默认值从 `'Chloe'` 改为 `'mimo_default'`；3. 枚举回退值改为 `mimo_default` | 统一默认音色为 MiMo 官方推荐值 |
+| `realtime_voice_page.dart` | 1. 默认音色从 `Chloe` 改为 `mimo_default`；2. `mimoVoiceStr` 默认值从 `'Chloe'` 改为 `'mimo_default'`；3. 枚举回退值改为 `mimo_default` | 统一默认音色为 MiMo 官方推荐值 |
+| `spirit_chat_page.dart` | 默认音色回退从 `MiMoVoice.Chloe.name` 改为 `MiMoVoice.mimo_default.name` | 统一默认音色 |
+
+### 会话 #8 - 语音对话配置UI修复 + MiMo API域名更新
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈名灵回响蒸馏人物的语音对话界面中，点击右上角配置按钮后出现的对话配置页面有问题——只显示"清除上下文"，其他功能（切换模型、选择音色）被一个大色块遮挡。同时需要更新 MiMo API 的默认域名。
+
+#### 主要目的
+1. 修复名灵回响语音对话配置对话框的UI大色块问题
+2. 更新 MiMo API 默认 Base URL 为最新域名
+
+#### 完成的主要任务
+1. **配置对话框UI修复**：定位到 `AlertDialog` 的 `actions` 中使用了 `const Spacer()`，而 `Spacer` 只能在 `Flex` 容器（Row/Column）中使用，`AlertDialog` 的 actions 默认使用 `OverflowBar` 布局，导致 `Spacer` 被渲染为大色块遮挡其他按钮
+2. **MiMo API 域名更新**：将所有 `api.xiaomimimo.com` 替换为 `api.mimo-v2.com`（MiMo 官方最新域名）
+
+#### 技术栈
+- Flutter AlertDialog 布局机制（OverflowBar vs Flex）
+- MiMo TTS API（api.mimo-v2.com）
+
+#### 关键决策和解决方案
+1. **Spacer 导致大色块**：`AlertDialog.actions` 使用 `OverflowBar` 而非 `Flex`，`Spacer` 无法正常工作。将"清除上下文"按钮从 `actions` 移到 `content` 的 `Column` 中，使用 `OutlinedButton.icon` 样式，`actions` 只保留"取消"和"应用"
+2. **MiMo API 域名迁移**：根据 MiMo 官方文档（mimo-v2.com），新 API 域名为 `https://api.mimo-v2.com/v1`，旧域名 `api.xiaomimimo.com` 仍可用但建议迁移
+
+#### 使用的工具
+- Grep（代码搜索）
+- Read（文件读取）
+- Edit（文件编辑）
+- WebSearch（搜索 MiMo API 最新域名）
+- TodoWrite（任务跟踪）
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `spirit_voice_chat_page.dart` | 移除 `actions` 中的 `const Spacer()`，将"清除上下文"按钮移到 `content` 中用 `OutlinedButton.icon` | 修复 Spacer 在 OverflowBar 中渲染为大色块的问题 |
+| `tts_service.dart` | `_defaultMiMoBaseUrl` 从 `api.xiaomimimo.com` 改为 `api.mimo-v2.com` | 更新为 MiMo 官方最新域名 |
+| `local_proxy_service.dart` | `_defaultTargetBase` 从 `api.xiaomimimo.com` 改为 `api.mimo-v2.com` | 统一 MiMo API 域名 |
+| `voice_clone_service.dart` | `_defaultBaseUrl` 从 `api.xiaomimimo.com` 改为 `api.mimo-v2.com`；DNS 错误提示移除硬编码域名 | 统一 MiMo API 域名 |
+| `voice_settings_page.dart` | 更新3处 UI 文本中的旧域名为新域名 | 统一用户可见的域名信息 |
+| `proxy_status_page.dart` | 目标地址从 `api.xiaomimimo.com/v1` 改为 `api.mimo-v2.com/v1` | 统一代理状态页面显示 |
+
+### 会话 #9 - 录音功能完全失效修复
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈语音克隆和灵感一瞬中的开始录音功能完全失效，无法录音更无法处理。
+
+#### 主要目的
+修复灵感一瞬和语音克隆页面的录音功能
+
+#### 完成的主要任务
+1. **定位根因**：之前为修复 `RecorderInitializeFailException` 添加的手动 `deinit()` 逻辑导致双重释放，C++ 端状态混乱
+2. **修复灵感一瞬录音**：移除 `_startRecording()` 中的手动 `deinit` 逻辑，直接调用 `Recorder.instance.init()`（其内部已处理重复初始化）
+3. **修复语音克隆录音**：同上修复
+4. **简化 `_cleanupRecorder()`**：`deinit()` 内部会先调用 `stop()`，无需单独 `stop()`
+
+#### 技术栈
+- flutter_recorder 插件（v1.1.5）
+- FFI 录音器生命周期管理
+
+#### 关键决策和解决方案
+**根因分析**：`Recorder.instance.init()` 源码内部已处理重复初始化——它会先检查 `isDeviceInitialized()`，如果已初始化则自动 `deinit()` 再重新 `init()`。而之前的修复代码在调用 `init()` 之前手动 `deinit()`，导致：
+1. `_cleanupRecorder()` 调用 `stop()` + `deinit()`
+2. 修复代码又检查 `isDeviceInitialized()` 并再次 `deinit()`（双重 deinit）
+3. `init()` 内部发现已 deinit 但 C++ 端资源未完全释放，导致 `init()` 失败
+
+**解决方案**：移除所有手动 `deinit` 逻辑，直接调用 `Recorder.instance.init()`，让插件自行处理重复初始化。仅保留首次失败后的重试机制。
+
+#### 使用的工具
+- Grep（代码搜索）
+- Read（文件读取，包括 flutter_recorder 插件源码分析）
+- Edit（文件编辑）
+- RunCommand（构建和安装）
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `inspiration_page.dart` | 移除 `_startRecording()` 中的手动 `deinit` 逻辑；简化 `_cleanupRecorder()` | 双重 deinit 导致 C++ 端状态混乱，录音失效 |
+| `voice_clone_page.dart` | 同上 | 同上 |
+
+### 会话 #10 - 导出功能修复 + MiMo API域名回退 + 录音修复
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈灵感一瞬的导出功能（总结和思维导图）点击后显示导出失败，以及 TTS 完全失效（所有音色均无声音）。
+
+#### 主要目的
+1. 修复灵感一瞬导出功能
+2. 修复 TTS 完全失效问题
+
+#### 完成的主要任务
+1. **导出功能修复**：`Share.shareXFiles` 在 iOS 上无法访问 `getApplicationSupportDirectory()` 的文件，改用 `getTemporaryDirectory()`；添加 `sharePositionOrigin` 参数（iOS 必需）
+2. **MiMo API 域名回退**：之前错误地将 `api.xiaomimimo.com` 改为 `api.mimo-v2.com`，后者是第三方镜像站而非小米官方 API，导致 TTS 完全失效。已全部回退
+3. **DocumentGenerationService 修复**：XMind 生成也使用 `getApplicationDocumentsDirectory()`，改为 `getTemporaryDirectory()`
+
+#### 技术栈
+- iOS 沙盒文件系统（getApplicationSupportDirectory vs getTemporaryDirectory）
+- share_plus 插件（iOS 需要 sharePositionOrigin）
+- MiMo API 官方域名（api.xiaomimimo.com）
+
+#### 关键决策和解决方案
+1. **导出失败根因**：iOS 沙盒机制下，`getApplicationSupportDirectory()` 返回的路径对 share_plus 不可见，需要使用 `getTemporaryDirectory()` 代替
+2. **TTS 失效根因**：`api.mimo-v2.com` 是第三方镜像站（mimo-v2.com），不是小米官方 API 域名。小米官方域名是 `api.xiaomimimo.com`（platform.xiaomimimo.com）。错误更改域名导致 API 请求失败
+3. **sharePositionOrigin**：iOS 上 `Share.shareXFiles` 必须提供 `sharePositionOrigin`，否则在 iPad 上会崩溃，在 iPhone 上可能静默失败
+
+#### 使用的工具
+- Grep（代码搜索）
+- Read（文件读取）
+- Edit（文件编辑）
+- WebSearch（验证 MiMo API 官方域名）
+- RunCommand（构建和安装）
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `inspiration_page.dart` | 导出函数改用 `getTemporaryDirectory()` + 添加 `sharePositionOrigin` | iOS 沙盒限制 + share_plus 必需参数 |
+| `document_generation_service.dart` | `generateXMind` 改用 `getTemporaryDirectory()` | iOS 沙盒限制 |
+| `tts_service.dart` | `_defaultMiMoBaseUrl` 回退为 `api.xiaomimimo.com` | 第三方镜像站导致 TTS 失效 |
+| `local_proxy_service.dart` | `_defaultTargetBase` 回退为 `api.xiaomimimo.com` | 同上 |
+| `voice_clone_service.dart` | `_defaultBaseUrl` 回退为 `api.xiaomimimo.com` | 同上 |
+| `proxy_status_page.dart` | 目标地址回退为 `api.xiaomimimo.com/v1` | 同上 |
+
+### 会话 #11 - MiMo 音色 ID 映射修复 + iOS 系统 TTS 音色设置
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈 TTS 仍然大部分音色无法使用。上一轮修复了 MiMo API 域名回退，但核心问题未解决。
+
+#### 主要目的
+修复 MiMo TTS 预置音色（冰糖、茉莉、苏打、白桦）无法使用的问题
+
+#### 完成的主要任务
+1. **MiMo 音色 ID 映射修复**：MiMo 官方 API 的预置音色 Voice ID 使用中文（`冰糖`、`茉莉`、`苏打`、`白桦`），而应用内部存储使用拼音（`bingtang`、`moli`、`suda`、`baihua`）。添加 `_mimoVoiceIdMap` 映射表和 `_resolveMiMoVoiceId()` 方法，在调用 API 时将拼音转换为中文
+2. **iOS 系统 TTS 音色设置**：iOS 平台初始化系统 TTS 时遗漏了音色设置逻辑，添加了与 Android 相同的音色匹配和设置代码
+
+#### 关键决策和解决方案
+1. **根因**：MiMo API 文档明确预置音色 Voice ID 是中文（冰糖、茉莉、苏打、白桦），不是拼音。代码传拼音给 API 导致音色不识别，API 返回错误
+2. **解决方案**：在 `_synthesizeWithMiMo` 和 `_synthesizeMultipleSegments` 中，通过 `_resolveMiMoVoiceId()` 将内部拼音 ID 映射为 API 需要的中文 ID
+3. **iOS 系统 TTS**：之前 iOS 初始化时只设置了语言，没有设置音色，导致系统 TTS 始终使用默认音色
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `tts_service.dart` | 添加 `_mimoVoiceIdMap` 映射表和 `_resolveMiMoVoiceId()` 方法；`_synthesizeWithMiMo` 中使用映射；`_synthesizeMultipleSegments` 中使用映射 | MiMo API 音色 ID 需要中文而非拼音 |
+| `tts_service.dart` | iOS `_initSystemTts` 添加音色设置逻辑 | iOS 系统 TTS 音色设置遗漏 |
+
+### 会话 #12 - 切换音色闪退修复
+
+**日期**: 2026-06-08
+
+#### 背景
+用户反馈切换音色时有一定概率闪退
+
+#### 主要目的
+修复切换 TTS 音色时应用闪退的问题
+
+#### 完成的主要任务
+1. **修复 `_cachedTtsService` 替换时未释放旧实例**：切换音色后 TTS 服务被重建，但旧的 `TTSService` 实例（包含 `FlutterTts`、`AudioPlayer`、`SherpaTts`）没有被 `dispose()`，导致 iOS 上多实例冲突闪退
+2. **修复 `TTSService.dispose()` 缺少 `AudioPlayer` 释放**：`dispose()` 方法没有调用 `_audioPlayer.dispose()`，导致 just_audio 播放器资源泄漏
+3. **修复第 588 行初始化路径缺少 `mimoVoiceId` 和 `systemVoiceId`**：会话页面初始化 `TTSService` 时遗漏了 `mimoVoiceId`（字符串音色 ID）和 `systemVoiceId` 参数
+
+#### 关键决策和解决方案
+1. **根因**：`_cachedTtsService` 被直接赋值替换，旧的 `FlutterTts` 和 `AudioPlayer` 实例仍在内存中。iOS 上 `FlutterTts` 使用 `AVAudioSession`，多实例同时操作会导致原生层崩溃
+2. **解决方案**：在替换 `_cachedTtsService` 前先调用旧实例的 `dispose()`；在 `dispose()` 中添加 `_audioPlayer.dispose()` 调用
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `session_detail_page.dart` | `_cachedTtsService` 替换前先调用 `_cachedTtsService?.dispose()` | 避免多实例冲突闪退 |
+| `session_detail_page.dart` | 第 588 行初始化路径添加 `mimoVoiceId` 和 `systemVoiceId` 参数 | 音色 ID 传递遗漏 |
+| `tts_service.dart` | `dispose()` 添加 `_audioPlayer.dispose()` | 释放 just_audio 播放器资源 |
+
+### 会话 #13 - 语音播放无声音修复
+
+**日期**: 2026-06-09
+
+#### 背景
+用户反馈两个问题：1) 会话界面点击语音播放按钮后对话无法出声音；2) 名灵回响中只有 MiMo 默认语音能正常发音，clone 音色无任何声音
+
+#### 主要目的
+修复 TTS 语音播放无声音的问题
+
+#### 完成的主要任务
+1. **修复系统 TTS 在 `speakLongText` 中的分块冲突**：系统 TTS 的 `speak()` 是直接播放的，分块流水线模式会导致多个 `speak()` 调用互相中断。添加系统 TTS 特殊处理，直接播放整个文本
+2. **修复名灵回响 `_ttsService` 未释放**：`spirit_voice_chat_page.dart` 中 `_ttsService` 从未调用 `dispose()`，页面销毁和音色切换时旧实例未释放
+3. **修复名灵回响缺少 `mimoVoiceId` 参数**：`TTSService` 创建时遗漏 `mimoVoiceId` 字符串音色 ID
+4. **修复会话界面 `_isSpeaking` 未设置**：`_isSpeaking` 从未被设为 true，导致防重叠调用机制失效
+
+#### 关键决策和解决方案
+1. **根因 1（会话无声音）**：系统 TTS 使用 `speak()` 直接播放，但 `speakLongText` 的流水线模式会分块调用 `synthesize()`，每个块调用 `_speakWithSystem()`，多个 `speak()` 调用互相中断导致无声音
+2. **根因 2（名灵回响 clone 无声音）**：`_ttsService` 未释放导致多实例冲突 + 缺少 `mimoVoiceId` 参数
+
+#### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|----------|----------|
+| `tts_service.dart` | `speakLongText` 添加系统 TTS 特殊处理，直接播放整个文本 | 系统 TTS 的 `speak()` 不支持分块流水线 |
+| `spirit_voice_chat_page.dart` | `dispose()` 添加 `_ttsService?.dispose()` | 释放 TTS 服务资源 |
+| `spirit_voice_chat_page.dart` | `_initVoiceServices` 中先释放旧 `_ttsService` 再创建新实例 | 避免多实例冲突 |
+| `spirit_voice_chat_page.dart` | `TTSService` 创建添加 `mimoVoiceId` 参数 | 传递字符串音色 ID |
+| `session_detail_page.dart` | `_doPlayAssistantVoice` 中设置 `_isSpeaking = true` | 防重叠调用机制生效 |
+
+### 会话 #8 - 录音初始化修复 + TTS 按钮导致 LlamaException 修复
+
+**日期**: 2026-06-09
+
+#### 背景
+用户反馈所有录音功能再次出现录音初始化问题，包括灵感一瞬、语音克隆、名灵回响语音对话等功能。同时，点击会话界面中的 TTS 按钮后出现 LlamaException，导致完全无法对话。
+
+#### 主要目的
+- 修复所有录音功能的初始化问题，确保录音正常使用
+- 确保语音克隆中录音可以播放并被克隆成音色
+- 确保克隆音色在所有 TTS 相关功能中正常使用和播放
+- 修复 TTS 按钮导致 LlamaException 的问题
+
+#### 完成的主要任务
+1. **创建 RecorderManager 集中录音管理器**: 解决 `flutter_recorder` 全局单例在多页面间切换时未正确释放的问题
+2. **修复灵感一瞬录音**: 将直接 `Recorder.instance` 调用替换为 `RecorderManager.instance`
+3. **修复语音克隆录音**: 将直接 `Recorder.instance` 调用替换为 `RecorderManager.instance`
+4. **修复名灵回响录音**: 在初始化新 `AudioRecorder` 前释放旧实例
+5. **修复 voice_dialog_engine 录音**: 在初始化新 `AudioRecorder` 前释放旧实例
+6. **修复 TTS 按钮导致 LlamaException**: 本地模型推理期间避免初始化 Sherpa TTS，降级到系统 TTS
+7. **增强 LlamaException 自动恢复**: 未知推理错误也标记上下文失效，确保下次推理时自动重载
+8. **增强会话错误处理**: 检测到上下文失效错误时自动重载模型
+
+#### 技术栈
+- **录音管理**: flutter_recorder（全局单例）+ record（独立实例）
+- **TTS 服务**: Sherpa-ONNX / 系统 TTS / MIMO / CosyVoice
+- **本地推理**: llamadart (llama.cpp FFI)
+- **状态管理**: Riverpod
+
+#### 关键决策和解决方案
+1. **RecorderManager 集中管理**: 创建 `RecorderManager` 单例，通过 `holder` 参数标识当前持有者，确保初始化前释放旧持有者的资源
+2. **TTS 降级策略**: 本地模型推理期间（`_isGenerating` 为 true），Sherpa TTS 自动降级为系统 TTS，避免内存冲突
+3. **上下文失效自动恢复**: 所有推理错误（包括未知错误）都标记 `_contextInvalidated = true`，下次推理时自动重载模型
+4. **会话层错误恢复**: `_sendMessage` 的 catch 块中检测 LocalFFIException / 上下文失效错误，自动调用 `_autoLoadModel()`
+
+#### 使用的工具
+- Read（文件读取）
+- Grep（代码搜索）
+- Edit（文件编辑）
+- RunCommand（构建验证）
+- TodoWrite（任务跟踪）
+
+#### 修改的文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `recorder_manager.dart` | 新建 RecorderManager 集中录音管理器 | 解决 flutter_recorder 全局单例冲突 |
+| `inspiration_page.dart` | 替换 `Recorder.instance` 为 `RecorderManager.instance`，更新 `_cleanupRecorder`/`_startRecording`/`_pauseRecording`/`_resumeRecording`/`_stopRecording` | 修复灵感一瞬录音初始化失败 |
+| `voice_clone_page.dart` | 替换 `Recorder.instance` 为 `RecorderManager.instance`，更新 `_cleanupRecorder`/`_startRecording`/`_pauseRecording`/`_resumeRecording`/`_stopRecording` | 修复语音克隆录音初始化失败 |
+| `spirit_voice_chat_page.dart` | `_startRecording` 中先释放旧 `AudioRecorder` 实例再创建新实例 | 修复名灵回响录音初始化冲突 |
+| `voice_dialog_engine.dart` | `_startRecording` 中先释放旧 `AudioRecorder` 实例再创建新实例 | 修复语音对话引擎录音初始化冲突 |
+| `session_detail_page.dart` | `_doPlayAssistantVoice` 中添加本地模型推理期间 Sherpa TTS 降级逻辑；`_sendMessage` catch 块中添加 LocalFFIException/上下文失效检测和自动重载 | 修复 TTS 按钮导致 LlamaException |
+| `local_ffi_engine.dart` | `generate` 和 `generateStream` 的 catch 块中，未知错误也标记 `_contextInvalidated = true` | 确保任何推理错误后下次推理自动重载模型 |
+
+---
+
+## 会话 #6 - 2026-06-09
+
+### 会话背景
+延续之前的会话，继续修复会话界面中 ASR 按住说话闪退的问题。
+
+### 会话的主要目的
+修复会话界面中 ASR（按住说话）功能闪退的 Bug。
+
+### 完成的主要任务
+- 修复 `AsrInputService` 中 `AudioRecorder` 实例管理导致的第二次录音闪退问题
+
+### 会话中主要使用的技术栈
+- Flutter / Dart
+- `record` 包（AudioRecorder）
+- ASR 语音识别服务
+
+### 关键决策和解决方案
+- **根因分析**：`AsrInputService` 使用 `final AudioRecorder _recorder = AudioRecorder()` 在构造时创建录音器实例。第一次 `stopRecording` 调用 `_recorder.stop()` 后，`_recorder` 实例可能处于不可用状态。第二次调用 `_recorder.start()` 时，由于实例状态异常导致崩溃。
+- **解决方案**：将 `_recorder` 从 `final` 改为可空类型 `AudioRecorder?`，在每次 `startRecording` 前先释放旧实例再创建新实例，确保录音器始终处于可用状态。
+
+### 会话中主要使用的工具
+- Read / Edit / Grep / Glob（代码分析与修改）
+- flutter analyze（静态分析）
+- flutter build macos --debug（构建验证）
+
+### 修改了哪些文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `asr_input_service.dart` | 将 `_recorder` 从 `final AudioRecorder` 改为 `AudioRecorder?`；添加 `_ensureRecorder()` 方法；在 `startRecording` 中先释放旧实例再创建新实例；修复所有 `_recorder` 调用适配可空类型 | 修复 ASR 按住说话第二次录音闪退 |
+
+---
+
+## 会话 #7 - 2026-06-09
+
+### 会话背景
+延续之前的会话，用户反馈 iOS 版本中按住说话按钮后直接闪退，聊天界面和语音聊天界面都会闪退。
+
+### 会话的主要目的
+修复 iOS 平台上 ASR 按住说话功能闪退的 Bug。
+
+### 完成的主要任务
+- 排查并修复 iOS 上 `record` 包与 `audio_session` 包的 AVAudioSession 管理冲突
+- 在所有录音相关代码中禁用 `record` 包内部的 AVAudioSession 管理
+
+### 会话中主要使用的技术栈
+- Flutter / Dart
+- `record` 包（AudioRecorder, IosRecordConfig）
+- `audio_session` 包（AVAudioSession 管理）
+- iOS AVAudioSession 机制
+
+### 关键决策和解决方案
+- **根因分析**：`record` 包 v6.2.1 的 `IosRecordConfig.manageAudioSession` 默认为 `true`，导致 `record` 包在调用 `start()` 时内部设置 AVAudioSession（设置 category 为 playAndRecord、activate session 等）。与此同时，项目使用 `audio_session` 包外部管理 AVAudioSession。两者同时管理 AVAudioSession 导致 iOS 原生层冲突崩溃。
+- **解决方案**：
+  1. 在创建 `AudioRecorder` 后调用 `_recorder.ios?.manageAudioSession(false)` 禁用内部管理
+  2. 在 `RecordConfig` 中设置 `iosConfig: IosRecordConfig(manageAudioSession: false)` 作为双重保障
+  3. 由 `audio_session` 包统一管理 AVAudioSession 的配置和切换
+
+### 会话中主要使用的工具
+- Read / Edit / Grep / Glob（代码分析与修改）
+- WebSearch（查找 record 包已知问题和 API）
+- flutter analyze（静态分析）
+- flutter build ios --debug --no-codesign（iOS 构建验证）
+
+### 修改了哪些文件
+
+| 文件名 | 修改的内容 | 修改的原因 |
+|--------|-----------|-----------|
+| `asr_input_service.dart` | 创建 AudioRecorder 后调用 `_recorder!.ios?.manageAudioSession(false)`；`RecordConfig` 添加 `iosConfig: IosRecordConfig(manageAudioSession: false)` | 禁用 record 包内部 AVAudioSession 管理，避免与 audio_session 包冲突导致 iOS 崩溃 |
+| `spirit_voice_chat_page.dart` | 同上：创建 AudioRecorder 后调用 `ios?.manageAudioSession(false)`；`RecordConfig` 添加 `iosConfig: IosRecordConfig(manageAudioSession: false)` | 同上 |
+| `voice_dialog_engine.dart` | 同上：创建 AudioRecorder 后调用 `ios?.manageAudioSession(false)`；`RecordConfig` 添加 `iosConfig: IosRecordConfig(manageAudioSession: false)` | 同上 |
+
+
+---
+
+## 会话记录 - 2026-06-10：克隆音色与音频会话冲突修复（续）
+
+### 会话背景
+用户反馈两个持续性问题：1) 文字聊天切换到语音对话界面后点击语音按钮闪退；2) "马健"克隆语音仍然不可用。这是前次会话修复的延续。
+
+### 会话主要目的
+彻底修复克隆音色不可用问题和文字聊天→语音对话界面切换闪退问题。
+
+### 完成的主要任务
+1. **克隆音色参考音频文件验证**：在 `_initVoiceDialogEngine` 和 `RealtimeVoicePage` 中增加了参考音频文件存在性和大小验证，避免传递无效路径给 TTS API
+2. **RealtimeVoicePage 缺少 mimoVoiceId 和 mimoBaseUrl 参数**：修复 TTSService 创建时未传入 `mimoVoiceId`（非克隆模式需传入字符串音色 ID）和 `mimoBaseUrl`（自定义 API 地址）的问题
+3. **变量作用域修复**：将 `mimoVoiceStr` 从 `if` 块内提升到外层，确保 TTSService 构造时可访问
+4. **增强克隆音色调试日志**：在 `_initVoiceDialogEngine` 中添加克隆音色查找、文件验证等详细日志
+
+### 主要使用的技术栈
+- Flutter/Dart
+- iOS AVAudioSession 管理
+- MiMo Voice Clone API
+- SharedPreferences 状态管理
+
+### 关键决策和解决方案
+- **克隆音色不可用根因**：`RealtimeVoicePage` 创建 TTSService 时缺少 `mimoVoiceId` 参数，导致非克隆模式下无法正确指定音色；同时缺少 `mimoBaseUrl` 导致自定义 API 地址不生效
+- **参考音频文件验证**：克隆音色的参考音频文件可能被删除或损坏，增加文件存在性和大小检查，避免无效路径传递给 API
+- **变量作用域问题**：`mimoVoiceStr` 原来在 `if (resolvedTtsProvider == 'mimo')` 块内定义，TTSService 构造在块外无法访问
+
+### 主要使用的工具
+- Read/Edit（代码阅读与修改）
+- RunCommand（Flutter 构建与安装）
+- Grep/Glob（代码搜索）
+
+### 修改的文件
+
+| 文件名 | 修改内容 | 修改原因 |
+|--------|---------|---------|
+| `session_detail_page.dart` | `_initVoiceDialogEngine` 中克隆音色处理增加文件验证和详细日志 | 排查克隆音色不可用问题，确保参考音频文件有效 |
+| `realtime_voice_page.dart` | 1. `mimoVoiceStr` 变量提升到外层作用域；2. TTSService 增加 `mimoVoiceId` 和 `mimoBaseUrl` 参数；3. 克隆音色增加文件验证 | 修复克隆音色不可用（缺少关键参数）和变量作用域问题 |
+
+
+## 会话总结 #2026-06-09 v2 - iOS App 闪退问题修复（语音/TTS 全面排查）
+
+### 会话背景
+用户在 iOS 设备上运行 LLM Studio (multi_model_client) Flutter 应用，遇到持续升级的稳定性问题：
+- 最初：会话界面点击语音按钮后闪退
+- 中期：语音对话界面第二次说话闪退
+- 后期：会话界面 ASR 按住说话闪退
+- 当前：App 启动后白屏或闪退（EXC_BAD_ACCESS，code=50，地址 0x12XX000c4，指令 `ldur x6, [x24, #0x37]`）
+
+崩溃堆栈模式稳定指向同一个 native 指令序列，表明是同一个底层问题。
+
+### 会话主要目的
+1. 系统性排查并修复 iOS 设备上的所有闪退问题
+2. 解决会话页面语音功能（包括 mimo 克隆音色）
+3. 修复 App 启动白屏/闪退问题
+
+### 完成的主要任务
+1. **pubspec.yaml 资源声明修复** - 关键修复
+2. **realtime_voice_page.dart 录音器清理重构** - 防止 AVAudioSession 冲突
+3. **session_detail_page.dart TTS 初始化修复** - 解决 mimo 克隆音色无法使用
+
+### 关键技术栈
+- Flutter (Dart) for UI/业务逻辑
+- record (AudioRecorder) - 录音
+- audio_session - AVAudioSession 管理
+- sherpa_onnx - ASR (语音识别)
+- TTSService (mimo / cosyvoice / fishaudio / sherpa / system)
+- llamadart - 本地 LLM 推理（含 Metal GPU 加速）
+- iOS Metal / AVAudioSession / SIGSEGV 处理
+
+### 关键决策和解决方案
+1. **资源声明缺失**：`assets/mj_nexus_logo.png` 存在但未在 pubspec.yaml 中声明
+   - 影响：debug 模式下 widget 树预加载时，Flutter 框架尝试加载该资源并触发 SIGSEGV
+   - 解决：在 pubspec.yaml assets 列表添加 `assets/mj_nexus_logo.png`
+2. **realtime_voice_page 录音器未清理**：直接 `new AudioRecorder()` 没有先清理旧实例
+   - 影响：iOS 上 native AVAudioSession 状态冲突，导致后续操作 SIGSEGV
+   - 解决：增加 `_safeCleanupOldRecorder()`，在每次 start 前彻底 stop + dispose 旧的
+3. **mimo 克隆音色 TTS 初始化缺参数**：session_detail_page.dart 在 mimo 模式下未传 `cloneReferenceAudioPath`
+   - 影响：克隆音色被当作普通 mimo 处理，音色 ID 无效
+   - 解决：扩展 `cloneReferenceAudioPath` 传参条件，mimo + clone 时也传路径
+
+### 会话中主要使用的工具
+- Read / Edit / Grep / Glob（文件操作）
+- RunCommand（flutter run、pymobiledevice3、xcrun devicectl）
+- xcrun devicectl list devices（设备状态检查）
+
+### 修改的文件
+
+1. **`/Users/jianma/Desktop/LLM STUDIO/multi_model_client/pubspec.yaml`**
+   - **修改内容**：在 `assets/icons/` 后添加 `- assets/mj_nexus_logo.png`
+   - **原因**：项目代码 4 处引用 `Image.asset('assets/mj_nexus_logo.png')`，但 pubspec.yaml 未声明该资源。debug 模式下 Flutter 预加载 widget 树时遇到未声明资源触发 SIGSEGV（崩溃地址 0x12XX000c4）
+
+2. **`/Users/jianma/Desktop/LLM STUDIO/multi_model_client/lib/features/session/presentation/pages/realtime_voice_page.dart`**
+   - **修改内容**：
+     - 在 `_startRecording` 开头增加 `await _safeCleanupOldRecorder()`
+     - 拆出独立的 `_safeCleanupOldRecorder()` 方法
+     - iOS 平台 try/catch 包裹 hasPermission 调用，dispose 失败的 recorder
+     - `_stopRecordingAndProcess` 改用 try/catch 包裹 stop + dispose
+     - `_stopRecording` 改用 try/catch 包裹 stop + dispose
+   - **原因**：该文件直接 `new AudioRecorder()` 创建录音器，没清理旧实例。配合 session_detail_page 的 asr_input_service 跨页面切换时，iOS AVAudioSession 状态错乱导致 SIGSEGV
+
+3. **`/Users/jianma/Desktop/LLM STUDIO/multi_model_client/lib/features/session/presentation/pages/session_detail_page.dart`**
+   - **修改内容**：TTSService 构造时 `cloneReferenceAudioPath` 改为三段式
+     ```dart
+     cloneReferenceAudioPath: ttsProvider == 'mimo' && cloneReferenceAudioPath != null
+         ? cloneReferenceAudioPath
+         : (ttsProvider == 'cosyvoice' && cvRefAudio.isNotEmpty ? cvRefAudio : null),
+     ```
+   - **原因**：原代码仅在 cosyvoice 模式传 cloneReferenceAudioPath，mimo 模式下即使有克隆音色也传 null。结果 mimo 克隆音色时 TTS 调用普通 API 而不是 voiceclone endpoint，音色不生效
+
+### 待完成/潜在风险
+- 设备需解锁后才能验证（`devicectl` 显示 `State: unavailable`）
+- 仍需验证 Metal 加速是否恢复（之前临时改为 CPU 模式）
+- mmproj 多模态投影仪加载仍禁用（防止 SIGSEGV）
+- ASR sherpa-onnx 加载时需保证 SenseVoice 模型文件有效
+
+### 验证方式
+1. 解锁 iPhone 并保持前台
+2. 重新运行 `flutter run -d 00008150-00016CEA1420401C --debug`
+3. 测试场景：会话界面输入文字、会话界面按住说话、mimo 克隆音色播放
+
+## 会话总结 #2026-06-10 - ASR 转录闪退问题修复（跨页面资源泄漏）
+
+### 会话背景
+用户反馈：在对话界面中使用 ASR（按住说话）后，再导航到灵感一瞬页面录音并点击转录，有一定概率会闪退。该问题是跨页面 ASR 资源管理不当导致的原生 C++ 内存冲突。
+
+### 会话主要目的
+1. 分析 ASR 使用后灵感一瞬转录闪退的根因
+2. 修复 `AsrInputService` 中 `_dynamicAsrService` 未释放问题
+3. 修复灵感一瞬转录中 `ASRService` 资源管理（异常时未释放）
+4. 全面排查项目中所有 `ASRService` 实例的资源泄漏
+
+### 完成的主要任务
+1. **根因分析** - 确认闪退由 `AsrInputService._dynamicAsrService`（含 OfflineRecognizer 原生 C++ 对象）在录音停止后未释放导致
+2. **AsrInputService 修复** - 在 `stopRecording()` 和 `dispose()` 中释放 `_dynamicAsrService`
+3. **灵感一瞬转录修复** - 两个 `_transcribeRecording` 函数的 `asr.dispose()` 移到 `finally` 块
+4. **媒体管道修复** - `media_ingestion_pipeline.dart` 的 `asrService.dispose()` 移到 `finally` 块
+
+### 关键技术栈
+- Flutter (Dart) for UI/业务逻辑
+- sherpa_onnx - ASR 本地离线识别（OfflineRecognizer 为原生 C++ 对象）
+- ONNX Runtime - 底层推理引擎（进程级共享资源）
+- Flutter Isolate - `compute` 函数在后台 Isolate 执行识别
+- AVAudioSession - iOS 音频会话管理
+
+### 关键决策和解决方案
+
+1. **根因：`_dynamicAsrService` 从未释放**
+   - `AsrInputService` 在 `createAsrService()` 时创建 `_dynamicAsrService = ASRService(...)` 并调用 `initSherpa()` 创建 `OfflineRecognizer`
+   - `stopRecording()` 后 `_dynamicAsrService` 未被 dispose，也未被设为 null
+   - `dispose()` 方法中也缺少 `_dynamicAsrService?.dispose()`
+   - `session_detail_page` 在导航到灵感一瞬页面时不会被 dispose，所以 `AsrInputService` 及其 `_dynamicAsrService` 一直存活
+   - 当灵感一瞬页面创建新的 `ASRService` + `OfflineRecognizer` 时，sherpa_onnx 的 ONNX Runtime 在进程级别共享某些资源（线程池、内存分配器），导致冲突触发 SIGSEGV/SIGABRT
+   - **解决**：在 `stopRecording()` 后立即释放 `_dynamicAsrService`，在 `dispose()` 中也释放
+
+2. **灵感一瞬转录 `asr.dispose()` 位置不当**
+   - `asr.dispose()` 在 `try` 块中调用，如果 `recognizeFile` 抛异常，`OfflineRecognizer` 会泄漏
+   - **解决**：将 `asr` 声明移到 `try` 外，`asr.dispose()` 移到 `finally` 块
+
+3. **`media_ingestion_pipeline.dart` 同样的问题**
+   - `asrService.dispose()` 在 `try` 块中，异常时泄漏
+   - **解决**：同样移到 `finally` 块
+
+### 会话中主要使用的工具
+- Read / Edit / Grep / Glob（文件操作与代码分析）
+- RunCommand（flutter build ios --release / flutter install --release）
+
+### 修改的文件
+
+1. **`/Users/jianma/Desktop/LLM STUDIO/multi_model_client/lib/core/services/asr_input_service.dart`**
+   - **修改内容**：
+     - `stopRecording()` 中增加 `_dynamicAsrService?.dispose()` 和 `_dynamicAsrService = null`
+     - `dispose()` 中增加 `_dynamicAsrService?.dispose()`
+   - **修改原因**：`_dynamicAsrService`（ASRService 含 OfflineRecognizer 原生 C++ 对象）在录音停止后从未释放，导致 sherpa_onnx 原生资源一直占用。当灵感一瞬页面创建新 ASRService 时触发 ONNX Runtime 资源冲突闪退
+
+2. **`/Users/jianma/Desktop/LLM STUDIO/multi_model_client/lib/features/inspiration/presentation/pages/inspiration_page.dart`**
+   - **修改内容**：
+     - 第一个 `_transcribeRecording`（行 433）：`asr` 声明移到 `try` 外，`asr.dispose()` 移到 `finally` 块
+     - 第二个 `_transcribeRecording`（行 1049）：同上处理
+   - **修改原因**：`asr.dispose()` 原在 `try` 块中，如果 `recognizeFile` 抛异常则 OfflineRecognizer 泄漏，导致后续 ASR 操作冲突
+
+3. **`/Users/jianma/Desktop/LLM STUDIO/multi_model_client/lib/core/services/media_ingestion_pipeline.dart`**
+   - **修改内容**：`_transcribeWithASR` 方法中 `asrService` 声明移到 `try` 外，`asrService.dispose()` 移到 `finally` 块
+   - **修改原因**：与灵感一瞬页面同样的问题，异常时 OfflineRecognizer 泄漏

@@ -10,6 +10,21 @@ import 'package:background_downloader/background_downloader.dart' as bgd;
 import '../../storage/database.dart';
 import '../../storage/database_connection.dart';
 
+/// 下载完成事件（用于通知 UI 层注册模型）
+class DownloadCompletedEvent {
+  final String taskId;
+  final String modelId; // HuggingFace 模型 ID
+  final String savePath; // 模型文件完整路径
+  final int fileSize; // 文件大小（字节）
+
+  DownloadCompletedEvent({
+    required this.taskId,
+    required this.modelId,
+    required this.savePath,
+    required this.fileSize,
+  });
+}
+
 /// 下载任务状态
 enum DownloadStatus {
   pending,      // 等待中
@@ -113,6 +128,13 @@ class DownloadTaskManager {
   // 进度通知器
   final ValueNotifier<Map<String, DownloadProgress>> progressNotifier =
       ValueNotifier<Map<String, DownloadProgress>>({});
+
+  // ★★★ 下载完成事件流：通知 UI 层（如 ModelNotifier）注册模型 ★★★
+  // 解决：异步下载完成时，model_market_page 的 onProgress 回调已失效，
+  // 导致模型未注册到 modelProvider，创建会话时误判为"无模型"
+  final StreamController<DownloadCompletedEvent> _completionController =
+      StreamController<DownloadCompletedEvent>.broadcast();
+  Stream<DownloadCompletedEvent> get onDownloadCompleted => _completionController.stream;
 
   // 存储预期哈希值
   final Map<String, String> _expectedHashes = {};
@@ -494,6 +516,18 @@ class DownloadTaskManager {
 
       debugPrint('[DownloadTaskManager] ✅ 下载完成: $filename ($fileSize bytes)');
 
+      // ★★★ 发送下载完成事件，通知 UI 层注册模型 ★★★
+      // 解决：异步下载完成时，model_market_page 的 onProgress 回调已失效
+      if (!_completionController.isClosed) {
+        _completionController.add(DownloadCompletedEvent(
+          taskId: taskId,
+          modelId: effectiveModelId,
+          savePath: savePath,
+          fileSize: fileSize,
+        ));
+        debugPrint('[DownloadTaskManager] 📢 已发送下载完成事件: $effectiveModelId');
+      }
+
       // 清理
       _expectedHashes.remove(taskId);
       _retryCount.remove(taskId);
@@ -727,6 +761,18 @@ class DownloadTaskManager {
         totalBytes: task.totalBytes,
       ));
       return;
+    }
+
+    // ★★★ 确保目标目录存在 ★★★
+    // 修复：删除模型后重新下载时，目标目录可能已被删除，
+    // background_downloader 不会自动创建目录，导致文件保存失败
+    if (task.savePath.isNotEmpty) {
+      final saveDir = task.savePath.substring(0, task.savePath.lastIndexOf('/'));
+      final dir = Directory(saveDir);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+        debugPrint('[DownloadTaskManager] 📁 已创建目标目录: $saveDir');
+      }
     }
 
     // 检查文件是否已存在（用于断点续传）
@@ -1147,6 +1193,7 @@ class DownloadTaskManager {
   void dispose() {
     debugPrint('[DownloadTaskManager] 释放资源...');
     progressNotifier.dispose();
+    _completionController.close();
     _expectedHashes.clear();
     _taskModelMap.clear();
     _retryCount.clear();

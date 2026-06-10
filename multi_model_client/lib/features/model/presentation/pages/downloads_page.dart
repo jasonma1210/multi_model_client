@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/services/model_download/download_task_manager.dart';
 import '../../../../core/storage/database.dart';
+import '../../../../core/models/model_entry.dart';
 import '../../../../core/providers/model_provider.dart';
 
 /// 下载管理页面
@@ -497,7 +498,21 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
     if (confirmed != true) return;
 
     try {
-      // 1. 删除已下载的文件
+      // 1. 通过 filePath 匹配 modelProvider 中的模型（task.modelId 是 HuggingFace ID，不是 UUID）
+      ModelEntry? matchedModel;
+      if (task != null && task.savePath.isNotEmpty) {
+        final modelState = ref.read(modelProvider);
+        matchedModel = modelState.models.where((m) {
+          if (m.filePath == null) return false;
+          // 精确匹配文件路径
+          if (m.filePath == task.savePath) return true;
+          // 兼容：文件在同一目录下
+          if (m.filePath!.contains(task.savePath)) return true;
+          return false;
+        }).firstOrNull;
+      }
+
+      // 2. 删除已下载的文件
       if (task != null && task.savePath.isNotEmpty) {
         final file = File(task.savePath);
         if (await file.exists()) {
@@ -511,15 +526,16 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
         }
       }
 
-      // 2. 级联删除：模型列表中的记录 + 所有关联会话
-      if (task != null && task.modelId.isNotEmpty) {
-        final modelId = task.modelId;
+      // 3. 级联删除：模型列表中的记录 + 所有关联会话
+      if (matchedModel != null) {
         try {
-          await ref.read(modelProvider.notifier).deleteModel(modelId);
-          debugPrint('[DownloadsPage] 已级联删除模型及关联会话: $modelId');
+          await ref.read(modelProvider.notifier).deleteModel(matchedModel.id);
+          debugPrint('[DownloadsPage] 已级联删除模型及关联会话: ${matchedModel.id} (${matchedModel.displayName})');
         } catch (e) {
           debugPrint('[DownloadsPage] 级联删除模型失败: $e');
         }
+      } else {
+        debugPrint('[DownloadsPage] 未找到匹配的模型记录，跳过级联删除');
       }
 
       // 3. 删除数据库中的下载任务记录
@@ -579,7 +595,50 @@ class _DownloadsPageState extends ConsumerState<DownloadsPage> {
         return;
       }
 
-      // 使用平台命令打开文件夹
+      // ★ 修复：iOS 上无法用 `open` 命令打开文件夹，改为显示文件信息
+      if (Platform.isIOS || Platform.isAndroid) {
+        // 移动端：列出目录中的文件并显示
+        final files = <String>[];
+        await for (final entity in directory.list()) {
+          final name = entity.path.split('/').last;
+          final size = entity is File ? ' (${(await entity.length() / 1024 / 1024).toStringAsFixed(1)} MB)' : '/';
+          files.add(name + size);
+        }
+        if (mounted) {
+          showModalBottomSheet(
+            context: context,
+            builder: (ctx) => SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('模型文件目录', style: Theme.of(ctx).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text(dirPath, style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: Colors.grey)),
+                    const Divider(),
+                    if (files.isEmpty)
+                      const Text('目录为空（文件可能未下载完成）', style: TextStyle(color: Colors.orange))
+                    else
+                      ...files.map((f) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(children: [
+                          Icon(f.endsWith('/') ? Icons.folder : Icons.insert_drive_file, size: 18, color: Colors.grey),
+                          const SizedBox(width: 8),
+                          Flexible(child: Text(f, overflow: TextOverflow.ellipsis)),
+                        ]),
+                      )),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      // 桌面端：使用平台命令打开文件夹
       final result = await Process.run('open', [dirPath]);
       
       if (result.exitCode != 0) {

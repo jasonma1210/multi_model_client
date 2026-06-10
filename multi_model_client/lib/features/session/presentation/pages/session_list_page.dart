@@ -312,7 +312,8 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
 
-    return Column(
+    return SafeArea(
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
@@ -349,7 +350,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('MJ Nexus',
+                    Text('MJ Nexus Series',
                         style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                     Text('多模型 AI 助手',
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -365,54 +366,30 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 2),
-              Text('多模型 AI 助手',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                  )),
-            ],
-          ),
-        ),
         const Divider(height: 24),
         Expanded(
           child: SingleChildScrollView(
             child: Column(
               children: [
+                // 1. 会话
                 _NavItem(icon: Icons.chat_outlined, label: l10n.sessions, isActive: true,
                     onTap: () {
                       setState(() => _sidebarOpen = false);
                     }),
-                _NavItem(icon: Icons.smart_toy_outlined, label: l10n.models, isActive: false,
-                    onTap: () {
-                      setState(() => _sidebarOpen = false);
-                      context.go('/settings/models');
-                    }),
-                _NavItem(icon: Icons.psychology_outlined, label: l10n.knowledge, isActive: false,
-                    onTap: () {
-                      setState(() => _sidebarOpen = false);
-                      context.go('/settings/knowledge');
-                    }),
-                const SizedBox(height: 8),
-                // 灵感一瞬入口
+                // 2. 灵感一瞬
                 _NavItem(icon: Icons.lightbulb_outline, label: '灵感一瞬', isActive: false,
                     onTap: () {
                       setState(() => _sidebarOpen = false);
                       _navigateToInspiration(context);
                     }),
+                // 3. 名灵回响
+                _NavItem(icon: Icons.auto_awesome, label: '名灵回响', isActive: false,
+                    onTap: () {
+                      setState(() => _sidebarOpen = false);
+                      context.push('/spirit');
+                    }),
                 const SizedBox(height: 16),
-                // 下载管理入口（带角标显示下载中数量）
-                _DownloadNavItem(
-                  onTap: () {
-                    setState(() => _sidebarOpen = false);
-                    context.push('/downloads');
-                  },
-                ),
-                const SizedBox(height: 8),
+                // 7. 设置
                 _NavItem(icon: Icons.settings_outlined, label: l10n.settings, isActive: false,
                     onTap: () {
                       setState(() => _sidebarOpen = false);
@@ -424,17 +401,21 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
           ),
         ),
       ],
+    ),
     );
   }
 
-  /// 获取当前显示的会话列表
+  /// 获取当前显示的会话列表（过滤掉名灵回响会话）
   Future<List<Session>> _getSessions(SessionManager sessionManager) async {
     if (_showArchived) {
-      return await _folderService.getArchivedSessions();
+      final archived = await _folderService.getArchivedSessions();
+      return archived.where((s) => !s.isSpirit).toList();
     } else if (_selectedFolderId != null) {
-      return await _folderService.getSessionsByFolder(_selectedFolderId!);
+      final folderSessions = await _folderService.getSessionsByFolder(_selectedFolderId!);
+      return folderSessions.where((s) => !s.isSpirit).toList();
     } else {
-      return await sessionManager.getAllSessions();
+      final all = await sessionManager.getAllSessions();
+      return all.where((s) => !s.isSpirit).toList();
     }
   }
 
@@ -715,7 +696,8 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
 
-    return Column(
+    return SafeArea(
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
@@ -750,7 +732,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('MJ Nexus',
+                  Text('MJ Nexus Series',
                       style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 2),
                   Text('多模型 AI 助手',
@@ -763,40 +745,34 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
           ),
         ),
         const Divider(height: 24),
+        // 1. 会话
         _NavItem(icon: Icons.chat_outlined, label: l10n.sessions, isActive: true,
             onTap: () {}),
-        _NavItem(icon: Icons.smart_toy_outlined, label: l10n.models, isActive: false,
-            onTap: () => context.go('/settings/models')),
-        _NavItem(icon: Icons.psychology_outlined, label: l10n.knowledge, isActive: false,
-            onTap: () => context.go('/settings/knowledge')),
-        const SizedBox(height: 8),
-        // 灵感一瞬入口
+        // 2. 灵感一瞬
         _NavItem(icon: Icons.lightbulb_outline, label: '灵感一瞬', isActive: false,
             onTap: () => _navigateToInspiration(context)),
+        // 3. 名灵回响
+        _NavItem(icon: Icons.auto_awesome, label: '名灵回响', isActive: false,
+            onTap: () => context.push('/spirit')),
         const Spacer(),
         const Divider(height: 1),
-        // 下载管理入口（带角标显示下载中数量）
-        _DownloadNavItem(
-          onTap: () => context.push('/downloads'),
-        ),
-        const SizedBox(height: 8),
+        // 7. 设置
         _NavItem(icon: Icons.settings_outlined, label: l10n.settings, isActive: false,
             onTap: () => context.go('/settings')),
         const SizedBox(height: 12),
       ],
+    ),
     );
   }
-
-  // ────────────────────────── 核心：点击「+」的处理逻辑 ──────────────────────────
 
   Future<void> _handleAddSession(BuildContext context) async {
     // 检查是否有可用模型
     final modelState = ref.read(modelProvider);
 
     if (modelState.isEmpty) {
-      // 没有模型 → 直接跳转到模型市场（无需弹窗确认）
+      // 没有模型 → 跳转到模型管理页面（配置模型，而非下载界面）
       if (context.mounted) {
-        context.go('/model-market');
+        context.go('/settings/models');
       }
       return;
     }
@@ -2304,13 +2280,6 @@ class _DownloadNavItemState extends State<_DownloadNavItem> {
                         ),
                       ),
                   ],
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  AppLocalizations.of(context)!.downloadManager,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
                 ),
               ],
             ),

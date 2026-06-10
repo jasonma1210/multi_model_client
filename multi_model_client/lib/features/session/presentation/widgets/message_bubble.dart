@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../domain/dialogue_engine.dart';
 
 // ============================================================
 // 消息解析工具
@@ -702,6 +704,8 @@ class MessageBubble extends StatelessWidget {
   final int? tokenCount;
   final double? tokensPerSecond;
   final WebSearchSummary? webSearchSummary;
+  /// 点击播放语音的回调（仅 AI 消息气泡显示）
+  final VoidCallback? onPlayVoice;
 
   const MessageBubble({
     super.key,
@@ -710,6 +714,7 @@ class MessageBubble extends StatelessWidget {
     this.tokenCount,
     this.tokensPerSecond,
     this.webSearchSummary,
+    this.onPlayVoice,
   });
 
   @override
@@ -742,6 +747,7 @@ class MessageBubble extends StatelessWidget {
                     tokenCount: tokenCount,
                     tokensPerSecond: tokensPerSecond,
                     webSearchSummary: webSearchSummary,
+                    onPlayVoice: onPlayVoice,
                   ),
                 const SizedBox(height: 4),
                 Text(
@@ -846,12 +852,13 @@ class _UserBubble extends StatelessWidget {
 }
 
 /// AI 助手消息气泡
-class _AssistantBubble extends StatelessWidget {
+class _AssistantBubble extends StatefulWidget {
   final dynamic message;
   final String modelId;
   final int? tokenCount;
   final double? tokensPerSecond;
   final WebSearchSummary? webSearchSummary;
+  final VoidCallback? onPlayVoice;
 
   const _AssistantBubble({
     required this.message,
@@ -859,12 +866,69 @@ class _AssistantBubble extends StatelessWidget {
     this.tokenCount,
     this.tokensPerSecond,
     this.webSearchSummary,
+    this.onPlayVoice,
   });
+
+  @override
+  State<_AssistantBubble> createState() => _AssistantBubbleState();
+}
+
+class _AssistantBubbleState extends State<_AssistantBubble> {
+  String? _translatedText;
+  bool _isTranslating = false;
+
+  /// 检测文本是否主要为英文
+  bool _isMainlyEnglish(String text) {
+    final cleaned = text.replaceAll(RegExp(r'[\s\d\p{P}]', unicode: true), '');
+    if (cleaned.isEmpty) return false;
+    final englishChars = RegExp(r'[a-zA-Z]').allMatches(cleaned).length;
+    final chineseChars = RegExp(r'[\u4e00-\u9fff]').allMatches(cleaned).length;
+    return englishChars > chineseChars * 2 && englishChars > 10;
+  }
+
+  /// 使用 LLM 翻译英文到中文
+  Future<void> _translate() async {
+    if (_isTranslating) return;
+    setState(() => _isTranslating = true);
+
+    try {
+      final content = (widget.message.content as String? ?? '');
+      // 清理 TTS 标签和 Markdown 格式
+      final plainText = content
+          .replaceAll(RegExp(r'\[tts[^\]]*\]'), '')
+          .replaceAll(RegExp(r'\[/tts\]'), '')
+          .replaceAll(RegExp(r'```[\s\S]*?```'), '')
+          .replaceAll(RegExp(r'`[^`]*`'), '')
+          .replaceAll(RegExp(r'[*#_~>]'), '')
+          .trim();
+
+      // 通过 ProviderScope 获取 DialogueEngine 进行翻译
+      final container = ProviderScope.containerOf(context);
+      final engine = container.read(dialogueEngineProvider);
+      final result = await engine.translateText(plainText, targetLang: '中文');
+
+      if (mounted) {
+        setState(() {
+          _translatedText = result;
+          _isTranslating = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _translatedText = '翻译失败: $e';
+          _isTranslating = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final parsed = MessageParser.parse(message.content as String? ?? '');
+    final content = widget.message.content as String? ?? '';
+    final parsed = MessageParser.parse(content);
+    final showTranslate = _isMainlyEnglish(parsed.mainContent);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -878,8 +942,8 @@ class _AssistantBubble extends StatelessWidget {
           ),
 
         // 搜索引用区块
-        if (webSearchSummary != null)
-          WebSearchSection(summary: webSearchSummary!),
+        if (widget.webSearchSummary != null)
+          WebSearchSection(summary: widget.webSearchSummary!),
 
         // 正文内容（仅当有正文时显示，避免思考内容为空时也渲染空框）
         if (parsed.mainContent.isNotEmpty)
@@ -888,13 +952,100 @@ class _AssistantBubble extends StatelessWidget {
             theme: theme,
           ),
 
-        // 底部：统计 + 复制
+        // ★ 翻译区域（检测到英文时显示）
+        if (showTranslate) ...[
+          const SizedBox(height: 4),
+          if (_translatedText != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: theme.brightness == Brightness.dark
+                    ? const Color(0xFF1A2A1A)
+                    : const Color(0xFFF0F7F0),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.translate, size: 12, color: theme.colorScheme.primary),
+                      const SizedBox(width: 4),
+                      Text(
+                        '中文翻译',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _translatedText!,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.85),
+                      height: 1.6,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else if (_isTranslating)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: theme.colorScheme.primary),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('翻译中...', style: TextStyle(fontSize: 12, color: theme.colorScheme.primary)),
+                ],
+              ),
+            )
+          else
+            InkWell(
+              onTap: _translate,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.translate, size: 14, color: theme.colorScheme.primary.withValues(alpha: 0.7)),
+                    const SizedBox(width: 4),
+                    Text(
+                      '翻译',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+
+        // 底部：统计 + 播放语音 + 复制
         const SizedBox(height: 6),
         _BubbleFooter(
-          content: message.content as String? ?? '',
-          tokenCount: tokenCount,
-          tokensPerSecond: tokensPerSecond,
+          content: content,
+          tokenCount: widget.tokenCount,
+          tokensPerSecond: widget.tokensPerSecond,
           theme: theme,
+          onPlayVoice: widget.onPlayVoice,
         ),
       ],
     );
@@ -1062,12 +1213,14 @@ class _BubbleFooter extends StatelessWidget {
   final int? tokenCount;
   final double? tokensPerSecond;
   final ThemeData theme;
+  final VoidCallback? onPlayVoice;
 
   const _BubbleFooter({
     required this.content,
     required this.theme,
     this.tokenCount,
     this.tokensPerSecond,
+    this.onPlayVoice,
   });
 
   @override
@@ -1082,6 +1235,14 @@ class _BubbleFooter extends StatelessWidget {
             tokenCount: tokenCount,
             tokensPerSecond: tokensPerSecond,
             theme: theme,
+          ),
+          const SizedBox(width: 10),
+        ],
+        // ★ 播放语音按钮
+        if (onPlayVoice != null) ...[
+          GestureDetector(
+            onTap: onPlayVoice,
+            child: Icon(Icons.volume_up_outlined, size: 14, color: iconColor),
           ),
           const SizedBox(width: 10),
         ],

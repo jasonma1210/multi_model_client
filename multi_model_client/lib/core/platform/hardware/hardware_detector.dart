@@ -7,7 +7,7 @@ import '../models/device_capabilities.dart';
 
 /// 硬件检测服务
 class HardwareDetector {
-  static const MethodChannel _channel = MethodChannel('com.example.ai_assistant/hardware');
+  static const MethodChannel _channel = MethodChannel('hardware_checker');
   static const String _tag = 'HardwareDetector';
 
   /// 获取设备环境信息

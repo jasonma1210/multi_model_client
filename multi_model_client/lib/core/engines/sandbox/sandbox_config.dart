@@ -161,10 +161,12 @@ class SandboxConfig {
     final useMlock = false;
 
     // ── GPU 后端偏好 ──
-    // ★ 根据 llamadart 后端选择指南：
+    // ★ 根据 llamadart 0.6.16+ 后端选择指南 + 骁龙 8 Elite 优化：
     //   Apple 平台: GpuBackend.metal（consolidated runtime）
     //   Windows/Linux: GpuBackend.auto（llamadart 自动检测 CUDA/Vulkan）
-    //   Android: GpuBackend.auto（llamadart 默认 CPU，Vulkan opt-in）
+    //   Android: GpuBackend.vulkan（显式启用 Vulkan，避免默认 CPU 回退）
+    //     - 骁龙 8 Elite 5 的 Adreno GPU 通过 Vulkan 可获得 3-5 倍推理加速
+    //     - 纯 CPU 推理连芯片实力 1/10 都发挥不出来
     //   CPU 回退: GpuBackend.cpu
     final preferredBackend = forceCpuMode
         ? GpuBackend.cpu

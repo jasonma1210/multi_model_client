@@ -241,6 +241,21 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
         type: DriftSqlType.string,
         requiredDuringInsert: false,
       );
+  static const VerificationMeta _isSpiritMeta = const VerificationMeta(
+    'isSpirit',
+  );
+  @override
+  late final GeneratedColumn<bool> isSpirit = GeneratedColumn<bool>(
+    'is_spirit',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_spirit" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -283,6 +298,7 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
     enableCamera,
     enableFileUpload,
     enabledKnowledgeBaseId,
+    isSpirit,
     createdAt,
     updatedAt,
   ];
@@ -445,6 +461,12 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
         ),
       );
     }
+    if (data.containsKey('is_spirit')) {
+      context.handle(
+        _isSpiritMeta,
+        isSpirit.isAcceptableOrUnknown(data['is_spirit']!, _isSpiritMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -542,6 +564,10 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
         DriftSqlType.string,
         data['${effectivePrefix}enabled_knowledge_base_id'],
       ),
+      isSpirit: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_spirit'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -578,6 +604,7 @@ class Session extends DataClass implements Insertable<Session> {
   final bool enableCamera;
   final bool enableFileUpload;
   final String? enabledKnowledgeBaseId;
+  final bool isSpirit;
   final DateTime createdAt;
   final DateTime updatedAt;
   const Session({
@@ -599,6 +626,7 @@ class Session extends DataClass implements Insertable<Session> {
     required this.enableCamera,
     required this.enableFileUpload,
     this.enabledKnowledgeBaseId,
+    required this.isSpirit,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -639,6 +667,7 @@ class Session extends DataClass implements Insertable<Session> {
         enabledKnowledgeBaseId,
       );
     }
+    map['is_spirit'] = Variable<bool>(isSpirit);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -676,6 +705,7 @@ class Session extends DataClass implements Insertable<Session> {
       enabledKnowledgeBaseId: enabledKnowledgeBaseId == null && nullToAbsent
           ? const Value.absent()
           : Value(enabledKnowledgeBaseId),
+      isSpirit: Value(isSpirit),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -711,6 +741,7 @@ class Session extends DataClass implements Insertable<Session> {
       enabledKnowledgeBaseId: serializer.fromJson<String?>(
         json['enabledKnowledgeBaseId'],
       ),
+      isSpirit: serializer.fromJson<bool>(json['isSpirit']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -741,6 +772,7 @@ class Session extends DataClass implements Insertable<Session> {
       'enabledKnowledgeBaseId': serializer.toJson<String?>(
         enabledKnowledgeBaseId,
       ),
+      'isSpirit': serializer.toJson<bool>(isSpirit),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -765,6 +797,7 @@ class Session extends DataClass implements Insertable<Session> {
     bool? enableCamera,
     bool? enableFileUpload,
     Value<String?> enabledKnowledgeBaseId = const Value.absent(),
+    bool? isSpirit,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => Session(
@@ -793,6 +826,7 @@ class Session extends DataClass implements Insertable<Session> {
     enabledKnowledgeBaseId: enabledKnowledgeBaseId.present
         ? enabledKnowledgeBaseId.value
         : this.enabledKnowledgeBaseId,
+    isSpirit: isSpirit ?? this.isSpirit,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -842,6 +876,7 @@ class Session extends DataClass implements Insertable<Session> {
       enabledKnowledgeBaseId: data.enabledKnowledgeBaseId.present
           ? data.enabledKnowledgeBaseId.value
           : this.enabledKnowledgeBaseId,
+      isSpirit: data.isSpirit.present ? data.isSpirit.value : this.isSpirit,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -868,6 +903,7 @@ class Session extends DataClass implements Insertable<Session> {
           ..write('enableCamera: $enableCamera, ')
           ..write('enableFileUpload: $enableFileUpload, ')
           ..write('enabledKnowledgeBaseId: $enabledKnowledgeBaseId, ')
+          ..write('isSpirit: $isSpirit, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -875,7 +911,7 @@ class Session extends DataClass implements Insertable<Session> {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     name,
     folderId,
@@ -894,9 +930,10 @@ class Session extends DataClass implements Insertable<Session> {
     enableCamera,
     enableFileUpload,
     enabledKnowledgeBaseId,
+    isSpirit,
     createdAt,
     updatedAt,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -919,6 +956,7 @@ class Session extends DataClass implements Insertable<Session> {
           other.enableCamera == this.enableCamera &&
           other.enableFileUpload == this.enableFileUpload &&
           other.enabledKnowledgeBaseId == this.enabledKnowledgeBaseId &&
+          other.isSpirit == this.isSpirit &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -942,6 +980,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
   final Value<bool> enableCamera;
   final Value<bool> enableFileUpload;
   final Value<String?> enabledKnowledgeBaseId;
+  final Value<bool> isSpirit;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<int> rowid;
@@ -964,6 +1003,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     this.enableCamera = const Value.absent(),
     this.enableFileUpload = const Value.absent(),
     this.enabledKnowledgeBaseId = const Value.absent(),
+    this.isSpirit = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -987,6 +1027,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     this.enableCamera = const Value.absent(),
     this.enableFileUpload = const Value.absent(),
     this.enabledKnowledgeBaseId = const Value.absent(),
+    this.isSpirit = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
     this.rowid = const Value.absent(),
@@ -1014,6 +1055,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     Expression<bool>? enableCamera,
     Expression<bool>? enableFileUpload,
     Expression<String>? enabledKnowledgeBaseId,
+    Expression<bool>? isSpirit,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
@@ -1041,6 +1083,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
       if (enableFileUpload != null) 'enable_file_upload': enableFileUpload,
       if (enabledKnowledgeBaseId != null)
         'enabled_knowledge_base_id': enabledKnowledgeBaseId,
+      if (isSpirit != null) 'is_spirit': isSpirit,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -1066,6 +1109,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     Value<bool>? enableCamera,
     Value<bool>? enableFileUpload,
     Value<String?>? enabledKnowledgeBaseId,
+    Value<bool>? isSpirit,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<int>? rowid,
@@ -1091,6 +1135,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
       enableFileUpload: enableFileUpload ?? this.enableFileUpload,
       enabledKnowledgeBaseId:
           enabledKnowledgeBaseId ?? this.enabledKnowledgeBaseId,
+      isSpirit: isSpirit ?? this.isSpirit,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -1160,6 +1205,9 @@ class SessionsCompanion extends UpdateCompanion<Session> {
         enabledKnowledgeBaseId.value,
       );
     }
+    if (isSpirit.present) {
+      map['is_spirit'] = Variable<bool>(isSpirit.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1193,6 +1241,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
           ..write('enableCamera: $enableCamera, ')
           ..write('enableFileUpload: $enableFileUpload, ')
           ..write('enabledKnowledgeBaseId: $enabledKnowledgeBaseId, ')
+          ..write('isSpirit: $isSpirit, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -12293,6 +12342,7 @@ typedef $$SessionsTableCreateCompanionBuilder =
       Value<bool> enableCamera,
       Value<bool> enableFileUpload,
       Value<String?> enabledKnowledgeBaseId,
+      Value<bool> isSpirit,
       required DateTime createdAt,
       required DateTime updatedAt,
       Value<int> rowid,
@@ -12317,6 +12367,7 @@ typedef $$SessionsTableUpdateCompanionBuilder =
       Value<bool> enableCamera,
       Value<bool> enableFileUpload,
       Value<String?> enabledKnowledgeBaseId,
+      Value<bool> isSpirit,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<int> rowid,
@@ -12418,6 +12469,11 @@ class $$SessionsTableFilterComposer
 
   ColumnFilters<String> get enabledKnowledgeBaseId => $composableBuilder(
     column: $table.enabledKnowledgeBaseId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isSpirit => $composableBuilder(
+    column: $table.isSpirit,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -12531,6 +12587,11 @@ class $$SessionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get isSpirit => $composableBuilder(
+    column: $table.isSpirit,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -12631,6 +12692,9 @@ class $$SessionsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<bool> get isSpirit =>
+      $composableBuilder(column: $table.isSpirit, builder: (column) => column);
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -12684,6 +12748,7 @@ class $$SessionsTableTableManager
                 Value<bool> enableCamera = const Value.absent(),
                 Value<bool> enableFileUpload = const Value.absent(),
                 Value<String?> enabledKnowledgeBaseId = const Value.absent(),
+                Value<bool> isSpirit = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -12706,6 +12771,7 @@ class $$SessionsTableTableManager
                 enableCamera: enableCamera,
                 enableFileUpload: enableFileUpload,
                 enabledKnowledgeBaseId: enabledKnowledgeBaseId,
+                isSpirit: isSpirit,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -12730,6 +12796,7 @@ class $$SessionsTableTableManager
                 Value<bool> enableCamera = const Value.absent(),
                 Value<bool> enableFileUpload = const Value.absent(),
                 Value<String?> enabledKnowledgeBaseId = const Value.absent(),
+                Value<bool> isSpirit = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -12752,6 +12819,7 @@ class $$SessionsTableTableManager
                 enableCamera: enableCamera,
                 enableFileUpload: enableFileUpload,
                 enabledKnowledgeBaseId: enabledKnowledgeBaseId,
+                isSpirit: isSpirit,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,

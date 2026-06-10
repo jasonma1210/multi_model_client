@@ -122,13 +122,21 @@ class PlatformProfile {
 
   /// 转换为 llamadart 的 GpuBackend
   ///
-  /// ★ 基于 llamadart 后端选择指南：
+  /// ★ 基于 llamadart 0.6.16+ 后端选择指南 + 骁龙 8 Elite 优化：
   ///   Apple 平台: GpuBackend.metal（consolidated runtime，自动使用 Metal）
   ///   Windows/Linux: GpuBackend.auto（llamadart 自动检测 CUDA/Vulkan）
-  ///   Android: GpuBackend.auto（llamadart 默认 CPU，Vulkan opt-in via pubspec.yaml）
+  ///   Android: GpuBackend.vulkan（显式启用 Vulkan，避免默认回退到 CPU）
+  ///     - 骁龙 8 Elite 5 的 Adreno GPU 通过 Vulkan 可获得 3-5 倍推理加速
+  ///     - llamadart 默认 Android 使用 CPU，必须显式指定 vulkan 才能启用 GPU
+  ///     - 如果 Vulkan 不可用，LocalFFIEngine 会自动回退到 CPU 模式
+  ///   CPU 回退: GpuBackend.cpu
   ///   未知: GpuBackend.auto
   GpuBackend toLlamadartGpuBackend() {
     if (isApple) return GpuBackend.metal;
+    // ★ Android 显式启用 Vulkan：避免骁龙旗舰芯片纯 CPU "裸奔"
+    if (isMobile && primaryGpuBackend == SandboxGpuBackend.vulkan) {
+      return GpuBackend.vulkan;
+    }
     return GpuBackend.auto;
   }
 

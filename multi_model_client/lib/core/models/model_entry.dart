@@ -44,7 +44,7 @@ class LocalModelParams {
     this.contextSize = 32768, // 默认 32K 上下文
     this.contextOverflow = 'truncate_middle',
     this.stopString,
-    this.cpuThreads = 4,
+    this.cpuThreads = 2, // ★ 默认 2 线程：骁龙 8 Elite 有 2 个超大核，2 线程绑定超大核效果最佳
     this.gpuLayers = 99, // 默认全部 GPU 加速
     this.topK = 40,
     this.repeatPenaltyEnabled = true,
@@ -178,7 +178,7 @@ class RemoteModelConfig {
     required this.modelId,
     this.temperature = 0.7,
     this.topP = 0.9,
-    this.maxTokens = 4096,
+    this.maxTokens = 8192,
     this.streamEnabled = true,
     this.numKeep,
     this.numCtx,
@@ -242,7 +242,7 @@ class RemoteModelConfig {
       modelId: json['modelId'] as String? ?? '',
       temperature: (json['temperature'] as num?)?.toDouble() ?? 0.7,
       topP: (json['topP'] as num?)?.toDouble() ?? 0.9,
-      maxTokens: json['maxTokens'] as int? ?? 4096,
+      maxTokens: json['maxTokens'] as int? ?? 8192,
       streamEnabled: json['streamEnabled'] as bool? ?? true,
       numKeep: json['numKeep'] as int?,
       numCtx: json['numCtx'] as int?,

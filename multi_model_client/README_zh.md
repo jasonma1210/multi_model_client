@@ -1,7 +1,7 @@
-# MJ Nexus - 多模态 AI 助手
+# MJ Nexus Series:灵犀通 - 多模态 AI 助手
 
 <p align="center">
-  <img src="assets/mj_nexus_logo.png" width="120" alt="MJ Nexus Logo"/>
+  <img src="assets/mj_nexus_logo.png" width="120" alt="MJ Nexus Series Logo"/>
 </p>
 
 <p align="center">
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.30.5-blue" alt="版本"/>
+  <img src="https://img.shields.io/badge/version-0.40.0-blue" alt="版本"/>
   <img src="https://img.shields.io/badge/flutter-3.x-blue" alt="Flutter"/>
   <img src="https://img.shields.io/badge/dart-3.10.7+-blue" alt="Dart"/>
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20macOS-green" alt="平台"/>
@@ -18,7 +18,7 @@
 
 ---
 
-**MJ Nexus** 是一款功能强大的跨平台 AI 助手应用，支持本地和远程大语言模型、实时语音对话、RAG 知识库、记忆引擎和多模态推理能力。
+**MJ Nexus Series:灵犀通** 是一款功能强大的跨平台 AI 助手应用，支持本地和远程大语言模型、实时语音对话、RAG 知识库、记忆引擎和多模态推理能力。
 
 ## ✨ 核心功能
 
@@ -190,9 +190,23 @@ flutter build ios --release
 
 ## 📦 发布版本
 
-从 [Releases](https://github.com/jasonma1210/multi_model_client/releases) 页面下载最新版本 (v0.30.0)：
+从 [Releases](https://github.com/jasonma1210/multi_model_client/releases) 页面下载最新版本 (v0.40.0)：
 - `app-release.apk` — Android APK
-- `multi_model_client.app.dmg` — macOS DMG
+- `MJ_Nexus_Series.dmg` — macOS DMG
+
+## 📋 更新日志
+
+### v0.40.0 (2026-06-06)
+
+**品牌更新**
+- 应用更名为 **MJ Nexus Series:Synpse**（英文） / **MJ Nexus Series:灵犀通**（中文）
+- 更新所有平台的应用标题（Android、iOS、macOS）
+
+**TTS 语音改进**
+- 默认 TTS 提供商更改为 **MiMo**（云端 TTS），语音质量更好
+- 移除自动降级/回退逻辑 — 用户完全控制 TTS 提供商切换
+- 新增 **1分钟总超时** 机制 — 语音输出如在1分钟内未完成，自动停止
+- 不再需要等待 20-30 秒自动切换提供商
 
 ## 📄 许可证
 

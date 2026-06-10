@@ -281,9 +281,9 @@ class HardwareCompatibilityChecker {
       debugPrint('Error getting recommended config: $e');
       return {
         'contextSize': 2048,
-        'threads': 4,
+        'threads': 2, // ★ 默认 2 线程：骁龙 8 Elite 超大核绑定
         'useGpu': false,
-        'batchSize': 512,
+        'batchSize': 128, // ★ 默认 128：移动端大 batch 会导致首字延迟
       };
     }
   }

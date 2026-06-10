@@ -233,6 +233,15 @@ class LocalFFIEngine {
       // ★ 安全模式 = CPU 模式，必须同时设置 forceCpuMode
       forceCpuMode = true;
     }
+    
+    // ★★★ iOS 临时方案：默认使用 CPU 模式 ★★★
+    // llamadart 的 Metal 后端在当前 iOS 26 设备上会触发 SIGSEGV，
+    // 该信号无法被 Dart try-catch 捕获，导致 App 直接闪退。
+    // 临时在 iOS 上默认使用 CPU 模式（gpuLayers=0），待 llamadart 修复 Metal 问题后恢复
+    if (Platform.isIOS && !forceCpuMode) {
+      debugPrint('[LocalFFIEngine] 🔧 iOS 平台临时默认使用 CPU 模式（防止 Metal SIGSEGV）');
+      forceCpuMode = true;
+    }
 
     // ★★★ 写入崩溃标记（加载前）★★★
     // 如果加载过程中 SIGABRT 崩溃，标记会保留，下次启动时检测到
@@ -243,26 +252,39 @@ class LocalFFIEngine {
 
     // ★ 修复：处理模型路径
     // 情况1：路径包含 / 或 \，可能是完整路径
-    //   - 如果是 xxx.gguf/xxx.gguf（重复），提取文件名并搜索
-    //   - 否则直接使用
+    //   - 如果文件存在，直接使用
+    //   - 如果文件不存在（iOS 沙盒路径变化等），提取文件名重新搜索
+    //   - 特殊处理 xxx.gguf/xxx.gguf 重复路径
     // 情况2：路径不包含 / 或 \，只保存了文件名，需要搜索
     String fullModelPath = modelPath;
     
     if (modelPath.contains('/') || modelPath.contains('\\')) {
-      // 完整路径，检查是否重复（xxx.gguf/xxx.gguf）
-      final pathParts = modelPath.split('/');
-      if (pathParts.length >= 2) {
-        final lastPart = pathParts.last;
-        final secondLastPart = pathParts[pathParts.length - 2];
-        if (secondLastPart.endsWith('.gguf') && lastPart.endsWith('.gguf')) {
-          // 重复了！提取文件名
-          final fileName = lastPart;
-          debugPrint('LocalFFIEngine: 检测到重复路径，提取文件名: $fileName');
-          final foundPath = await _findModelFile(fileName);
-          if (foundPath != null) {
-            fullModelPath = foundPath;
-            debugPrint('LocalFFIEngine: ✅ 找到模型文件: $fullModelPath');
+      // 完整路径，先检查文件是否存在
+      if (await File(modelPath).exists()) {
+        fullModelPath = modelPath;
+      } else {
+        // ★ iOS 沙盒路径可能变化（每次安装后 UUID 不同），需要重新搜索
+        final fileName = modelPath.split('/').last;
+        debugPrint('LocalFFIEngine: 文件不存在，提取文件名重新搜索: $fileName');
+        
+        // 检查是否重复路径（xxx.gguf/xxx.gguf）
+        final pathParts = modelPath.split('/');
+        if (pathParts.length >= 2) {
+          final lastPart = pathParts.last;
+          final secondLastPart = pathParts[pathParts.length - 2];
+          if (secondLastPart.endsWith('.gguf') && lastPart.endsWith('.gguf')) {
+            debugPrint('LocalFFIEngine: 检测到重复路径，提取文件名: $lastPart');
           }
+        }
+        
+        // 在所有模型目录中搜索
+        final foundPath = await _findModelFile(fileName);
+        if (foundPath != null) {
+          fullModelPath = foundPath;
+          debugPrint('LocalFFIEngine: ✅ 重新搜索找到模型文件: $fullModelPath');
+        } else {
+          // 找不到，保留原路径（会触发后续的文件不存在错误）
+          debugPrint('LocalFFIEngine: ⚠️ 重新搜索未找到文件: $fileName');
         }
       }
     } else {
@@ -328,10 +350,36 @@ class LocalFFIEngine {
     debugPrint('[LocalFFIEngine] 📊 内存预估: 模型${modelSizeMB}MB + KV${kvCacheMB}MB + 运行时256MB = 约${estimatedMemoryMB}MB');
     debugPrint('[LocalFFIEngine] 📊 设备可用: ${availableMB}MB，预留25%后: ${safetyThreshold}MB');
     
-    // 如果预估内存超过安全阈值，尝试降低配置
-    if (estimatedMemoryMB > safetyThreshold) {
+    // ★★★ Android Swap/ZRAM 防护 ★★★
+    // 大模型推理是"内存带宽受限"任务，一旦触发 ZRAM/Swap：
+    // - 闪存速度比 LPDDR5X 慢几十倍
+    // - 生成速度从 20 tokens/s 暴跌到 1 tokens/s
+    // 防护策略：确保模型内存需求 < 可用内存的 75%，避免触发 Swap
+    if (Platform.isAndroid && estimatedMemoryMB > safetyThreshold) {
+      debugPrint('[LocalFFIEngine] ⚠️ Android Swap 防护触发！');
+      debugPrint('[LocalFFIEngine] ⚠️ 预估内存 ${estimatedMemoryMB}MB > 安全阈值 ${safetyThreshold}MB');
+      debugPrint('[LocalFFIEngine] ⚠️ 触发 Swap 会导致推理速度暴跌 20x，必须降低配置');
+      
+      // 策略1：降低 contextSize（KV Cache 是内存大头）
+      final reducedContextSize = (config.contextSize * 0.6).toInt().clamp(2048, 65536);
+      debugPrint('[LocalFFIEngine] 🔧 降低 contextSize: ${config.contextSize} → $reducedContextSize');
+      
+      // 策略2：如果降低 context 后仍然超限，进一步降低 GPU 层数
+      // GPU offload 需要额外显存，减少 GPU 层可以释放部分内存
+      var adjustedGpuLayers = params?.gpuLayers ?? config.gpuLayers;
+      final reestimatedMB = modelSizeMB + (reducedContextSize * 50) ~/ 1024 + 256;
+      if (reestimatedMB > safetyThreshold && adjustedGpuLayers > 20) {
+        adjustedGpuLayers = (adjustedGpuLayers * 0.6).round().clamp(0, 999);
+        debugPrint('[LocalFFIEngine] 🔧 降低 GPU 层数: ${params?.gpuLayers ?? config.gpuLayers} → $adjustedGpuLayers');
+      }
+      
+      params = (params ?? const LocalModelParams()).copyWith(
+        contextSize: reducedContextSize,
+        gpuLayers: adjustedGpuLayers,
+      );
+    } else if (estimatedMemoryMB > safetyThreshold) {
+      // 非 Android 平台：温和降低配置
       debugPrint('[LocalFFIEngine] ⚠️ 预估内存超过安全阈值，尝试降低配置...');
-      // 降低 contextSize，缩减比例从 60% 放宽到 75%
       final reducedContextSize = (config.contextSize * 0.75).toInt().clamp(2048, 65536);
       debugPrint('[LocalFFIEngine] 🔧 降低 contextSize: ${config.contextSize} → $reducedContextSize');
       params = (params ?? const LocalModelParams()).copyWith(
@@ -385,6 +433,16 @@ class LocalFFIEngine {
       // 构建模型参数（异步，根据设备内存动态调整）
       var modelParams = await _buildModelParams(params, forceCpuMode: forceCpuMode);
       
+      // ★★★ 加载前打印完整参数（方便排查 Prefill 卡死问题）★★★
+      debugPrint('[LocalFFIEngine] 🚀 loadModel 参数: gpuLayers=${modelParams.gpuLayers}, '
+          'contextSize=${modelParams.contextSize}, '
+          'threads=${modelParams.numberOfThreads}, '
+          'batchThreads=${modelParams.numberOfThreadsBatch}, '
+          'batchSize=${modelParams.batchSize}, '
+          'microBatchSize=${modelParams.microBatchSize}, '
+          'flashAttention=${modelParams.flashAttention}, '
+          'preferredBackend=${modelParams.preferredBackend}');
+      
       // 使用 llamadart 加载模型
       // ★★★ 关键：这里可能触发 SIGSEGV（Metal 缓冲区分配失败）★★★
       await engine.loadModel(
@@ -405,14 +463,30 @@ class LocalFFIEngine {
         final mmprojFullPath = await _findMmprojFile(mmprojPath, fullModelPath);
         
         if (mmprojFullPath != null) {
-          try {
-            debugPrint('[LocalFFIEngine] 🔄 正在加载 mmproj: $mmprojFullPath');
-            await engine.loadMultimodalProjector(mmprojFullPath);
-            debugPrint('[LocalFFIEngine] ✅ mmproj loaded: $mmprojFullPath');
-          } catch (e, stack) {
-            debugPrint('[LocalFFIEngine] ⚠️ Failed to load mmproj: $e');
-            debugPrint('[LocalFFIEngine] ⚠️ Stack: $stack');
-          }
+          // ★★★ 暂时跳过 mmproj 加载，防止损坏文件触发 C++ SIGSEGV ★★★
+          // llamadart 的 mtmd_init_from_file 在遇到损坏/无效的 mmproj 文件时
+          // 会在 Metal 缓冲区分配阶段触发 SIGSEGV，导致整个 App 闪退
+          // Dart 的 try-catch 无法捕获 SIGSEGV，所以暂时禁用 mmproj 加载
+          // TODO: 找到安全验证 mmproj 文件的方法后再启用
+          debugPrint('[LocalFFIEngine] ⚠️ mmproj 加载已暂时禁用（防止 SIGSEGV 崩溃）');
+          debugPrint('[LocalFFIEngine] ⚠️ 多模态（图片理解）功能暂不可用');
+          // try {
+          //   final mmprojFile = File(mmprojFullPath);
+          //   final mmprojSize = await mmprojFile.length();
+          //   debugPrint('[LocalFFIEngine] mmproj 文件大小: ${mmprojSize ~/ (1024 * 1024)}MB');
+          //   
+          //   // mmproj 文件至少 1MB
+          //   if (mmprojSize < 1024 * 1024) {
+          //     debugPrint('[LocalFFIEngine] ⚠️ mmproj 文件异常（过小: ${mmprojSize ~/ 1024}KB），可能已损坏，跳过加载');
+          //   } else {
+          //     debugPrint('[LocalFFIEngine] 🔄 正在加载 mmproj: $mmprojFullPath');
+          //     await engine.loadMultimodalProjector(mmprojFullPath);
+          //     debugPrint('[LocalFFIEngine] ✅ mmproj loaded: $mmprojFullPath');
+          //   }
+          // } catch (e, stack) {
+          //   debugPrint('[LocalFFIEngine] ⚠️ Failed to load mmproj: $e');
+          //   debugPrint('[LocalFFIEngine] ⚠️ Stack: $stack');
+          // }
         } else {
           debugPrint('[LocalFFIEngine] ⚠️ mmproj file not found anywhere: $mmprojPath');
         }
@@ -440,31 +514,29 @@ class LocalFFIEngine {
       
       // ★★★ SIGSEGV / Metal 崩溃 CPU 回退 ★★★
       // 检测是否是 Metal/GPU 相关的原生崩溃
+      // 注意：匹配模式必须精确，避免误判普通 Dart 异常为 GPU 崩溃
+      // 误判会触发 _llamaEngine?.dispose() + CPU 回退，可能导致 native crash
       final errorStr = e.toString().toLowerCase();
       final isGpuCrash = 
           // SIGSEGV / EXC_BAD_ACCESS
           errorStr.contains('sigsegv') ||
           errorStr.contains('exc_bad_access') ||
-          errorStr.contains('access error') ||
           // Metal specific
-          errorStr.contains('metal') ||
-          errorStr.contains('gpu') ||
-          // Address / pointer
-          errorStr.contains('address') ||
-          // General signal
-          errorStr.contains('signal') ||
-          errorStr.contains('abort') ||
-          // llama.cpp internal
-          errorStr.contains('buffer') && (errorStr.contains('alloc') || errorStr.contains('fail')) ||
-          errorStr.contains('ggml_backend') ||
           errorStr.contains('ggml_metal') ||
-          // SIGILL (也在这里处理，因为也是信号崩溃)
+          errorStr.contains('metal') && errorStr.contains('error') ||
+          errorStr.contains('gpu') && (errorStr.contains('crash') || errorStr.contains('error') || errorStr.contains('fail')) ||
+          // llama.cpp internal
+          errorStr.contains('buffer') && (errorStr.contains('alloc') || errorStr.contains('fail')) && errorStr.contains('ggml') ||
+          errorStr.contains('ggml_backend') ||
+          // SIGILL
           errorStr.contains('sigill') ||
-          errorStr.contains('illegal') ||
+          errorStr.contains('illegal instruction') ||
           errorStr.contains('signal 4') ||
-          errorStr.contains('ill_opc') ||
-          errorStr.contains('sme') ||
-          errorStr.contains('sve');
+          errorStr.contains('signal 11') ||
+          errorStr.contains('signal 6') ||
+          // SME/SVE
+          errorStr.contains('sme') && errorStr.contains('instruction') ||
+          errorStr.contains('sve') && errorStr.contains('instruction');
 
       if (isGpuCrash) {
         debugPrint('[LocalFFIEngine] 🔄 检测到 GPU/Metal 崩溃，准备 CPU 回退...');
@@ -481,13 +553,16 @@ class LocalFFIEngine {
           _llamaEngine = cpuEngine;
           
           // 使用纯 CPU 模式（gpuLayers = 0）
+      // ★ Android Metal 崩溃回退也使用优化的 batch 大小
+      final isAndroidFallback = Platform.isAndroid;
+      final fallbackThreads = isAndroidFallback ? 2 : (Platform.numberOfProcessors > 4 ? 6 : 4);
       final modelParams = ModelParams(
         gpuLayers: 0,  // 禁用 GPU 加速
         contextSize: (params?.contextSize ?? 4096).clamp(512, 8192),
-        numberOfThreads: Platform.numberOfProcessors > 4 ? 6 : 4,
-        numberOfThreadsBatch: Platform.numberOfProcessors > 4 ? 6 : 4,
-        batchSize: 512,
-        microBatchSize: 512,
+        numberOfThreads: fallbackThreads,
+        numberOfThreadsBatch: fallbackThreads,
+        batchSize: isAndroidFallback ? 128 : 512,
+        microBatchSize: isAndroidFallback ? 64 : 512,
         flashAttention: FlashAttention.disabled,
       );
           
@@ -765,8 +840,19 @@ class LocalFFIEngine {
     if (engine == null) {
       throw LocalFFIException('LocalFFIEngine._llamaEngine is null after _ensureInitialized().');
     }
+
+    // ★★★ Prefill 阶段诊断日志 ★★★
+    debugPrint('[LocalFFIEngine] ⏱️ generate() 开始 engine.create() → Prefill...');
+    final prefillStopwatch = Stopwatch()..start();
+    bool firstChunkReceived = false;
+
     try {
       await for (final chunk in engine.create(llamaMessages)) {
+        if (!firstChunkReceived) {
+          firstChunkReceived = true;
+          prefillStopwatch.stop();
+          debugPrint('[LocalFFIEngine] ✅ generate() Prefill 完成！首 token 耗时=${prefillStopwatch.elapsedMilliseconds}ms');
+        }
         _contextInvalidated = false;
         if (chunk.choices.isEmpty) continue;
         final content = chunk.choices.first.delta.content;
@@ -777,12 +863,14 @@ class LocalFFIEngine {
     } catch (e) {
       // 上下文失效错误：尝试自动重载并重试
       final errMsg = e.toString().toLowerCase();
-      // 扩展错误检测：包含 "message"、"class"、"has no instance" 等
+      // ★★★ 精确匹配上下文失效错误，避免误判普通 Dart 异常 ★★★
+      // 误判会触发 _autoReloadContext() → dispose() → native crash
       final isContextError = errMsg.contains('no such instance') ||
-          errMsg.contains('no such') ||
-          errMsg.contains('message') && (errMsg.contains('class') || errMsg.contains('instance')) ||
-          errMsg.contains('context') ||
-          errMsg.contains('instance');
+          errMsg.contains('context') && errMsg.contains('invalid') ||
+          errMsg.contains('context') && errMsg.contains('error') && errMsg.contains('llama') ||
+          errMsg.contains('failed to decode') ||
+          errMsg.contains('context overflow') ||
+          errMsg.contains('kv cache');
       
       if (isContextError && _currentModelPath != null) {
         debugPrint('[LocalFFIEngine] ❌ generate 上下文错误: $e，重试...');
@@ -852,6 +940,14 @@ class LocalFFIEngine {
     if (engine == null) {
       throw LocalFFIException('LocalFFIEngine._llamaEngine is null after _ensureInitialized().');
     }
+
+    // ★★★ Prefill 阶段诊断日志 ★★★
+    // 骁龙 8 Elite 上 Vulkan Prefill 可能卡死数分钟
+    // 此日志帮助定位卡在哪个阶段
+    debugPrint('[LocalFFIEngine] ⏱️ 开始 engine.create() → Prefill 阶段...');
+    debugPrint('[LocalFFIEngine] ⏱️ 消息数=${llamaMessages.length}, 上下文=${_contextMaxSize ?? "unknown"}');
+    final prefillStopwatch = Stopwatch()..start();
+
     try {
       // ★★★ 诊断：流式推理 token 计数 ★★★
       int chunkCount = 0;
@@ -859,6 +955,10 @@ class LocalFFIEngine {
       int emptyAfterCleanCount = 0;
       final stopwatch = Stopwatch()..start();
       await for (final chunk in engine.create(llamaMessages)) {
+        if (chunkCount == 0) {
+          prefillStopwatch.stop();
+          debugPrint('[LocalFFIEngine] ✅ Prefill 完成！首 token 耗时=${prefillStopwatch.elapsedMilliseconds}ms');
+        }
         chunkCount++;
         // 上下文重置成功，正常推理
         _contextInvalidated = false;
@@ -887,25 +987,20 @@ class LocalFFIEngine {
       final errMsg = e.toString().toLowerCase();
 
       // ★★★ 检测上下文失效错误 ★★★
-      // 扩展错误检测：包含 "message"、"class"、"has no instance" 等
+      // 注意：匹配模式必须精确，避免误判普通 Dart 异常为上下文错误
+      // 误判会导致 _autoReloadContext() 被触发，dispose() 可能导致 native crash
       final isContextError = errMsg.contains('no such instance') ||
-          errMsg.contains('no such') ||
-          errMsg.contains('message') && (errMsg.contains('class') || errMsg.contains('instance')) ||
-          errMsg.contains('context') && (errMsg.contains('invalid') ||
-              errMsg.contains('error') ||
-              errMsg.contains('null') ||
-              errMsg.contains('not found')) ||
-          errMsg.contains('instance') && errMsg.contains('error') ||
+          errMsg.contains('context') && errMsg.contains('invalid') ||
+          errMsg.contains('context') && errMsg.contains('error') && errMsg.contains('llama') ||
           errMsg.contains('failed to decode') ||
           errMsg.contains('context overflow') ||
           errMsg.contains('kv cache');
 
       // ★★★ 检测 SME/SVE 指令集错误 ★★★
       final isSigillError = errMsg.contains('sigill') ||
-          errMsg.contains('illegal') ||
-          errMsg.contains('sme') ||
+          errMsg.contains('illegal instruction') ||
           errMsg.contains('signal 4') ||
-          errMsg.contains('illegal instruction');
+          errMsg.contains('sme') && errMsg.contains('instruction');
 
       // ★★★ 检测 OOM / 内存不足错误 ★★★
       final isOOMError = errMsg.contains('out of memory') ||
@@ -966,16 +1061,16 @@ class LocalFFIEngine {
       }
 
       // ★★★ 检测 GPU/Metal 崩溃（推理阶段）★★★
-      // 与 loadModel 中的 GPU 崩溃检测逻辑一致
+      // 注意：匹配模式必须精确，避免误判网络错误等普通异常
       final isGpuCrash = errMsg.contains('sigsegv') ||
           errMsg.contains('exc_bad_access') ||
-          errMsg.contains('metal') ||
-          errMsg.contains('gpu') ||
           errMsg.contains('ggml_metal') ||
           errMsg.contains('ggml_backend') ||
-          (errMsg.contains('buffer') && (errMsg.contains('alloc') || errMsg.contains('fail'))) ||
-          errMsg.contains('abort') ||
-          errMsg.contains('signal');
+          errMsg.contains('metal') && errMsg.contains('error') ||
+          errMsg.contains('gpu') && (errMsg.contains('crash') || errMsg.contains('error') || errMsg.contains('fail')) ||
+          (errMsg.contains('buffer') && (errMsg.contains('alloc') || errMsg.contains('fail')) && errMsg.contains('ggml')) ||
+          errMsg.contains('signal 11') ||
+          errMsg.contains('signal 6');
 
       if (isGpuCrash && _currentModelPath != null) {
         debugPrint('[LocalFFIEngine] ❌ 推理阶段 GPU/Metal 崩溃: $e');
@@ -1188,6 +1283,16 @@ class LocalFFIEngine {
       }
     }
 
+    // ★ 安全检查：确保消息列表中至少有一条 user 消息
+    // Hermes 等模板要求必须有 user 消息，否则报 "No user query found in messages"
+    if (!llamaMessages.any((m) => m.role == LlamaChatRole.user)) {
+      debugPrint('[LocalFFIEngine] ⚠️ 消息列表中没有 user 消息，追加占位 user 消息');
+      llamaMessages.add(LlamaChatMessage.fromText(
+        role: LlamaChatRole.user,
+        text: '你好',
+      ));
+    }
+
     return llamaMessages;
   }
 
@@ -1316,17 +1421,30 @@ class LocalFFIEngine {
   /// 根据设备内存动态调整配置，避免 OOM 闪退
   /// [forceCpuMode] - 强制 CPU 模式（Metal 不可用时调用）
   Future<ModelParams> _buildModelParams(LocalModelParams? params, {bool forceCpuMode = false}) async {
+    // ★★★ Android 批处理大小优化 ★★★
+    // batchSize=512 在骁龙 8 Elite 上会导致首字延迟 1 分钟！
+    // 原因：大 batch 在 Prefill 阶段需要一次性处理大量 token，
+    //        移动端 GPU 内存带宽不足，导致 Prefill 极慢
+    // 解决：Android 使用 batchSize=128, microBatchSize=64
+    //       桌面端保持 batchSize=512, microBatchSize=512
+    final isAndroid = Platform.isAndroid;
+    final defaultBatchSize = isAndroid ? 128 : 512;
+    final defaultMicroBatchSize = isAndroid ? 64 : 512;
+
     // 强制 CPU 模式：禁用所有 GPU 加速
     if (forceCpuMode) {
-      final threads = Platform.numberOfProcessors > 4 ? 6 : 4;
-      debugPrint('[LocalFFIEngine] 🔧 强制CPU模式: gpuLayers=0, threads=$threads, flashAttention=false');
+      // ★ Android CPU 模式：2 线程绑定超大核
+      final threads = isAndroid ? 2 : (Platform.numberOfProcessors > 4 ? 6 : 4);
+      final cpuBatchSize = isAndroid ? 128 : 512;
+      final cpuMicroBatchSize = isAndroid ? 64 : 512;
+      debugPrint('[LocalFFIEngine] 🔧 强制CPU模式: gpuLayers=0, threads=$threads, batch=$cpuBatchSize, flashAttention=false');
       return ModelParams(
         gpuLayers: 0,
         contextSize: (params?.contextSize ?? 4096).clamp(512, 8192),
         numberOfThreads: threads,
         numberOfThreadsBatch: threads,
-        batchSize: 512,
-        microBatchSize: 512,
+        batchSize: cpuBatchSize,
+        microBatchSize: cpuMicroBatchSize,
         flashAttention: FlashAttention.disabled,
       );
     }
@@ -1339,24 +1457,24 @@ class LocalFFIEngine {
       final effectiveGpuLayers = forceCpuMode ? 0 : params.gpuLayers.clamp(0, 999);
       final effectiveContextSize = params.contextSize.clamp(512, 131072);
       final threads = forceCpuMode 
-          ? (Platform.numberOfProcessors > 4 ? 6 : 4)
+          ? (isAndroid ? 2 : (Platform.numberOfProcessors > 4 ? 6 : 4))
           : params.cpuThreads;
       
-      debugPrint('[LocalFFIEngine] 🔧 使用用户自定义配置${forceCpuMode ? " (强制CPU模式)" : ""}: gpuLayers=$effectiveGpuLayers, ctx=$effectiveContextSize, threads=$threads, batchSize=512, flashAttention=true');
+      debugPrint('[LocalFFIEngine] 🔧 使用用户自定义配置${forceCpuMode ? " (强制CPU模式)" : ""}: gpuLayers=$effectiveGpuLayers, ctx=$effectiveContextSize, threads=$threads, batch=$defaultBatchSize, flashAttention=true');
       return ModelParams(
         gpuLayers: effectiveGpuLayers,
         contextSize: effectiveContextSize,
         numberOfThreads: threads,
         numberOfThreadsBatch: threads,
-        batchSize: 512,
-        microBatchSize: 512,
+        batchSize: defaultBatchSize,
+        microBatchSize: defaultMicroBatchSize,
         flashAttention: forceCpuMode ? FlashAttention.disabled : FlashAttention.enabled,
       );
     }
     
     // 根据设备内存动态调整
     final config = await _getRecommendedConfig();
-    final isAndroid = Platform.isAndroid;
+    // isAndroid 已在方法开头定义
     final isMacOS = Platform.isMacOS;
     
     // ★★★ 动态适配 GPU 层数和上下文大小 ★★★
@@ -1366,6 +1484,13 @@ class LocalFFIEngine {
       // macOS 默认启用 Metal GPU 加速
       // 如果 Metal 初始化失败，loadModel 的 catch 块会自动回退到 CPU
       defaultGpuLayers = 999;
+    } else if (Platform.isIOS) {
+      // ★★★ iOS Metal GPU 加速 ★★★
+      // llama.cpp Metal 后端在 iOS 上可用，iPhone 12+ (A14) 支持 Metal
+      // Release 模式下 Metal 正常工作，Debug 模式因 LLDB bug 会导致崩溃
+      // 设置 gpuLayers=99 让大部分层卸载到 GPU，保留少量层给 CPU
+      // 如果 Metal 初始化失败，catch 块会自动回退到 CPU
+      defaultGpuLayers = 99;
     } else if (isAndroid) {
       defaultGpuLayers = config.gpuLayers;
     } else {
@@ -1398,27 +1523,62 @@ class LocalFFIEngine {
       optimalThreads = (Platform.numberOfProcessors * 0.75).round().clamp(2, 16);
       optimalBatchThreads = (Platform.numberOfProcessors * 0.75).round().clamp(2, 16);
     } else if (Platform.isAndroid) {
-      // ★★★ Android 优化：显式设置线程数 ★★★
-      // 0=自动 在某些设备上会使用过多线程（big.LITTLE 架构会调度小核），
-      // 显式设置为 total-2 保留 2 核给系统
-      final totalCores = Platform.numberOfProcessors;
-      optimalThreads = (totalCores - 2).clamp(2, 10);
+      // ★★★ Android 优化：大核绑定策略 ★★★
+      // Android big.LITTLE 架构下，EAS（能量感知调度）会把推理任务分配给小核
+      // 必须显式设置线程数，避免"裸奔"在小核上
+      //
+      // 骁龙 8 Elite 5 核心: 2×超大核(P) + 4×大核(M) + 2×小核(E) = 8 核
+      // 推理线程数 = 大核数（跳过小核）
+      // 优先使用原生检测的大核信息，回退到经验值
+      int androidThreads;
+      try {
+        final bigCoreInfo = await CpuFeatureDetector.instance.getBigCoreInfo();
+        androidThreads = bigCoreInfo.recommendedThreads;
+        debugPrint('[LocalFFIEngine] 🔧 Android 大核检测: ${bigCoreInfo.bigCoreCount}大核 + ${bigCoreInfo.littleCoreCount}小核 → 线程数=$androidThreads');
+      } catch (e) {
+        // 回退：总核数 * 0.75（经验值，跳过约 1/4 的小核）
+        final totalCores = Platform.numberOfProcessors;
+        androidThreads = (totalCores * 0.75).round().clamp(2, 10);
+        debugPrint('[LocalFFIEngine] 🔧 Android 大核检测失败，使用经验值: $androidThreads');
+      }
+      optimalThreads = androidThreads;
       optimalBatchThreads = optimalThreads;
     } else {
       optimalThreads = 0; // 自动检测
       optimalBatchThreads = 0; // 自动检测
     }
 
-    debugPrint('[LocalFFIEngine] 🔧 最终配置: gpuLayers=$gpuLayers, contextSize=$contextSize, threads=$optimalThreads, batchSize=512, microBatchSize=512, flashAttention=true');
+    debugPrint('[LocalFFIEngine] 🔧 最终配置: gpuLayers=$gpuLayers, contextSize=$contextSize, threads=$optimalThreads, batchSize=$defaultBatchSize, microBatchSize=$defaultMicroBatchSize, flashAttention=true');
+
+    // ★★★ 跨平台 GPU 后端选择 ★★★
+    // macOS/iOS: Metal（Apple 原生 GPU API）
+    // Android: Vulkan（跨平台 GPU API，Adreno/Mali 均支持）
+    // Windows: CUDA（NVIDIA GPU）→ Vulkan 回退
+    // Linux: CUDA（NVIDIA GPU）→ Vulkan 回退
+    // 如果指定后端不可用，llamadart 会自动回退到 CPU
+    final GpuBackend preferredBackend;
+    if (Platform.isMacOS || Platform.isIOS) {
+      preferredBackend = GpuBackend.metal;
+    } else if (Platform.isAndroid) {
+      preferredBackend = GpuBackend.vulkan;
+    } else if (Platform.isWindows || Platform.isLinux) {
+      // Windows/Linux: 优先 CUDA（NVIDIA），llamadart 自动回退到 Vulkan/CPU
+      preferredBackend = GpuBackend.cuda;
+    } else {
+      preferredBackend = GpuBackend.cpu;
+    }
+
+    debugPrint('[LocalFFIEngine] 🔧 GPU 后端: $preferredBackend');
 
     return ModelParams(
       gpuLayers: gpuLayers,
       contextSize: contextSize,
       numberOfThreads: optimalThreads,
       numberOfThreadsBatch: optimalBatchThreads,
-      batchSize: 512,
-      microBatchSize: 512,
+      batchSize: defaultBatchSize,
+      microBatchSize: defaultMicroBatchSize,
       flashAttention: FlashAttention.enabled,
+      preferredBackend: preferredBackend,
     );
   }
 
@@ -1585,6 +1745,26 @@ class LocalFFIEngine {
       
       // 3. 再次延迟，让 GC 有时间执行
       await Future.delayed(const Duration(milliseconds: 100));
+      
+      // ★★★ 4. Android 专用内存优化 ★★★
+      // Android 应用有 4GB Java 堆内存限制，大模型推理需要绕过此限制
+      // llama.cpp 使用 Native 内存（C++ malloc），不受 Java 堆限制
+      // 但如果系统内存紧张，Android 会触发 ZRAM/Swap，导致推理速度暴跌
+      if (Platform.isAndroid) {
+        // 检查可用内存是否充足
+        final hardwareInfo = await _hardwareChecker.getHardwareInfo();
+        final availableMB = hardwareInfo.availableRamMB;
+        final totalMB = hardwareInfo.totalRamMB;
+        
+        debugPrint('[LocalFFIEngine] 📱 Android 内存: 总计${totalMB}MB, 可用${availableMB}MB');
+        
+        // 如果可用内存 < 总内存的 30%，发出 Swap 风险警告
+        if (availableMB < totalMB * 0.3) {
+          debugPrint('[LocalFFIEngine] ⚠️ Android 内存紧张！可用 ${availableMB}MB < 总计 ${totalMB}MB 的 30%');
+          debugPrint('[LocalFFIEngine] ⚠️ 高概率触发 ZRAM/Swap，推理速度可能暴跌 20x');
+          debugPrint('[LocalFFIEngine] ⚠️ 建议：关闭其他应用，或选择更小的模型');
+        }
+      }
       
       debugPrint('[LocalFFIEngine] ✅ 系统内存优化完成');
     } catch (e) {

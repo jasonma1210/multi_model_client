@@ -18,13 +18,18 @@ import UIKit
     }
 
     // 注册分享通道
-    let controller = window?.rootViewController as! FlutterViewController
+    // ★ 修复：使用 registrar(forPlugin:) 替代直接访问 rootViewController
+    // 旧代码 `window?.rootViewController as! FlutterViewController` 在 UIScene 生命周期下
+    // 会导致 nil 解包闪退（iOS 13+ 的 AppDelegate 不再设置 window.rootViewController）
+    guard let shareRegistrar = self.registrar(forPlugin: "SharePlugin") else {
+      return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    }
     let shareChannel = FlutterMethodChannel(
       name: "com.multimodel.client/share",
-      binaryMessenger: controller.binaryMessenger
+      binaryMessenger: shareRegistrar.messenger()
     )
 
-    shareChannel.setMethodCallHandler { [weak self] (call, result) in
+    shareChannel.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
       switch call.method {
       case "getSharedText":
         // 从 UserDefaults 读取分享内容
@@ -50,14 +55,15 @@ import UIKit
   ) -> Bool {
     // 处理 llmstudio:// 或 mjnexus:// URL
     if url.scheme == "llmstudio" || url.scheme == "mjnexus" {
-      // 通过 MethodChannel 通知 Flutter
-      if let controller = window?.rootViewController as? FlutterViewController {
-        let channel = FlutterMethodChannel(
-          name: "com.multimodel.client/deeplink",
-          binaryMessenger: controller.binaryMessenger
-        )
-        channel.invokeMethod("onDeepLink", arguments: url.absoluteString)
+      // ★ 修复：使用 registrar(forPlugin:) 替代直接访问 rootViewController
+      guard let deeplinkRegistrar = self.registrar(forPlugin: "DeeplinkPlugin") else {
+        return super.application(app, open: url, options: options)
       }
+      let channel = FlutterMethodChannel(
+        name: "com.multimodel.client/deeplink",
+        binaryMessenger: deeplinkRegistrar.messenger()
+      )
+      channel.invokeMethod("onDeepLink", arguments: url.absoluteString)
       return true
     }
     return super.application(app, open: url, options: options)

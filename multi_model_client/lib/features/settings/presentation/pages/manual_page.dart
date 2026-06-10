@@ -335,7 +335,7 @@ class _WelcomeCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Text(
-                '欢迎使用 MJ Nexus',
+                '欢迎使用 MJ Nexus Series',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: theme.colorScheme.primary,

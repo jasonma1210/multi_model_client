@@ -494,10 +494,30 @@ class _ModelParamsDialogState extends ConsumerState<ModelParamsDialog>
           ),
           const SizedBox(height: 4),
 
+          // ★ 纯 CPU 测试模式开关（骁龙 8 Elite 排查 Vulkan 问题用）
+          ParamRow(
+            label: '纯 CPU 测试',
+            tooltip: '强制 gpuLayers=0，纯 CPU 推理。\n'
+                '用于排查 Vulkan GPU 加速问题：\n'
+                '1. 开启此开关 → 测试纯 CPU 速度\n'
+                '2. 如果纯 CPU 更快 → Vulkan 有问题\n'
+                '3. 如果纯 CPU 更慢 → Vulkan 正常，问题在别处',
+            child: Switch(
+              value: _params.gpuLayers == 0,
+              onChanged: (v) => setState(() => _params = _params.copyWith(
+                gpuLayers: v ? 0 : 99,
+                cpuThreads: v ? 2 : _params.cpuThreads, // 纯 CPU 模式用 2 线程绑定超大核
+              )),
+            ),
+          ),
+          const SizedBox(height: 4),
+
           // GPU 层数
           ParamRow(
             label: 'GPU 层数',
-            tooltip: '卸载到 GPU 的模型层数。99 = 全部卸载（最快），0 = 纯 CPU（最慢）',
+            tooltip: '卸载到 GPU 的模型层数。99 = 全部卸载（最快），0 = 纯 CPU（最慢）\n'
+                '★ 骁龙 8 Elite 提示：如果开启 Vulkan 后反而更慢，\n'
+                '   请先用「纯 CPU 测试」开关对比速度',
             child: Row(
               children: [
                 Expanded(

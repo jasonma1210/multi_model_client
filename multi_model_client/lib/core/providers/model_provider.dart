@@ -136,6 +136,33 @@ class ModelNotifier extends StateNotifier<ModelState> {
           return m;
         }).toList();
         
+        // ★ 修复：验证本地模型文件是否存在，不存在则标记路径为待搜索
+        // iOS 沙盒路径每次安装后 UUID 会变化，导致旧路径失效
+        final appDir = await getApplicationDocumentsDirectory();
+        models = await Future.wait(models.map((m) async {
+          if (m.isLocal && m.filePath != null) {
+            final file = File(m.filePath!);
+            if (!await file.exists()) {
+              // 提取文件名，用于后续搜索
+              final fileName = m.filePath!.split('/').last;
+              // 尝试在新的沙盒路径下查找
+              final newDir = '${appDir.path}/models';
+              final newDirObj = Directory(newDir);
+              if (await newDirObj.exists()) {
+                await for (final entity in newDirObj.list(recursive: true)) {
+                  if (entity is File && entity.path.endsWith(fileName)) {
+                    debugPrint('[ModelProvider] iOS 沙盒路径修复: ${m.filePath} → ${entity.path}');
+                    return m.copyWith(filePath: entity.path);
+                  }
+                }
+              }
+              // 未找到，保留原路径（加载时会触发重新搜索）
+              debugPrint('[ModelProvider] ⚠️ 模型文件未找到: ${m.filePath}');
+            }
+          }
+          return m;
+        }));
+        
         state = ModelState(models: models);
         
         // 打印所有本地模型（调试用）
@@ -151,9 +178,42 @@ class ModelNotifier extends StateNotifier<ModelState> {
       } else {
         state = const ModelState(models: []);
       }
+
+      // ★★★ 监听下载完成事件，自动注册模型 ★★★
+      // 解决：异步下载完成时，model_market_page 的 onProgress 回调已失效，
+      // 导致模型未注册到 modelProvider，创建会话时误判为"无模型"
+      _listenDownloadCompletion();
     } catch (e) {
       state = ModelState(error: e.toString());
     }
+  }
+
+  /// 监听下载完成事件，自动注册模型到 modelProvider
+  ///
+  /// 核心问题：model_market_page 的 startDownload(onProgress: ...) 回调
+  /// 只在断点续传时调用一次，异步下载完成时不会触发。
+  /// 导致下载完成的模型未注册，创建会话时 modelState.isEmpty 为 true。
+  void _listenDownloadCompletion() {
+    final taskManager = DownloadTaskManager.instance;
+    taskManager.onDownloadCompleted.listen((event) {
+      // 检查模型是否已注册（通过文件路径匹配，避免重复注册）
+      final alreadyRegistered = state.models.any((m) => m.filePath == event.savePath);
+      if (alreadyRegistered) {
+        debugPrint('[ModelProvider] 模型已注册，跳过: ${event.modelId}');
+        return;
+      }
+
+      // 从 HuggingFace ID 提取显示名（去掉路径前缀）
+      final displayName = event.modelId.split('/').last;
+
+      debugPrint('[ModelProvider] 📢 自动注册下载完成的模型: $displayName (${event.savePath})');
+
+      // 注册模型
+      addLocalModel(
+        displayName: displayName,
+        filePath: event.savePath,
+      );
+    });
   }
 
   /// 自动关联 mmproj 文件：

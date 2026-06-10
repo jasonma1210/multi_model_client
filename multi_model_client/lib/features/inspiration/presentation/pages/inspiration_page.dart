@@ -15,11 +15,15 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/services/asr_service.dart';
 import '../../../../core/services/document_generation_service.dart';
 import '../../../../core/services/voice_model_service.dart';
+import '../../../../core/services/recorder_manager.dart';
 import '../../../../core/engines/local_ffi_engine.dart';
 import '../../../../core/engines/model_inference_engine.dart' show ChatMessage, globalModelEngine;
 import '../../../../core/models/model_entry.dart';
 
+/// 全局 ASRService 实例（顶层 final，与原实现保持一致，避免影响其他 import 链）
 final asrService = ASRService();
+
+/// 全局 VoiceModelService 实例（顶层 final，与原实现保持一致）
 final voiceModelService = VoiceModelService();
 
 class InspirationRecording {
@@ -248,12 +252,15 @@ class _InspirationPageState extends State<InspirationPage> {
   }
 
   void _cleanupRecorder() {
-    try {
-      if (Recorder.instance.isDeviceStarted()) Recorder.instance.stop();
-      if (Recorder.instance.isDeviceInitialized()) Recorder.instance.deinit();
-    } catch (e) {
-      debugPrint('[Inspiration] cleanup error: $e');
-    }
+    // ★ 修复：必须等待 RecorderManager.deinit 完成，否则会与后续页面的 init 竞态
+    // 之前 fire-and-forget 引发灵感页 dispose 后录音器未真正释放，下次 init 失败
+    // 这里 dispose 内部即使 fire-and-forget 也要保留 future 引用，避免被 GC 取消
+    final future = RecorderManager.instance.deinit(holder: 'inspiration');
+    future.then((_) {
+      debugPrint('[Inspiration] dispose: deinit 完成');
+    }).catchError((e) {
+      debugPrint('[Inspiration] dispose: deinit 错误: $e');
+    });
   }
 
   Future<void> _startRecording() async {
@@ -265,14 +272,25 @@ class _InspirationPageState extends State<InspirationPage> {
           return;
         }
       }
-      _cleanupRecorder();
+
       final appDir = await getApplicationSupportDirectory();
       final recDir = Directory('${appDir.path}/inspiration');
       if (!await recDir.exists()) await recDir.create(recursive: true);
       _recordingFilePath = '${recDir.path}/insp_${DateTime.now().millisecondsSinceEpoch}.wav';
-      await Recorder.instance.init(sampleRate: 16000, channels: RecorderChannels.mono, format: PCMFormat.s16le);
-      Recorder.instance.start();
-      Recorder.instance.startRecording(completeFilePath: _recordingFilePath!);
+
+      // ★ 使用 RecorderManager 统一管理初始化，避免多页面竞态
+      final ok = await RecorderManager.instance.init(
+        holder: 'inspiration',
+        sampleRate: 16000,
+        channels: RecorderChannels.mono,
+        format: PCMFormat.s16le,
+      );
+      if (!ok) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('录音初始化失败，请重试')));
+        return;
+      }
+
+      RecorderManager.instance.startRecording(_recordingFilePath!);
       setState(() { _recState = _RecordingState.recording; _recordingSeconds = 0; _showTimeWarning = false; });
       _recTimer = Timer.periodic(const Duration(seconds: 1), (t) {
         if (!mounted) return;
@@ -301,13 +319,14 @@ class _InspirationPageState extends State<InspirationPage> {
   }
 
   Future<void> _pauseRecording() async {
-    try { Recorder.instance.setPauseRecording(pause: true); _recTimer?.cancel(); setState(() => _recState = _RecordingState.paused); }
+    try {
+      RecorderManager.instance.pauseRecording(); _recTimer?.cancel(); setState(() => _recState = _RecordingState.paused); }
     catch (e) { debugPrint('[Inspiration] pause error: $e'); }
   }
 
   Future<void> _resumeRecording() async {
     try {
-      Recorder.instance.setPauseRecording(pause: false);
+      RecorderManager.instance.resumeRecording();
       _recTimer = Timer.periodic(const Duration(seconds: 1), (t) {
         if (!mounted) return;
         setState(() {
@@ -335,9 +354,8 @@ class _InspirationPageState extends State<InspirationPage> {
   Future<void> _stopRecording() async {
     _recTimer?.cancel();
     try {
-      Recorder.instance.stopRecording();
-      Recorder.instance.stop();
-      Recorder.instance.deinit();
+      RecorderManager.instance.stopRecording();
+      await RecorderManager.instance.deinit(holder: 'inspiration');
       setState(() => _recState = _RecordingState.stopped);
       final path = _recordingFilePath;
       if (path == null) return;
@@ -420,11 +438,11 @@ class _InspirationPageState extends State<InspirationPage> {
       return;
     }
     setState(() => recording.isTranscribing = true);
+    ASRService? asr;
     try {
-      final asr = ASRService(provider: ASRProvider.sherpa, sherpaModelId: _selectedAsrModelId);
+      asr = ASRService(provider: ASRProvider.sherpa, sherpaModelId: _selectedAsrModelId);
       await asr.initSherpa();
       final text = await asr.recognizeFile(recording.filePath);
-      asr.dispose();
       if (!mounted) return;
       setState(() { recording.transcription = text.isNotEmpty ? text : '（未识别到内容）'; recording.isTranscribing = false; });
       _saveData();
@@ -433,6 +451,10 @@ class _InspirationPageState extends State<InspirationPage> {
       setState(() => recording.isTranscribing = false);
       debugPrint('[Inspiration] transcribe error: $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('转录失败: $e')));
+    } finally {
+      // ★ 关键修复：确保 ASRService（含 OfflineRecognizer）在 finally 中释放
+      // 避免原生 C++ 资源泄漏，导致后续转录或其他页面的 ASR 初始化冲突闪退
+      asr?.dispose();
     }
   }
 
@@ -672,12 +694,19 @@ class _InspirationPageState extends State<InspirationPage> {
 
   Future<void> _exportAsMarkdown(SummaryRecord record) async {
     try {
-      final dir = await getApplicationSupportDirectory();
+      // ★ 修复导出失败：iOS 上 getApplicationSupportDirectory 的文件无法被 share_plus 访问
+      // 使用 getTemporaryDirectory 代替，share_plus 在 iOS 上需要临时目录的文件
+      final dir = await getTemporaryDirectory();
       final exportDir = Directory('${dir.path}/inspiration/exports');
       if (!await exportDir.exists()) await exportDir.create(recursive: true);
       final file = File('${exportDir.path}/summary_${record.id}.md');
       await file.writeAsString(record.summaryText);
-      await Share.shareXFiles([XFile(file.path)], subject: '灵感总结');
+      final box = context.findRenderObject() as RenderBox?;
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: '灵感总结',
+        sharePositionOrigin: box!.localToGlobal(Offset.zero) & box.size,
+      );
     } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导出失败: $e'))); }
   }
 
@@ -686,7 +715,12 @@ class _InspirationPageState extends State<InspirationPage> {
       Map<String, dynamic> mindMapData = {};
       if (record.mindMapData != null) mindMapData = jsonDecode(record.mindMapData!) as Map<String, dynamic>;
       final result = await DocumentGenerationService.instance.generateXMind(title: '灵感导图_${folder.name}', mindMapData: mindMapData);
-      await Share.shareXFiles([XFile(result.filePath)], subject: '思维导图 - ${folder.name}');
+      final box = context.findRenderObject() as RenderBox?;
+      await Share.shareXFiles(
+        [XFile(result.filePath)],
+        subject: '思维导图 - ${folder.name}',
+        sharePositionOrigin: box!.localToGlobal(Offset.zero) & box.size,
+      );
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('XMind 思维导图已导出: ${result.fileName}')));
     } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导出失败: $e'))); }
   }
@@ -1019,11 +1053,11 @@ class _FolderDetailPageState extends State<_FolderDetailPage> {
     if (_selectedAsrModelId == null) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先在语音设置中下载 ASR 模型'))); return; }
     setState(() => recording.isTranscribing = true);
     final slowTimer = Timer(const Duration(seconds: 5), () { if (mounted && recording.isTranscribing) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('文本转换速度时间较久，请稍待'))); });
+    ASRService? asr;
     try {
-      final asr = ASRService(provider: ASRProvider.sherpa, sherpaModelId: _selectedAsrModelId);
+      asr = ASRService(provider: ASRProvider.sherpa, sherpaModelId: _selectedAsrModelId);
       await asr.initSherpa();
       final text = await asr.recognizeFile(recording.filePath);
-      asr.dispose();
       slowTimer.cancel();
       if (!mounted) return;
       setState(() { recording.transcription = text.isNotEmpty ? text : '（未识别到内容）'; recording.isTranscribing = false; });
@@ -1033,6 +1067,9 @@ class _FolderDetailPageState extends State<_FolderDetailPage> {
       if (!mounted) return;
       setState(() => recording.isTranscribing = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('转录失败: $e')));
+    } finally {
+      // ★ 关键修复：确保 ASRService（含 OfflineRecognizer）在 finally 中释放
+      asr?.dispose();
     }
   }
 
@@ -1181,12 +1218,17 @@ class _FolderDetailPageState extends State<_FolderDetailPage> {
 
   Future<void> _exportAsMarkdown(SummaryRecord record) async {
     try {
-      final dir = await getApplicationSupportDirectory();
+      final dir = await getTemporaryDirectory();
       final exportDir = Directory('${dir.path}/inspiration/exports');
       if (!await exportDir.exists()) await exportDir.create(recursive: true);
       final file = File('${exportDir.path}/summary_${record.id}.md');
       await file.writeAsString(record.summaryText);
-      await Share.shareXFiles([XFile(file.path)], subject: '灵感总结');
+      final box = context.findRenderObject() as RenderBox?;
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: '灵感总结',
+        sharePositionOrigin: box!.localToGlobal(Offset.zero) & box.size,
+      );
     } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导出失败: $e'))); }
   }
 
@@ -1195,7 +1237,12 @@ class _FolderDetailPageState extends State<_FolderDetailPage> {
       Map<String, dynamic> mindMapData = {};
       if (record.mindMapData != null) mindMapData = jsonDecode(record.mindMapData!) as Map<String, dynamic>;
       final result = await DocumentGenerationService.instance.generateXMind(title: '灵感导图_${widget.folder.name}', mindMapData: mindMapData);
-      await Share.shareXFiles([XFile(result.filePath)], subject: '思维导图 - ${widget.folder.name}');
+      final box = context.findRenderObject() as RenderBox?;
+      await Share.shareXFiles(
+        [XFile(result.filePath)],
+        subject: '思维导图 - ${widget.folder.name}',
+        sharePositionOrigin: box!.localToGlobal(Offset.zero) & box.size,
+      );
     } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导出失败: $e'))); }
   }
 

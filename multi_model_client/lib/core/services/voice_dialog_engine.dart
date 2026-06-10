@@ -134,10 +134,30 @@ class VoiceDialogEngine {
   /// 启动音频录制（使用 record 包，macOS/iOS/Android/Linux 通用）
   Future<void> _startRecording() async {
     try {
+      // ★ 修复：先释放旧的录音器实例，避免资源冲突
+      await _recorder?.stop();
+      _recorder?.dispose();
+      _recorder = null;
+
       _recorder = AudioRecorder();
+
+      // ★★★ iOS 关键修复：禁用 record 包内部的 AVAudioSession 管理 ★★★
+      // record 包默认 manageAudioSession=true，会内部设置 AVAudioSession
+      // 与外部 audio_session 包冲突，导致 iOS 崩溃
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          await _recorder!.ios?.manageAudioSession(false);
+          debugPrint('[$_voiceTag] ✅ 已禁用 record 包内部 AVAudioSession 管理');
+        } catch (e) {
+          debugPrint('[$_voiceTag] ⚠️ 禁用 manageAudioSession 失败: $e');
+        }
+      }
+
       final hasPermission = await _recorder!.hasPermission();
       if (!hasPermission) {
         debugPrint('[$_voiceTag] 麦克风权限被拒绝');
+        _recorder?.dispose();
+        _recorder = null;
         return;
       }
 
@@ -155,11 +175,16 @@ class VoiceDialogEngine {
           encoder: encoder,
           sampleRate: 16000,
           numChannels: 1,
+          // ★★★ iOS 关键修复：禁用 record 包内部 AVAudioSession 管理 ★★★
+          iosConfig: IosRecordConfig(manageAudioSession: false),
         ),
         path: _tempAudioPath!,
       );
     } catch (e) {
       debugPrint('[$_voiceTag] 启动录音失败: $e');
+      // ★ 修复：录音失败时清理录音器实例
+      _recorder?.dispose();
+      _recorder = null;
     }
   }
 

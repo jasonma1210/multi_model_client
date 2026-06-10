@@ -471,6 +471,9 @@ class TTSStyleParser {
   ///
   /// 根据小米 MIMO API 格式，将控制指令转换为正确的 messages 格式。
   ///
+  /// 支持多标签合并：当文本包含多个 `[tts:...]...[/tts]` 标签时，
+  /// 会将所有控制内容收集到 user 消息，原始文本作为 assistant 消息发送。
+  ///
   /// [globalAnchor] 全局角色锚定描述，作为第一个 user 消息注入，
   /// 让 TTS 模型在所有段落中保持一致的角色人格和语调基调。
   static Map<String, dynamic> buildMiMoRequest({
@@ -480,7 +483,8 @@ class TTSStyleParser {
     String model = 'mimo-v2.5-tts',
     String? globalAnchor,
   }) {
-    final data = parse(text);
+    // ★ 使用 parseAll 解析所有标签，支持多标签合并场景
+    final allData = parseAll(text);
 
     final messages = <Map<String, String>>[];
 
@@ -492,22 +496,32 @@ class TTSStyleParser {
       });
     }
 
-    // 自然语言控制和导演模式：控制内容放在 user 消息中
-    if (data.type == TTSControlType.natural ||
-        data.type == TTSControlType.director) {
-      if (data.controlContent.isNotEmpty) {
-        messages.add({
-          'role': 'user',
-          'content': data.controlContent,
-        });
+    // 收集所有自然语言/导演模式的控制内容，放在 user 消息中
+    final controlContents = <String>[];
+    for (final data in allData) {
+      if (data.type == TTSControlType.natural ||
+          data.type == TTSControlType.director) {
+        if (data.controlContent.isNotEmpty) {
+          controlContents.add(data.controlContent);
+        }
       }
     }
+    if (controlContents.isNotEmpty) {
+      messages.add({
+        'role': 'user',
+        'content': controlContents.join('\n'),
+      });
+    }
 
-    // 风格标签控制和情绪标签控制：控制标签放在 assistant 消息中
-    // 自然语言控制和导演模式：assistant 消息只包含纯文本
+    // ★ 多标签合并场景：assistant 消息直接使用原始文本（保留所有 TTS 标签）
+    // 单标签场景：使用 data.ttsContent（与之前行为一致）
+    final assistantContent = allData.length > 1
+        ? text  // 多标签：直接用原始文本，MiMo 引擎会自行解析所有 [tts:...] 标签
+        : allData.first.ttsContent;  // 单标签：使用解析后的内容
+
     messages.add({
       'role': 'assistant',
-      'content': data.ttsContent,
+      'content': assistantContent,
     });
 
     return {
@@ -525,6 +539,9 @@ class TTSStyleParser {
   ///
   /// 克隆音色模式下，voice 字段是 DataURL 格式。
   ///
+  /// 支持多标签合并：当文本包含多个 `[tts:...]...[/tts]` 标签时，
+  /// 会将所有控制内容收集到 user 消息，原始文本作为 assistant 消息发送。
+  ///
   /// [globalAnchor] 全局角色锚定描述，作为第一个 user 消息注入，
   /// 让 TTS 模型在所有段落中保持一致的角色人格和语调基调。
   static Map<String, dynamic> buildMiMoCloneRequest({
@@ -534,7 +551,8 @@ class TTSStyleParser {
     String model = 'mimo-v2.5-tts-voiceclone',
     String? globalAnchor,
   }) {
-    final data = parse(text);
+    // ★ 使用 parseAll 解析所有标签，支持多标签合并场景
+    final allData = parseAll(text);
 
     final messages = <Map<String, String>>[];
 
@@ -546,21 +564,32 @@ class TTSStyleParser {
       });
     }
 
-    // 自然语言控制和导演模式：控制内容放在 user 消息中
-    if (data.type == TTSControlType.natural ||
-        data.type == TTSControlType.director) {
-      if (data.controlContent.isNotEmpty) {
-        messages.add({
-          'role': 'user',
-          'content': data.controlContent,
-        });
+    // 收集所有自然语言/导演模式的控制内容，放在 user 消息中
+    final controlContents = <String>[];
+    for (final data in allData) {
+      if (data.type == TTSControlType.natural ||
+          data.type == TTSControlType.director) {
+        if (data.controlContent.isNotEmpty) {
+          controlContents.add(data.controlContent);
+        }
       }
     }
+    if (controlContents.isNotEmpty) {
+      messages.add({
+        'role': 'user',
+        'content': controlContents.join('\n'),
+      });
+    }
 
-    // 风格标签控制和情绪标签控制：控制标签放在 assistant 消息中
+    // ★ 多标签合并场景：assistant 消息直接使用原始文本（保留所有 TTS 标签）
+    // 单标签场景：使用 data.ttsContent（与之前行为一致）
+    final assistantContent = allData.length > 1
+        ? text  // 多标签：直接用原始文本，MiMo 引擎会自行解析所有 [tts:...] 标签
+        : allData.first.ttsContent;  // 单标签：使用解析后的内容
+
     messages.add({
       'role': 'assistant',
-      'content': data.ttsContent,
+      'content': assistantContent,
     });
 
     return {
@@ -595,7 +624,8 @@ class TTSStyleParser {
       throw ArgumentError('voicedesign 模型要求 voicePrompt 必填');
     }
 
-    final data = parse(text);
+    // ★ 使用 parseAll 解析所有标签，支持多标签合并场景
+    final allData = parseAll(text);
 
     final messages = <Map<String, String>>[];
 
@@ -613,21 +643,31 @@ class TTSStyleParser {
       'content': voicePrompt,
     });
 
-    // 3) 自然语言控制/导演模式：放在 user 消息中
-    if (data.type == TTSControlType.natural ||
-        data.type == TTSControlType.director) {
-      if (data.controlContent.isNotEmpty) {
-        messages.add({
-          'role': 'user',
-          'content': data.controlContent,
-        });
+    // 3) 收集所有自然语言/导演模式的控制内容，放在 user 消息中
+    final controlContents = <String>[];
+    for (final data in allData) {
+      if (data.type == TTSControlType.natural ||
+          data.type == TTSControlType.director) {
+        if (data.controlContent.isNotEmpty) {
+          controlContents.add(data.controlContent);
+        }
       }
     }
+    if (controlContents.isNotEmpty) {
+      messages.add({
+        'role': 'user',
+        'content': controlContents.join('\n'),
+      });
+    }
 
-    // 4) 待合成文本作为 assistant 消息
+    // 4) ★ 多标签合并场景：assistant 消息直接使用原始文本
+    final assistantContent = allData.length > 1
+        ? text
+        : allData.first.ttsContent;
+
     messages.add({
       'role': 'assistant',
-      'content': data.ttsContent,
+      'content': assistantContent,
     });
 
     return {

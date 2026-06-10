@@ -2,6 +2,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -123,6 +124,8 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
         'system' => TTSProvider.system,
         'openai' => TTSProvider.openai,
         'mimo' => TTSProvider.mimo,
+        'edge' => TTSProvider.edge,
+        'cosyvoice' => TTSProvider.cosyvoice,
         _ => TTSProvider.system,
       };
 
@@ -137,11 +140,12 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
       };
 
       String? ttsApiKey;
-      MiMoVoice mimoVoice = MiMoVoice.Chloe;
+      MiMoVoice mimoVoice = MiMoVoice.mimo_default;
       String? cloneRefAudioPath;
+      String mimoVoiceStr = 'mimo_default'; // ★ 提升到外层，供 TTSService 构造使用
       if (resolvedTtsProvider == 'mimo') {
         ttsApiKey = await settingsService.getMimoApiKeyAsync();
-        final mimoVoiceStr = prefs.getString('tts_voice_id') ?? 'Chloe';
+        mimoVoiceStr = prefs.getString('tts_voice_id') ?? 'mimo_default';
         debugPrint('[RealtimeVoicePage] MiMo音色原始值: $mimoVoiceStr');
         if (mimoVoiceStr.startsWith('clone_')) {
           try {
@@ -153,6 +157,15 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
             if (cloneVoice != null && cloneVoice.isReady) {
               cloneRefAudioPath = cloneVoice.referenceAudioPath;
               debugPrint('[RealtimeVoicePage] 克隆音色加载成功: ${cloneVoice.name}, path=$cloneRefAudioPath');
+              // ★ 验证参考音频文件是否存在
+              final refFile = File(cloneRefAudioPath!);
+              final exists = await refFile.exists();
+              final size = exists ? await refFile.length() : 0;
+              debugPrint('[RealtimeVoicePage] 参考音频: exists=$exists, size=$size bytes');
+              if (!exists || size == 0) {
+                debugPrint('[RealtimeVoicePage] ⚠️ 参考音频文件不存在或为空，克隆音色将无法工作');
+                cloneRefAudioPath = null;
+              }
             } else {
               debugPrint('[RealtimeVoicePage] 克隆音色未找到或未就绪: found=${cloneVoice != null}, ready=${cloneVoice?.isReady}');
             }
@@ -162,7 +175,7 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
         } else {
           mimoVoice = MiMoVoice.values.firstWhere(
             (v) => v.name == mimoVoiceStr,
-            orElse: () => MiMoVoice.Chloe,
+            orElse: () => MiMoVoice.mimo_default,
           );
         }
 
@@ -178,14 +191,43 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
         sherpaModelId: selectedAsrModelId,
       );
 
+      // ★ 读取 Edge TTS 音色设置
+      final edgeVoiceStr = prefs.getString('edge_voice') ?? 'xiaoxiao';
+      final edgeVoice = EdgeVoice.values.firstWhere(
+        (v) => v.name == edgeVoiceStr,
+        orElse: () => EdgeVoice.xiaoxiao,
+      );
+
+      // ★ 读取 CosyVoice 设置
+      final cvBaseUrl = prefs.getString('cosyvoice_base_url') ?? 'http://localhost:50000';
+      final cvModeStr = prefs.getString('cosyvoice_mode') ?? 'cross_lingual';
+      final cvInstructText = prefs.getString('cosyvoice_instruct_text') ?? '用自然的语气说话';
+      final cvRefAudioPath = prefs.getString('cosyvoice_ref_audio_path') ?? '';
+      final cvMode = CosyVoiceMode.values.firstWhere(
+        (v) => v.name == cvModeStr,
+        orElse: () => CosyVoiceMode.cross_lingual,
+      );
+
+      // ★ 读取 MiMo 自定义 Base URL
+      final mimoBaseUrl = prefs.getString('mimo_base_url');
+
       _ttsService = TTSService(
         provider: ttsProviderEnum,
         apiKey: ttsApiKey,
         mimoVoice: mimoVoice,
-        cloneReferenceAudioPath: cloneRefAudioPath,
+        mimoVoiceId: mimoVoiceStr.startsWith('clone_') ? null : mimoVoiceStr, // ★ 克隆模式不传 voiceId
+        edgeVoice: edgeVoice,
+        cloneReferenceAudioPath: resolvedTtsProvider == 'cosyvoice' && cvRefAudioPath.isNotEmpty ? cvRefAudioPath : cloneRefAudioPath,
+        mimoBaseUrl: mimoBaseUrl?.isNotEmpty == true ? mimoBaseUrl : null,
         sherpaModelId: ttsModelId,
         speechRate: ttsSpeed,
         speakerId: int.tryParse(ttsVoice) ?? 0,
+        cosyvoiceBaseUrl: resolvedTtsProvider == 'cosyvoice' ? cvBaseUrl : null,
+        cosyvoiceMode: cvMode,
+        cosyvoiceInstructText: cvInstructText,
+        fishaudioBaseUrl: resolvedTtsProvider == 'fishaudio' ? prefs.getString('fishaudio_base_url') ?? 'http://localhost:50001' : null,
+        fishaudioReferenceAudioPath: resolvedTtsProvider == 'fishaudio' ? prefs.getString('fishaudio_reference_audio_path') : null,
+        fishaudioReferenceText: resolvedTtsProvider == 'fishaudio' ? prefs.getString('fishaudio_reference_text') : null,
       );
 
       _audioPlayer = AudioPlayer();
@@ -588,8 +630,14 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
       _interruptTTS();
     }
 
-    if (_state != _VoiceState.idle && _state != _VoiceState.error && _state != _VoiceState.speaking) {
-      return;
+    // ★★★ 如果 AI 正在思考/生成，打断当前回复，允许用户重新说话 ★★★
+    if (_state == _VoiceState.thinking || _state == _VoiceState.recognizing) {
+      debugPrint('[RealtimeVoicePage] ⚡ AI 正在生成，打断当前回复');
+      if (_dialogueEngine != null) {
+        _dialogueEngine!.cancelGeneration(widget.sessionId);
+      }
+      _ttsInterrupted = true;
+      _pulseController.stop();
     }
 
     setState(() {
@@ -650,6 +698,16 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
     _recorder = null;
     _tempAudioPath = null;
 
+    // ★★★ iOS/macOS AVAudioSession 恢复 ★★★
+    // 取消录音时也需恢复，避免后续 TTS 无法播放
+    if (Platform.isIOS || Platform.isMacOS) {
+      AudioSession.instance.then((session) {
+        session.configure(AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playback,
+        ));
+      }).catchError((_) {});
+    }
+
     setState(() {
       _state = _VoiceState.idle;
       _statusText = '已取消';
@@ -666,14 +724,62 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
 
   Future<void> _startRecording() async {
     try {
+      // ★★★ iOS 关键修复：录音器双重清理 ★★★
+      // 先尝试彻底释放之前可能残留的 AudioRecorder 实例
+      // 避免与 session_detail_page 的 asr_input_service 共用时冲突
+      await _safeCleanupOldRecorder();
+
       _recorder = AudioRecorder();
-      final hasPermission = await _recorder!.hasPermission();
-      if (!hasPermission) {
-        setState(() {
-          _errorMsg = '麦克风权限被拒绝';
-          _state = _VoiceState.error;
-        });
-        return;
+
+      // ★★★ iOS 关键修复：禁用 record 包内部的 AVAudioSession 管理 ★★★
+      // record 包默认 manageAudioSession=true，会内部设置 AVAudioSession
+      // 与外部 audio_session 包冲突，导致 iOS SIGSEGV 崩溃
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          await _recorder!.ios?.manageAudioSession(false);
+          debugPrint('[RealtimeVoicePage] ✅ 已禁用 record 包内部 AVAudioSession 管理');
+        } catch (e) {
+          debugPrint('[RealtimeVoicePage] ⚠️ 禁用 manageAudioSession 失败: $e');
+        }
+      }
+
+      // ★ 关键：在 iOS 上检查权限
+      if (Platform.isIOS) {
+        try {
+          final hasPermission = await _recorder!.hasPermission();
+          if (!hasPermission) {
+            try { _recorder!.dispose(); } catch (_) {}
+            _recorder = null;
+            setState(() {
+              _errorMsg = '麦克风权限被拒绝';
+              _state = _VoiceState.error;
+            });
+            return;
+          }
+        } catch (_) {}
+      } else {
+        final hasPermission = await _recorder!.hasPermission();
+        if (!hasPermission) {
+          try { _recorder!.dispose(); } catch (_) {}
+          _recorder = null;
+          setState(() {
+            _errorMsg = '麦克风权限被拒绝';
+            _state = _VoiceState.error;
+          });
+          return;
+        }
+      }
+
+      // ★★★ iOS/macOS AVAudioSession 配置 ★★★
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          final session = await AudioSession.instance;
+          await session.configure(AudioSessionConfiguration(
+            avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+            avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker,
+            avAudioSessionMode: AVAudioSessionMode.measurement,
+          ));
+        } catch (_) {}
       }
 
       final dir = await getTemporaryDirectory();
@@ -685,11 +791,16 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
           encoder: AudioEncoder.wav,
           sampleRate: 16000,
           numChannels: 1,
+          // ★★★ iOS 关键修复：禁用 record 包内部 AVAudioSession 管理 ★★★
+          // 由外部 audio_session 包统一管理，避免冲突导致崩溃
+          iosConfig: IosRecordConfig(manageAudioSession: false),
         ),
         path: _tempAudioPath!,
       );
     } catch (e) {
       debugPrint('[RealtimeVoicePage] 启动录音失败: $e');
+      try { _recorder?.dispose(); } catch (_) {}
+      _recorder = null;
       setState(() {
         _errorMsg = '录音失败: $e';
         _state = _VoiceState.error;
@@ -697,11 +808,38 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
     }
   }
 
+  /// ★ 关键：iOS 上彻底清理可能残留的 AudioRecorder 实例
+  /// 防止前后两次录音之间的 native 资源泄漏导致崩溃
+  Future<void> _safeCleanupOldRecorder() async {
+    if (_recorder == null) return;
+    try {
+      try { await _recorder!.stop(); } catch (_) {}
+      try { _recorder!.dispose(); } catch (_) {}
+    } catch (_) {}
+    _recorder = null;
+    // 等待 native 端完全释放
+    await Future.delayed(const Duration(milliseconds: 150));
+  }
+
   Future<void> _stopRecordingAndProcess() async {
     try {
       await _recorder?.stop();
-      _recorder?.dispose();
+      try { _recorder?.dispose(); } catch (_) {}
       _recorder = null;
+
+      // ★★★ iOS/macOS AVAudioSession 恢复 ★★★
+      // 录音结束后恢复为播放模式，让 TTS 可以正常播放
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          final session = await AudioSession.instance;
+          await session.configure(AudioSessionConfiguration(
+            avAudioSessionCategory: AVAudioSessionCategory.playback,
+          ));
+          debugPrint('[RealtimeVoicePage] ✅ AVAudioSession 恢复为 playback');
+        } catch (e) {
+          debugPrint('[RealtimeVoicePage] ⚠️ AVAudioSession 恢复失败: $e');
+        }
+      }
 
       if (_tempAudioPath != null && !_isDisposed) {
         await _recognizeAudio();
@@ -712,8 +850,8 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
   }
 
   void _stopRecording() {
-    _recorder?.stop();
-    _recorder?.dispose();
+    try { _recorder?.stop(); } catch (_) {}
+    try { _recorder?.dispose(); } catch (_) {}
     _recorder = null;
   }
 
@@ -875,28 +1013,18 @@ class _RealtimeVoicePageState extends ConsumerState<RealtimeVoicePage>
     _pulseController.repeat();
 
     try {
-      debugPrint('[RealtimeVoicePage] 开始TTS合成，音色来自语音设置');
-      final audioPath = await _ttsService!.synthesize(text);
+      debugPrint('[RealtimeVoicePage] 开始TTS合成 (speakLongText)，音色来自语音设置');
+      // ★ 使用 speakLongText 分句流式合成，避免长文本单次请求超时
+      // VoiceClone 模式下单次请求可能超过60秒，分句后每块约50-100字，2-10秒即可完成
+      final completed = await _ttsService!.speakLongText(text);
 
       if (_isDisposed) {
         _onTTSComplete();
         return;
       }
-      if (_ttsInterrupted) {
+      if (_ttsInterrupted || !completed) {
         // 被打断时 _interruptTTS 已恢复 state，直接退出
         return;
-      }
-
-      if (audioPath.isNotEmpty) {
-        // ★★★ V77 修复：播放前先 stop 上一轮的音频 ★★★
-        // 旧代码：播放完成后不 stop，player 留在 completed 状态
-        // 下一轮 setFilePath 可能无法正确重置 player 内部状态
-        try { await _audioPlayer!.stop(); } catch (_) {}
-        await _audioPlayer!.setFilePath(audioPath);
-        await _audioPlayer!.play();
-
-        // ★★★ 修复 V75：用 processingStateStream + completion future 替代轮询 ★★★
-        await _waitForPlaybackComplete();
       }
     } catch (e) {
       debugPrint('[RealtimeVoicePage] TTS 播放失败: $e');

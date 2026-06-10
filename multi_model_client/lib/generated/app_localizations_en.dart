@@ -9,7 +9,7 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get appTitle => 'MJ Nexus';
+  String get appTitle => 'MJ Nexus Series:Synpse';
 
   @override
   String get sessions => 'Sessions';

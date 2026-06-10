@@ -10,11 +10,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/voice_clone_service.dart';
+import '../../../../core/services/recorder_manager.dart';
 
 enum _RecordingState { idle, recording, paused, stopped }
 
 class VoiceClonePage extends ConsumerStatefulWidget {
-  const VoiceClonePage({super.key});
+  /// TTS 提供商: 'mimo' 或 'cosyvoice'，决定克隆提交行为
+  final String provider;
+  const VoiceClonePage({super.key, this.provider = 'mimo'});
 
   @override
   ConsumerState<VoiceClonePage> createState() => _VoiceClonePageState();
@@ -76,19 +79,15 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
 
   void _cleanupRecorder() {
     try {
-      if (Recorder.instance.isDeviceStarted()) {
-        Recorder.instance.stop();
-      }
-      if (Recorder.instance.isDeviceInitialized()) {
-        Recorder.instance.deinit();
-      }
+      // ★ 使用 RecorderManager 统一管理，避免多页面竞态
+      RecorderManager.instance.deinit(holder: 'voice_clone');
     } catch (e) {
       debugPrint('[VoiceClone] cleanup error: $e');
     }
   }
 
   Future<void> _loadClonedVoices() async {
-    final voices = await _voiceService.getClonedVoices();
+    final voices = await _voiceService.getClonedVoicesByProvider(widget.provider);
     if (mounted) setState(() => _clonedVoices = voices);
   }
 
@@ -100,6 +99,11 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
       if (!mounted) return;
       if (_recState == _RecordingState.recording) {
         setState(() => _recordingDuration++);
+        // ★ CosyVoice 参考音频最长 30 秒，自动停止
+        if (_recordingDuration >= 30) {
+          debugPrint('[VoiceClone] 录音已达30秒上限，自动停止');
+          _stopRecording();
+        }
       }
     });
   }
@@ -125,12 +129,21 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
 
       _cleanupRecorder();
 
-      await Recorder.instance.init(
+      // ★ 使用 RecorderManager 统一管理初始化，避免多页面竞态
+      final ok = await RecorderManager.instance.init(
+        holder: 'voice_clone',
         sampleRate: 16000,
         channels: RecorderChannels.mono,
         format: PCMFormat.f32le,
       );
-      Recorder.instance.start();
+      if (!ok) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('录音初始化失败，请重试')),
+          );
+        }
+        return;
+      }
 
       final dir = await getApplicationSupportDirectory();
       final recordingsDir = Directory('${dir.path}/recordings');
@@ -140,7 +153,7 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
       final path =
           '${recordingsDir.path}/clone_${DateTime.now().millisecondsSinceEpoch}.wav';
 
-      Recorder.instance.startRecording(completeFilePath: path);
+      RecorderManager.instance.startRecording(path);
 
       if (!mounted) return;
       setState(() {
@@ -163,7 +176,7 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
 
   void _pauseRecording() {
     try {
-      Recorder.instance.setPauseRecording(pause: true);
+      RecorderManager.instance.pauseRecording();
       _stopDurationTimer();
       if (!mounted) return;
       setState(() => _recState = _RecordingState.paused);
@@ -180,7 +193,7 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
 
   void _resumeRecording() {
     try {
-      Recorder.instance.setPauseRecording(pause: false);
+      RecorderManager.instance.resumeRecording();
       if (!mounted) return;
       setState(() => _recState = _RecordingState.recording);
       _startDurationTimer();
@@ -200,10 +213,9 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
     debugPrint('[VoiceClone] _stopRecording called');
 
     try {
-      // flutter_recorder 的 stopRecording 是同步方法，不会挂起
-      Recorder.instance.stopRecording();
-      Recorder.instance.stop();
-      Recorder.instance.deinit();
+      // ★ 使用 RecorderManager 统一管理停止和释放
+      RecorderManager.instance.stopRecording();
+      await RecorderManager.instance.deinit(holder: 'voice_clone');
 
       final finalPath = _recordedAudioPath;
       debugPrint('[VoiceClone] stopped, path=$finalPath');
@@ -299,16 +311,27 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
     }
     setState(() => _isSubmitting = true);
     try {
-      await _voiceService.submitCloneTask(
-        audioPath: _recordedAudioPath!,
-        voiceName: name,
-      );
+      if (widget.provider == 'cosyvoice') {
+        // CosyVoice: 仅保存参考音频，无需远程验证
+        await _voiceService.submitCosyVoiceCloneTask(
+          audioPath: _recordedAudioPath!,
+          voiceName: name,
+        );
+      } else {
+        // MiMo: 提交到远程服务器验证
+        await _voiceService.submitCloneTask(
+          audioPath: _recordedAudioPath!,
+          voiceName: name,
+        );
+      }
       await _loadClonedVoices();
       _nameController.clear();
       _resetRecording();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('克隆任务已提交，正在后台处理...')),
+          SnackBar(content: Text(widget.provider == 'cosyvoice'
+              ? 'CosyVoice 音色已创建'
+              : '克隆任务已提交，正在后台处理...')),
         );
       }
     } catch (e) {
@@ -402,7 +425,7 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/settings/voice'),
         ),
-        title: const Text('语音克隆'),
+        title: Text(widget.provider == 'cosyvoice' ? 'CosyVoice 语音克隆' : '语音克隆'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(AppTheme.spacingM),
@@ -421,6 +444,9 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
                       style: theme.textTheme.displayMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                           fontFamily: 'monospace')),
+                  const SizedBox(height: 4),
+                  Text('最长 30 秒',
+                      style: TextStyle(color: Colors.grey, fontSize: 12)),
                   const SizedBox(height: AppTheme.spacingM),
                   _buildStatusBadge(),
                   const SizedBox(height: AppTheme.spacingL),
@@ -481,7 +507,9 @@ class _VoiceClonePageState extends ConsumerState<VoiceClonePage> {
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.cloud_upload),
-                    label: Text(_isSubmitting ? '提交中...' : '提交克隆'),
+                    label: Text(_isSubmitting
+                        ? '提交中...'
+                        : (widget.provider == 'cosyvoice' ? '创建音色' : '提交克隆')),
                   ),
                 ),
                 const SizedBox(width: AppTheme.spacingM),

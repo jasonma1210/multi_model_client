@@ -27,6 +27,15 @@ LazyDatabase openConnection() {
     return NativeDatabase.createInBackground(
       file,
       setup: (db) {
+        // ★ 修复：启用 WAL 模式 + 设置繁忙超时，防止 iOS 二次启动时数据库锁死
+        try {
+          db.execute('PRAGMA journal_mode=WAL');
+          db.execute('PRAGMA busy_timeout=5000'); // 等待 5 秒而非无限等待
+          db.execute('PRAGMA synchronous=NORMAL'); // 平衡性能和安全
+        } catch (_) {
+          // 忽略：某些平台可能不支持
+        }
+
         // 手动执行迁移：确保所有必要的表和列存在
         
         // 0. 创建 memories 表（如果不存在）
@@ -145,6 +154,11 @@ LazyDatabase openConnection() {
         }
         try {
           db.execute('ALTER TABLE sessions ADD COLUMN enable_file_upload INTEGER DEFAULT 0');
+        } catch (e) {
+          // 忽略：安全错误
+        }
+        try {
+          db.execute('ALTER TABLE sessions ADD COLUMN is_spirit INTEGER DEFAULT 0');
         } catch (e) {
           // 忽略：安全错误
         }

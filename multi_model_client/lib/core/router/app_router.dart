@@ -22,6 +22,11 @@ import '../../features/settings/presentation/pages/storage_paths_page.dart';
 import '../../features/settings/presentation/pages/log_list_page.dart';
 import '../../features/settings/presentation/pages/plugin_management_page.dart';
 import '../../features/settings/presentation/pages/manual_page.dart';
+import '../../features/spirit/presentation/pages/spirit_gallery_page.dart';
+import '../../features/spirit/presentation/pages/spirit_create_page.dart';
+import '../../features/spirit/presentation/pages/spirit_chat_page.dart';
+import '../../features/spirit/presentation/pages/spirit_voice_chat_page.dart';
+import '../../features/spirit/presentation/pages/spirit_detail_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -71,7 +76,9 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
               GoRoute(
                 path: 'voice/clone',
-                builder: (context, state) => const VoiceClonePage(),
+                builder: (context, state) => VoiceClonePage(
+                  provider: state.uri.queryParameters['provider'] ?? 'mimo',
+                ),
               ),
               GoRoute(
                 path: 'voice/director-templates',
@@ -124,6 +131,39 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: 'downloads',
             builder: (context, state) => const DownloadsPage(),
+          ),
+          // 名灵回响路由
+          GoRoute(
+            path: 'spirit',
+            builder: (context, state) => const SpiritGalleryPage(),
+            routes: [
+              GoRoute(
+                path: 'create',
+                builder: (context, state) => const SpiritCreatePage(),
+              ),
+              GoRoute(
+                path: 'chat/:spiritId',
+                builder: (context, state) {
+                  final spiritId = state.pathParameters['spiritId']!;
+                  return SpiritChatPage(spiritId: spiritId);
+                },
+              ),
+              GoRoute(
+                path: 'voice-chat/:spiritId',
+                builder: (context, state) {
+                  final spiritId = state.pathParameters['spiritId']!;
+                  final modelId = state.uri.queryParameters['modelId'] ?? '';
+                  return SpiritVoiceChatPage(spiritId: spiritId, modelId: modelId);
+                },
+              ),
+              GoRoute(
+                path: 'detail/:spiritId',
+                builder: (context, state) {
+                  final spiritId = state.pathParameters['spiritId']!;
+                  return SpiritDetailPage(spiritId: spiritId);
+                },
+              ),
+            ],
           ),
         ],
       ),

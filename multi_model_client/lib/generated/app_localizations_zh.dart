@@ -9,7 +9,7 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
-  String get appTitle => 'MJ Nexus';
+  String get appTitle => 'MJ Nexus Series:灵犀通';
 
   @override
   String get sessions => '会话';

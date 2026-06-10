@@ -68,7 +68,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   final List<OnboardingStep> _steps = [
     OnboardingStep(
       icon: Icons.rocket_launch,
-      title: '欢迎使用 MJ Nexus',
+      title: '欢迎使用 MJ Nexus Series',
       description: '多模型 AI 助手，支持本地和远程模型，连接无限可能',
       color: Colors.blue,
     ),

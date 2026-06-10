@@ -807,9 +807,27 @@ class ContextCompressorService {
     if (systemTokens >= tokenBudget) {
       // system 消息本身就超预算了，尝试截断 system 消息内容
       debugPrint('[ContextCompressor] ❌ system 消息已超预算 (${systemTokens}tokens)，尝试截断...');
-      final truncatedSystem = _truncateSystemMessages(systemMessages, tokenBudget);
+      // ★ 必须为最后一条 user 消息预留空间，否则 Hermes 模板会报 "No user query found"
+      int lastUserTokens = 0;
+      dynamic lastUserMsg;
+      for (int i = nonSystemMessages.length - 1; i >= 0; i--) {
+        if (nonSystemMessages[i].role == 'user') {
+          lastUserMsg = nonSystemMessages[i];
+          lastUserTokens = estimateTokens(lastUserMsg.content ?? '');
+          break;
+        }
+      }
+      final systemBudget = lastUserMsg != null
+          ? tokenBudget - lastUserTokens - 50  // 为 user 消息预留空间
+          : tokenBudget;
+      final truncatedSystem = _truncateSystemMessages(systemMessages, systemBudget > 100 ? systemBudget : tokenBudget);
       debugPrint('[ContextCompressor] 🔧 system 消息截断后: ${estimateTotalTokens(truncatedSystem)}tokens');
-      return truncatedSystem;
+      final result = <dynamic>[...truncatedSystem];
+      // ★ 确保最后一条 user 消息被保留
+      if (lastUserMsg != null && !result.any((m) => m.role == 'user')) {
+        result.add(lastUserMsg);
+      }
+      return result;
     }
 
     final remainingBudget = tokenBudget - systemTokens;

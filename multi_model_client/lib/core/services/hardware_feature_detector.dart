@@ -1,3 +1,4 @@
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -218,7 +219,7 @@ class NpuAvailabilityResult {
 /// 3. DotProd CPU 优化（所有现代手机都支持，提升 2-3 倍）
 /// 4. 通用 CPU（兜底）
 class CpuFeatureDetector {
-  static const MethodChannel _channel = MethodChannel('com.example.ai_assistant/hardware');
+  static const MethodChannel _channel = MethodChannel('hardware_checker');
 
   static CpuFeatureDetector? _instance;
   static CpuFeatureDetector get instance => _instance ??= CpuFeatureDetector._();
@@ -395,6 +396,97 @@ class CpuFeatureDetector {
     _cachedFeatures = null;
     _cachedVendor = null;
     _cachedNpu = null;
+    _cachedBigCoreInfo = null;
     debugPrint('[CpuFeatureDetector] 缓存已清除');
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  新增：大核信息检测（骁龙 8 Elite 优化核心）
+  // ════════════════════════════════════════════════════════════════════════
+
+  BigCoreInfo? _cachedBigCoreInfo;
+
+  /// 获取 CPU 大核信息
+  ///
+  /// ★ Android big.LITTLE 架构优化核心：
+  ///   - EAS（能量感知调度）会把推理任务分配给小核，导致性能极差
+  ///   - 必须显式设置线程数 = 大核数，避免"裸奔"在小核上
+  ///   - 骁龙 8 Elite 5: 2×超大核(P) + 4×大核(M) + 2×小核(E) = 8 核
+  Future<BigCoreInfo> getBigCoreInfo() async {
+    if (_cachedBigCoreInfo != null) return _cachedBigCoreInfo!;
+
+    if (!PlatformUtils.isAndroid) {
+      // 非 Android 平台：所有核心都可用
+      _cachedBigCoreInfo = BigCoreInfo(
+        totalCores: Platform.numberOfProcessors,
+        bigCoreCount: Platform.numberOfProcessors,
+        littleCoreCount: 0,
+        recommendedThreads: Platform.numberOfProcessors,
+      );
+      return _cachedBigCoreInfo!;
+    }
+
+    try {
+      final result = await _channel.invokeMethod('getBigCoreInfo');
+      final map = Map<String, dynamic>.from(result);
+      _cachedBigCoreInfo = BigCoreInfo.fromMap(map);
+      debugPrint('[CpuFeatureDetector] 大核信息: $_cachedBigCoreInfo');
+      return _cachedBigCoreInfo!;
+    } catch (e) {
+      debugPrint('[CpuFeatureDetector] 获取大核信息失败: $e');
+      // 回退：使用经验值
+      final totalCores = Platform.numberOfProcessors;
+      _cachedBigCoreInfo = BigCoreInfo(
+        totalCores: totalCores,
+        bigCoreCount: (totalCores * 0.75).round(),
+        littleCoreCount: totalCores - (totalCores * 0.75).round(),
+        recommendedThreads: (totalCores * 0.75).round().clamp(2, 10),
+      );
+      return _cachedBigCoreInfo!;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  大核信息数据模型
+// ════════════════════════════════════════════════════════════════════════
+
+/// CPU 大核信息（Android big.LITTLE 架构优化）
+///
+/// ★ 骁龙 8 Elite 5 核心: 2×超大核(P) + 4×大核(M) + 2×小核(E) = 8 核
+/// 推理线程数应 = 大核数（跳过小核），避免 EAS 调度到小核
+class BigCoreInfo {
+  /// 总 CPU 核心数
+  final int totalCores;
+
+  /// 大核数（包括超大核）
+  final int bigCoreCount;
+
+  /// 小核数
+  final int littleCoreCount;
+
+  /// 推荐的推理线程数 = 大核数（clamp 2-10）
+  final int recommendedThreads;
+
+  const BigCoreInfo({
+    required this.totalCores,
+    required this.bigCoreCount,
+    required this.littleCoreCount,
+    required this.recommendedThreads,
+  });
+
+  factory BigCoreInfo.fromMap(Map<String, dynamic> map) {
+    return BigCoreInfo(
+      totalCores: map['totalCores'] as int? ?? Platform.numberOfProcessors,
+      bigCoreCount: map['bigCoreCount'] as int? ?? (Platform.numberOfProcessors * 0.75).round(),
+      littleCoreCount: map['littleCoreCount'] as int? ?? 0,
+      recommendedThreads: map['recommendedThreads'] as int? ?? (Platform.numberOfProcessors * 0.75).round().clamp(2, 10),
+    );
+  }
+
+  @override
+  String toString() {
+    return 'BigCoreInfo(total: $totalCores, big: $bigCoreCount, '
+        'little: $littleCoreCount, recommendedThreads: $recommendedThreads)';
   }
 }

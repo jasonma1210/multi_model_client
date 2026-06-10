@@ -428,6 +428,26 @@ class DialogueEngine implements IDialogueEngine {
     await _messageRepository.deleteSessionMessages(sessionId);
   }
 
+  /// ★ 翻译文本（使用 LLM 进行翻译，支持英→中/中→英等）
+  Future<String> translateText(String text, {String targetLang = '中文'}) async {
+    // 获取可用的模型
+    final models = await _modelEngine.getAvailableModels();
+    String? modelId;
+    // 优先使用远程模型（速度快）
+    for (final m in models) {
+      if (m.source != 'ollama' && m.source != 'gguf') {
+        modelId = m.id;
+        break;
+      }
+    }
+    // 兜底使用本地模型
+    modelId ??= models.isNotEmpty ? models.first.id : null;
+    if (modelId == null) throw StateError('无可用模型进行翻译');
+
+    final prompt = '请将以下内容翻译为$targetLang，只输出翻译结果，不要添加任何解释或额外内容：\n\n$text';
+    return _modelEngine.generate(modelId, prompt, maxTokens: 4096);
+  }
+
   /// 构建结构化消息数组（支持 system/user/assistant 角色）
   ///
   /// 返回的消息数组结构：

@@ -261,6 +261,12 @@ class HardwareProfiler {
   }
 
   /// GPU 层数推荐
+  ///
+  /// ★ 骁龙 8 Elite 5 优化：
+  ///   - Adreno 7xx GPU 通过 Vulkan 可获得 3-5 倍推理加速
+  ///   - 统一内存架构，GPU 可直接访问全部 RAM
+  ///   - GPU offload 层数越多，推理越快（但需要更多内存）
+  ///   - 16GB 手机可安全 offload 60+ 层
   int _recommendGpuLayers(PlatformProfile platform, MemoryTier tier) {
     // Apple 平台：统一内存，全量 offload
     if (platform.isApple && platform.cpuArch == CpuArch.arm64) {
@@ -273,22 +279,24 @@ class HardwareProfiler {
     }
 
     // Android Vulkan：根据内存分级
+    // ★ 骁龙 8 Elite 5 的 Adreno GPU 通过 Vulkan 加速效果显著
+    // GPU offload 比纯 CPU 快 3-5 倍，应尽可能多卸载
     if (platform.isMobile) {
       switch (tier) {
         case MemoryTier.ultraLow:
-          return 8;
+          return 8;   // 极低端设备，GPU 太弱
         case MemoryTier.low:
-          return 12;
+          return 12;   // 入门设备
         case MemoryTier.midLow:
-          return 20;
+          return 20;   // 中低端
         case MemoryTier.mid:
-          return 28;
+          return 28;   // 8GB 设备
         case MemoryTier.midHigh:
-          return 35;
+          return 40;   // 12GB 设备，Vulkan 加速明显
         case MemoryTier.high:
-          return 60;
+          return 60;   // ★ 16GB 旗舰（骁龙 8 Elite），大量 offload
         default:
-          return 35;
+          return 40;
       }
     }
 

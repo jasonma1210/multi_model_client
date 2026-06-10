@@ -26,12 +26,25 @@ class _AppState extends ConsumerState<App> {
   }
 
   Future<void> _checkOnboarding() async {
-    final shouldShow = await OnboardingService.shouldShowOnboarding();
-    if (mounted) {
-      setState(() {
-        _showOnboarding = shouldShow;
-        _isCheckingOnboarding = false;
-      });
+    try {
+      // ★ 修复：添加超时保护，防止 SharedPreferences 卡住导致白屏
+      final shouldShow = await OnboardingService.shouldShowOnboarding()
+          .timeout(const Duration(seconds: 5), onTimeout: () => false);
+      if (mounted) {
+        setState(() {
+          _showOnboarding = shouldShow;
+          _isCheckingOnboarding = false;
+        });
+      }
+    } catch (e) {
+      // 超时或异常时跳过引导，直接进入主界面
+      debugPrint('[App] ⚠️ Onboarding 检查失败（跳过）: $e');
+      if (mounted) {
+        setState(() {
+          _showOnboarding = false;
+          _isCheckingOnboarding = false;
+        });
+      }
     }
   }
 
@@ -43,7 +56,7 @@ class _AppState extends ConsumerState<App> {
   Widget build(BuildContext context) {
     if (_isCheckingOnboarding) {
       return MaterialApp(
-        title: 'MJ Nexus',
+        title: 'MJ Nexus Series',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
@@ -65,7 +78,7 @@ class _AppState extends ConsumerState<App> {
 
     if (_showOnboarding) {
       return MaterialApp(
-        title: 'MJ Nexus',
+        title: 'MJ Nexus Series',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
