@@ -4,6 +4,11 @@ platform :ios, '15.5'
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
+# ★ 使用清华镜像加速 CocoaPods（国内 CDN 访问慢）
+# 清华镜像 + 官方 CDN 双源（部分 Pod 仅在官方源可用）
+source 'https://mirrors.tuna.tsinghua.edu.cn/git/CocoaPods/Specs.git'
+source 'https://cdn.cocoapods.org/'
+
 project 'Runner', {
   'Debug' => :debug,
   'Profile' => :release,
@@ -45,6 +50,19 @@ post_install do |installer|
       config.build_settings['ENABLE_BITCODE'] = 'NO'
       # 优化编译
       config.build_settings['SWIFT_OPTIMIZATION_LEVEL'] = '-O'
+
+      # ★ permission_handler 权限宏配置
+      # 必须显式启用需要的权限，否则 permission_handler 在 iOS 上无法正常工作
+      # 参考：https://github.com/Baseflow/flutter-permission-handler
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
+        '$(inherited)',
+        'PERMISSION_MICROPHONE=1',          # 麦克风权限（录音、语音识别）
+        'PERMISSION_SPEECH_RECOGNIZER=1',   # 语音识别权限（ASR）
+        'PERMISSION_CAMERA=1',              # 相机权限（扫码、拍照）
+        'PERMISSION_PHOTOS=1',              # 照片权限（图片选择）
+        'PERMISSION_NOTIFICATIONS=1',       # 通知权限
+        'PERMISSION_LOCATION=1',             # 位置权限
+      ]
     end
   end
 end

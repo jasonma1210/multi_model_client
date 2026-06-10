@@ -45,9 +45,10 @@ PODS:
   - file_selector_ios (0.0.1):
     - Flutter
   - Flutter (1.0.0)
-  - flutter_secure_storage_darwin (10.0.0):
+  - flutter_recorder (0.0.1):
     - Flutter
-    - FlutterMacOS
+  - flutter_secure_storage (6.0.0):
+    - Flutter
   - flutter_tts (0.0.1):
     - Flutter
   - geolocator_apple (1.2.0):
@@ -124,7 +125,7 @@ PODS:
   - permission_handler_apple (9.3.0):
     - Flutter
   - PromisesObjC (2.4.0)
-  - record_ios (1.2.0):
+  - record_ios (1.2.1):
     - Flutter
   - SDWebImage (5.21.7):
     - SDWebImage/Core (= 5.21.7)
@@ -134,7 +135,7 @@ PODS:
   - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
-  - sherpa_onnx_ios (1.13.0):
+  - sherpa_onnx_ios (1.13.2):
     - Flutter
   - speech_to_text (7.2.0):
     - CwlCatchException
@@ -178,7 +179,8 @@ DEPENDENCIES:
   - file_picker (from `.symlinks/plugins/file_picker/ios`)
   - file_selector_ios (from `.symlinks/plugins/file_selector_ios/ios`)
   - Flutter (from `Flutter`)
-  - flutter_secure_storage_darwin (from `.symlinks/plugins/flutter_secure_storage_darwin/darwin`)
+  - flutter_recorder (from `.symlinks/plugins/flutter_recorder/ios`)
+  - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
   - flutter_tts (from `.symlinks/plugins/flutter_tts/ios`)
   - geolocator_apple (from `.symlinks/plugins/geolocator_apple/darwin`)
   - google_mlkit_commons (from `.symlinks/plugins/google_mlkit_commons/ios`)
@@ -199,7 +201,7 @@ DEPENDENCIES:
   - video_compress (from `.symlinks/plugins/video_compress/ios`)
 
 SPEC REPOS:
-  trunk:
+  https://mirrors.tuna.tsinghua.edu.cn/git/CocoaPods/Specs.git:
     - CwlCatchException
     - CwlCatchExceptionSupport
     - DKImagePickerController
@@ -207,18 +209,19 @@ SPEC REPOS:
     - GoogleDataTransport
     - GoogleMLKit
     - GoogleToolboxForMac
-    - GoogleUtilities
     - GTMSessionFetcher
     - MLImage
-    - MLKitCommon
     - MLKitTextRecognition
     - MLKitTextRecognitionCommon
-    - MLKitVision
     - nanopb
     - PromisesObjC
     - SDWebImage
     - sqlite3
     - SwiftyGif
+  trunk:
+    - GoogleUtilities
+    - MLKitCommon
+    - MLKitVision
 
 EXTERNAL SOURCES:
   audio_session:
@@ -233,8 +236,10 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/file_selector_ios/ios"
   Flutter:
     :path: Flutter
-  flutter_secure_storage_darwin:
-    :path: ".symlinks/plugins/flutter_secure_storage_darwin/darwin"
+  flutter_recorder:
+    :path: ".symlinks/plugins/flutter_recorder/ios"
+  flutter_secure_storage:
+    :path: ".symlinks/plugins/flutter_secure_storage/ios"
   flutter_tts:
     :path: ".symlinks/plugins/flutter_tts/ios"
   geolocator_apple:
@@ -283,7 +288,8 @@ SPEC CHECKSUMS:
   file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
   file_selector_ios: ec57ec07954363dd730b642e765e58f199bb621a
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  flutter_secure_storage_darwin: acdb3f316ed05a3e68f856e0353b133eec373a23
+  flutter_recorder: ed50a95fdc1de98847f1caf155e2a35c0c55a06d
+  flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
   flutter_tts: 35ac3c7d42412733e795ea96ad2d7e05d0a75113
   geolocator_apple: ab36aa0e8b7d7a2d7639b3b4e48308394e8cef5e
   google_mlkit_commons: 92c769cc2e0a2bfdeb3c38091a36e8a9cc8c63d4
@@ -306,11 +312,11 @@ SPEC CHECKSUMS:
   pdfx: 77f4dddc48361fbb01486fa2bdee4532cbb97ef3
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
   PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
-  record_ios: 412daca2350b228e698fffcd08f1f94ceb1e3844
+  record_ios: 980fd386a97a35987d0fce3dfda4b26a38c90f4c
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
-  sherpa_onnx_ios: dd99d1ea762b50700812684ce429a95709f3756e
+  sherpa_onnx_ios: e8ce46d79d231ebdf2edd7b97891f5a601dd3565
   speech_to_text: 3b313d98516d3d0406cea424782ec25470c59d19
   sqlite3: a51c07cf16e023d6c48abd5e5791a61a47354921
   sqlite3_flutter_libs: b3e120efe9a82017e5552a620f696589ed4f62ab
@@ -318,6 +324,6 @@ SPEC CHECKSUMS:
   url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
   video_compress: f2133a07762889d67f0711ac831faa26f956980e
 
-PODFILE CHECKSUM: efcc195185baebdb4e3b0e872e2e848dcac574c5
+PODFILE CHECKSUM: 574e0ad403abd7b0ba8ad230888ee1729d74aafc
 
 COCOAPODS: 1.16.2

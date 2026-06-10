@@ -704,6 +704,8 @@ class MessageBubble extends StatelessWidget {
   final int? tokenCount;
   final double? tokensPerSecond;
   final WebSearchSummary? webSearchSummary;
+  /// 点击播放语音的回调（仅 AI 消息气泡显示）
+  final VoidCallback? onPlayVoice;
 
   const MessageBubble({
     super.key,
@@ -712,6 +714,7 @@ class MessageBubble extends StatelessWidget {
     this.tokenCount,
     this.tokensPerSecond,
     this.webSearchSummary,
+    this.onPlayVoice,
   });
 
   @override
@@ -744,6 +747,7 @@ class MessageBubble extends StatelessWidget {
                     tokenCount: tokenCount,
                     tokensPerSecond: tokensPerSecond,
                     webSearchSummary: webSearchSummary,
+                    onPlayVoice: onPlayVoice,
                   ),
                 const SizedBox(height: 4),
                 Text(
@@ -854,6 +858,7 @@ class _AssistantBubble extends StatefulWidget {
   final int? tokenCount;
   final double? tokensPerSecond;
   final WebSearchSummary? webSearchSummary;
+  final VoidCallback? onPlayVoice;
 
   const _AssistantBubble({
     required this.message,
@@ -861,6 +866,7 @@ class _AssistantBubble extends StatefulWidget {
     this.tokenCount,
     this.tokensPerSecond,
     this.webSearchSummary,
+    this.onPlayVoice,
   });
 
   @override
@@ -1032,13 +1038,14 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
             ),
         ],
 
-        // 底部：统计 + 复制
+        // 底部：统计 + 播放语音 + 复制
         const SizedBox(height: 6),
         _BubbleFooter(
           content: content,
           tokenCount: widget.tokenCount,
           tokensPerSecond: widget.tokensPerSecond,
           theme: theme,
+          onPlayVoice: widget.onPlayVoice,
         ),
       ],
     );
@@ -1206,12 +1213,14 @@ class _BubbleFooter extends StatelessWidget {
   final int? tokenCount;
   final double? tokensPerSecond;
   final ThemeData theme;
+  final VoidCallback? onPlayVoice;
 
   const _BubbleFooter({
     required this.content,
     required this.theme,
     this.tokenCount,
     this.tokensPerSecond,
+    this.onPlayVoice,
   });
 
   @override
@@ -1226,6 +1235,14 @@ class _BubbleFooter extends StatelessWidget {
             tokenCount: tokenCount,
             tokensPerSecond: tokensPerSecond,
             theme: theme,
+          ),
+          const SizedBox(width: 10),
+        ],
+        // ★ 播放语音按钮
+        if (onPlayVoice != null) ...[
+          GestureDetector(
+            onTap: onPlayVoice,
+            child: Icon(Icons.volume_up_outlined, size: 14, color: iconColor),
           ),
           const SizedBox(width: 10),
         ],

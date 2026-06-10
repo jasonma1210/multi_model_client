@@ -32,6 +32,33 @@ Future<String> _sherpaRecognizeInBackground(Map<String, String> params) async {
   final ruleFst = params['ruleFst'] ?? '';
   final filePath = params['filePath']!;
 
+  // ★★★ 关键修复：验证模型文件有效性，防止无效文件触发 C++ abort() ★★★
+  // 原生 sherpa_onnx 的 SherpaOnnxCreateOfflineRecognizer 在遇到无效模型时会
+  // 抛出 C++ 异常并调用 abort()，导致整个 App 闪退，Dart try-catch 无法捕获
+  final modelFile = File(modelPath);
+  final tokensFile = File(tokensPath);
+  
+  if (!await modelFile.exists()) {
+    throw Exception('ASR 模型文件不存在: $modelPath');
+  }
+  if (!await tokensFile.exists()) {
+    throw Exception('ASR tokens 文件不存在: $tokensPath');
+  }
+  
+  final modelSize = await modelFile.length();
+  final tokensSize = await tokensFile.length();
+  
+  // ONNX 模型文件至少 1MB，tokens 文件至少 1KB
+  if (modelSize < 1024 * 1024) {
+    throw Exception('ASR 模型文件异常（过小: ${modelSize ~/ 1024}KB），可能已损坏: $modelPath');
+  }
+  if (tokensSize < 1024) {
+    throw Exception('ASR tokens 文件异常（过小: ${tokensSize}B），可能已损坏: $tokensPath');
+  }
+  
+  // 注意：不验证 ONNX 文件头，因为 int8 量化模型可能有不同的 protobuf 编码头
+  // 文件大小 + 扩展名验证已足够防止损坏文件触发 C++ 崩溃
+
   // 初始化 bindings
   initBindings();
 
@@ -277,6 +304,35 @@ class ASRService {
     if (resolvedTokensPath == null || !await File(resolvedTokensPath).exists()) {
       throw StateError('Sherpa tokens.txt 文件不存在: $resolvedTokensPath');
     }
+    
+    // ★★★ 关键修复：验证模型文件完整性，防止损坏文件触发 C++ abort() ★★★
+    // sherpa_onnx 原生代码在遇到损坏/无效的 ONNX 模型时会抛出 C++ 异常
+    // 并调用 abort()，导致整个 App 闪退，Dart try-catch 无法捕获
+    final modelFile = File(resolvedModelPath);
+    final tokensFile = File(resolvedTokensPath);
+    final modelSize = await modelFile.length();
+    final tokensSize = await tokensFile.length();
+    
+    debugPrint('[ASRService] 模型文件大小: ${modelSize ~/ (1024 * 1024)}MB, tokens 文件大小: ${tokensSize ~/ 1024}KB');
+    
+    // ONNX 模型文件至少 1MB，tokens 文件至少 1KB
+    if (modelSize < 1024 * 1024) {
+      throw Exception(
+        'ASR 模型文件异常（过小: ${modelSize ~/ 1024}KB），可能已损坏\n'
+        '请在「语音设置」中删除并重新下载模型\n'
+        '路径: $resolvedModelPath',
+      );
+    }
+    if (tokensSize < 1024) {
+      throw Exception(
+        'ASR tokens 文件异常（过小: ${tokensSize}B），可能已损坏\n'
+        '请在「语音设置」中删除并重新下载模型\n'
+        '路径: $resolvedTokensPath',
+      );
+    }
+    
+    // 注意：不验证 ONNX 文件头，因为 int8 量化模型可能有不同的 protobuf 编码头
+    // 文件大小验证已足够防止损坏文件触发 C++ 崩溃
     
     // 根据模型类型选择配置
     final modelPathLower = resolvedModelPath.toLowerCase();

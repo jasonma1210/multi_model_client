@@ -86,8 +86,19 @@ class LocalProxyService {
       
       final proxyPort = port ?? prefs.getInt(_proxyPortKey) ?? _defaultPort;
 
-      // 启动 HTTP 服务器
-      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, proxyPort);
+      // ★ 修复：先关闭可能残留的旧服务器（防止端口冲突导致启动卡住）
+      if (_server != null) {
+        try {
+          await _server!.close(force: true);
+          _server = null;
+        } catch (_) {}
+      }
+
+      // 启动 HTTP 服务器（带超时保护，防止 iOS 端口占用导致无限等待）
+      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, proxyPort)
+          .timeout(const Duration(seconds: 5), onTimeout: () {
+        throw TimeoutException('绑定端口 $proxyPort 超时，可能端口已被占用');
+      });
       debugPrint('[$_tag] Proxy started on port $proxyPort, target: $_targetBaseUrl');
 
       // 监听请求

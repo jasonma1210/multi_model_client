@@ -36,12 +36,15 @@ import 'package:web_socket_channel/io.dart';
 import 'package:crypto/crypto.dart';
 import 'voice_model_service.dart';
 import 'tts_style_parser.dart';
+import 'audio_format_utils.dart';
 import '../platform/platform_utils.dart';
 
 /// TTS 提供商类型
 enum TTSProvider {
   openai,    // OpenAI TTS API (云端)
   mimo,      // 小米 MiMo TTS API (云端，中文优化)
+  cosyvoice, // CosyVoice 本地 Docker TTS (阿里开源，支持流式/克隆/指令控制)
+  fishaudio, // Fish Audio S2 Pro 本地 MLX TTS (Apple Silicon 原生，支持克隆/情感标签)
   edge,      // 微软 Edge TTS (免费，WebSocket 流式，降级方案)
   sherpa,    // Sherpa-ONNX 本地离线 TTS (中文优化)
   system,    // 系统内置 TTS (macOS/Windows/iOS/Android)
@@ -58,11 +61,32 @@ enum VoiceModel {
 }
 
 /// 小米 MiMo TTS 音色
+/// 完整列表来自 MiMo 官方文档：
+/// - mimo_default: 因部署集群而异，中国集群默认为冰糖，其他集群默认为Mia
+/// - bingtang/moli/suda/baihua: 中文音色
+/// - Mia/Chloe/Milo/Dean: 英文音色
+/// - default_zh/default_en: 中英文默认音色
 enum MiMoVoice {
-  Chloe,         // MiMo 默认音色
-  mimo_default,  // MiMo 默认音色 (V2)
+  mimo_default,  // MiMo 默认音色（推荐，因集群自动选择）
+  bingtang,      // 冰糖 - 中文 女性
+  moli,          // 茉莉 - 中文 女性
+  suda,          // 苏打 - 中文 男性
+  baihua,        // 白桦 - 中文 男性
+  Mia,           // Mia - 英文 女性
+  Chloe,         // Chloe - 英文 女性
+  Milo,          // Milo - 英文 男性
+  Dean,          // Dean - 英文 男性
   default_zh,    // 中文女声
   default_en,    // 英文女声
+}
+
+/// CosyVoice 推理模式
+/// CosyVoice2-0.5B 模型不支持 SFT/instruct 模式（无 spk2info.pt），
+/// 仅支持以下三种模式：
+enum CosyVoiceMode {
+  zero_shot,     // 零样本克隆（需要参考音频 + 参考文本，音色还原度最高）
+  cross_lingual, // 跨语言克隆（只需参考音频，不需要文本，最便捷）
+  instruct2,     // 指令控制 V2（参考音频 + 自然语言指令控制情感/语速等）
 }
 
 /// Edge TTS 音色（微软免费神经网络语音）
@@ -206,8 +230,12 @@ class TTSService {
   final TTSProvider _provider;
   final String? _apiKey;
   final VoiceModel _voice;
-  /// 小米 MiMo TTS 音色
+  /// 小米 MiMo TTS 音色（枚举，仅用于兼容旧代码）
   final MiMoVoice _mimoVoice;
+  /// ★ MiMo TTS 音色 ID（字符串，优先使用，直接传给 API）
+  /// 支持所有 MiMo 官方音色：mimo_default, bingtang, moli, suda, baihua, Mia, Chloe, Milo, Dean 等
+  /// 也支持克隆音色的 DataURL 格式
+  final String? _mimoVoiceId;
   /// Edge TTS 音色
   final EdgeVoice _edgeVoice;
   /// 克隆音色参考音频路径（非空时使用克隆模式）
@@ -221,6 +249,18 @@ class TTSService {
   final int _speakerId;
   /// ★ 系统 TTS 音色 ID（SharedPreferences 中的 tts_voice_id）
   final String? _systemVoiceId;
+  /// ★ CosyVoice 服务地址（Docker 本地部署，默认 http://localhost:50000）
+  final String? _cosyvoiceBaseUrl;
+  /// ★ CosyVoice 推理模式
+  final CosyVoiceMode _cosyvoiceMode;
+  /// ★ CosyVoice 指令文本（instruct2 模式使用，如"用开心的语气说话"）
+  final String? _cosyvoiceInstructText;
+  /// ★ Fish Audio 服务地址（MLX 本地部署，默认 http://localhost:50001）
+  final String? _fishaudioBaseUrl;
+  /// ★ Fish Audio 参考音频路径（语音克隆时使用）
+  final String? _fishaudioReferenceAudioPath;
+  /// ★ Fish Audio 参考音频文本转录（提升克隆质量）
+  final String? _fishaudioReferenceText;
   static const String _tag = 'TTSService';
   static const String _defaultMiMoBaseUrl = 'https://api.xiaomimimo.com/v1';
 
@@ -262,6 +302,9 @@ class TTSService {
   // ignore: unused_field — TTS 引擎绑定状态，预留给未来诊断
   bool _systemTtsBound = false;
   
+  /// ★ 是否为克隆音色模式（用于 UI 提示）
+  bool get isCloneMode => _cloneReferenceAudioPath != null;
+
   // just_audio 播放器实例（用于 stop/pause/resume 控制）
   final AudioPlayer _audioPlayer = AudioPlayer();
   // ignore: unused_field — 跟踪音频播放状态，用于 _playAudio 和 stop 操作
@@ -277,7 +320,10 @@ class TTSService {
     TTSProvider provider = TTSProvider.system,  // 默认使用系统内置 TTS
     String? apiKey,
     VoiceModel voice = VoiceModel.alloy,
-    MiMoVoice mimoVoice = MiMoVoice.Chloe,
+    MiMoVoice mimoVoice = MiMoVoice.mimo_default,
+    /// ★ MiMo 音色 ID 字符串（优先于 mimoVoice 枚举，直接传给 API）
+    /// 支持所有 MiMo 官方音色：mimo_default, bingtang, moli, suda, baihua, Mia, Chloe, Milo, Dean 等
+    String? mimoVoiceId,
     EdgeVoice edgeVoice = EdgeVoice.xiaoxiao,  // Edge TTS 默认中文女声
     String? cloneReferenceAudioPath,
     String? mimoBaseUrl,
@@ -287,17 +333,36 @@ class TTSService {
     /// ★ 系统 TTS 音色 ID（来自 SharedPreferences 的 tts_voice_id）
     /// 字符串形式以支持任意 ID（系统 TTS 的 voice ID 可能不是数字）
     String? systemVoiceId,
+    /// ★ CosyVoice 服务地址（Docker 本地部署，默认 http://localhost:50000）
+    String? cosyvoiceBaseUrl,
+    /// ★ CosyVoice 推理模式（默认跨语言克隆，最便捷）
+    CosyVoiceMode cosyvoiceMode = CosyVoiceMode.cross_lingual,
+    /// ★ CosyVoice 指令文本（instruct2 模式使用，如"用开心的语气说话"）
+    String? cosyvoiceInstructText,
+    /// ★ Fish Audio 服务地址（MLX 本地部署，默认 http://localhost:50001）
+    String? fishaudioBaseUrl,
+    /// ★ Fish Audio 参考音频路径（语音克隆时使用）
+    String? fishaudioReferenceAudioPath,
+    /// ★ Fish Audio 参考音频文本转录（提升克隆质量）
+    String? fishaudioReferenceText,
   })  : _provider = provider,
         _apiKey = apiKey,
         _voice = voice,
         _mimoVoice = mimoVoice,
+        _mimoVoiceId = mimoVoiceId,
         _edgeVoice = edgeVoice,
         _cloneReferenceAudioPath = cloneReferenceAudioPath,
         _mimoBaseUrl = mimoBaseUrl,
         _speechRate = speechRate,
         _sherpaModelId = sherpaModelId,
         _speakerId = speakerId,
-        _systemVoiceId = systemVoiceId;
+        _systemVoiceId = systemVoiceId,
+        _cosyvoiceBaseUrl = cosyvoiceBaseUrl,
+        _cosyvoiceMode = cosyvoiceMode,
+        _cosyvoiceInstructText = cosyvoiceInstructText,
+        _fishaudioBaseUrl = fishaudioBaseUrl,
+        _fishaudioReferenceAudioPath = fishaudioReferenceAudioPath,
+        _fishaudioReferenceText = fishaudioReferenceText;
 
   /// 合成语音（返回音频文件路径）
   /// ★ VoiceClone 模式使用2分钟总超时（比普通合成慢），其他模式1分钟
@@ -334,6 +399,14 @@ class TTSService {
         case TTSProvider.mimo:
           debugPrint('[$_tag] synthesize() → _synthesizeWithMiMo');
           path = await _synthesizeWithMiMo(text, outputPath: outputPath);
+          break;
+        case TTSProvider.cosyvoice:
+          debugPrint('[$_tag] synthesize() → _synthesizeWithCosyVoice');
+          path = await _synthesizeWithCosyVoice(text, outputPath: outputPath);
+          break;
+        case TTSProvider.fishaudio:
+          debugPrint('[$_tag] synthesize() → _synthesizeWithFishAudio');
+          path = await _synthesizeWithFishAudio(text, outputPath: outputPath);
           break;
         case TTSProvider.edge:
           debugPrint('[$_tag] synthesize() → _synthesizeWithEdge');
@@ -380,6 +453,8 @@ class TTSService {
       switch (_provider) {
         case TTSProvider.openai:
         case TTSProvider.mimo:
+        case TTSProvider.cosyvoice:
+        case TTSProvider.fishaudio:
         case TTSProvider.edge:
         case TTSProvider.sherpa:
           debugPrint('[$_tag] speak() → synthesize + _playAudio (provider=$_provider)');
@@ -398,19 +473,11 @@ class TTSService {
     } catch (e, stack) {
       debugPrint('[$_tag] speak() ❌ 异常: $e');
       debugPrint('[$_tag] speak() 堆栈: $stack');
-      // 任何 TTS 失败时，如果 provider 不是 system，尝试降级到 system
-      if (_provider != TTSProvider.system) {
-        debugPrint('[$_tag] TTS $_provider 播放失败，降级到系统 TTS: $e');
-        try {
-          await _speakWithSystem(text);
-          debugPrint('[$_tag] 系统 TTS 降级播放成功');
-        } catch (fallbackError) {
-          // 系统 TTS 也失败，静默处理（_speakWithSystem 内部已有重试和日志）
-          debugPrint('[$_tag] 系统 TTS 降级也失败: $fallbackError');
-        }
-      } else {
-        rethrow;
-      }
+      // ★★★ 关键修复：移除自动降级到系统 TTS 的逻辑 ★★★
+      // 之前这里会"自动降级"导致：用户设置 mimo → mimo 超时 → 静默转 system 输出
+      // 违反用户意图：用户明确选了 mimo，超时应该是错误而不是降级
+      // 修复后：speak() 失败直接 rethrow，让上层（调用方）决定如何处理
+      rethrow;
     }
   }
 
@@ -462,13 +529,30 @@ class TTSService {
       return true;
     }
 
+    // ★ 系统 TTS 特殊处理：直接使用 speak() 播放整个文本
+    // 系统 TTS 的 speak() 是直接播放的，不支持分块流水线模式
+    // 分块会导致多个 speak() 调用冲突（后一个会中断前一个）
+    if (_provider == TTSProvider.system) {
+      debugPrint('[$_tag] speakLongText() 系统 TTS 模式：直接播放整个文本');
+      try {
+        await _speakWithSystem(cleanText);
+        return true;
+      } catch (e) {
+        debugPrint('[$_tag] speakLongText() 系统 TTS 播放失败: $e');
+        return false;
+      }
+    }
+
     // ★ 2. 根据 TTS 提供商选择分块策略
     // MiMo：细粒度分块（1-2句/100字），短文本合成快（2-5秒），首块即播
+    // CosyVoice：细粒度分块（2句/100字），本地 Docker 推理快，首块即播
     // 其他：粗粒度分块（3句/200字），等2块后播放
     final isMiMo = _provider == TTSProvider.mimo;
-    final chunkSentenceCount = isMiMo ? 2 : 3;
-    final chunkMaxChars = isMiMo ? 100 : 200;
-    final preSynthCount = isMiMo ? 1 : 2; // MiMo: 只等1块即播；其他: 等2块
+    final isCosyVoice = _provider == TTSProvider.cosyvoice;
+    final useFineChunking = isMiMo || isCosyVoice;
+    final chunkSentenceCount = useFineChunking ? 2 : 3;
+    final chunkMaxChars = useFineChunking ? 100 : 200;
+    final preSynthCount = useFineChunking ? 1 : 2; // MiMo/CosyVoice: 只等1块即播；其他: 等2块
     
     debugPrint('[$_tag] speakLongText() 分块策略: provider=$_provider, isMiMo=$isMiMo, '
         'chunkSentenceCount=$chunkSentenceCount, chunkMaxChars=$chunkMaxChars, preSynthCount=$preSynthCount');
@@ -608,11 +692,14 @@ class TTSService {
   /// 异步合成单个文本块（通过 Completer 通知完成）
   void _synthChunkAsync(String text, int index, int total, 
       Completer<String?> completer, List<String> allTempFiles) {
-    // MiMo 短文本用15秒超时，其他用20秒
+    // ★ MiMo 克隆音色合成较慢（需处理参考音频），使用更长超时
+    // 普通 MiMo：15秒；MiMo 克隆：60秒；CosyVoice：60秒
     final timeout = _provider == TTSProvider.mimo 
-        ? const Duration(seconds: 15) 
-        : const Duration(seconds: 20);
-    debugPrint('[$_tag] 异步合成 chunk[$index/$total] (${text.length}字)');
+        ? (_cloneReferenceAudioPath != null 
+            ? const Duration(seconds: 60) 
+            : const Duration(seconds: 15))
+        : const Duration(seconds: 60);
+    debugPrint('[$_tag] 异步合成 chunk[$index/$total] (${text.length}字), 超时=${timeout.inSeconds}s, isClone=${_cloneReferenceAudioPath != null}');
     
     () async {
       try {
@@ -1668,11 +1755,382 @@ class TTSService {
     }
   }
 
-  /// 使用小米 MiMo TTS 合成
+  /// ★ CosyVoice 本地 Docker TTS 合成
+  /// 
+  /// CosyVoice 本地 Docker TTS 合成
+  /// 
+  /// CosyVoice2-0.5B 模型仅支持以下三种模式：
+  /// - zero_shot: 零样本克隆（参考音频 + 参考文本，音色还原度最高）
+  /// - cross_lingual: 跨语言克隆（只需参考音频，最便捷）
+  /// - instruct2: 指令控制 V2（参考音频 + 自然语言指令控制情感/语速等）
   ///
+  /// API 使用 Form 表单（multipart/form-data），响应为流式 PCM int16 数据
+  /// 采样率：24000Hz（CosyVoice2-0.5B），需要添加 WAV 头部才能播放
+  Future<String> _synthesizeWithCosyVoice(String text, {String? outputPath}) async {
+    final baseUrl = _cosyvoiceBaseUrl ?? 'http://localhost:50000';
+    
+    // ★ 情感控制：解析 TTS 标签，提取情感描述
+    final hasControl = TTSStyleParser.hasControlDirective(text);
+    String cleanText = text;
+    String? emotionInstructText; // 从 TTS 标签提取的情感指令
+    
+    if (hasControl) {
+      final segments = TTSStyleParser.parseAll(text);
+      // 提取纯文本
+      cleanText = segments.map((s) => s.displayContent).join('');
+      // 提取所有情感/风格描述，合并为 instruct_text
+      final emotionParts = <String>[];
+      for (final seg in segments) {
+        if (seg.controlContent.isNotEmpty) {
+          emotionParts.add(seg.controlContent);
+        }
+      }
+      if (emotionParts.isNotEmpty) {
+        emotionInstructText = emotionParts.join('，');
+        debugPrint('[$_tag] CosyVoice 情感控制: 提取到情感指令="$emotionInstructText"');
+      }
+    }
+    
+    // ★ 决定推理模式：
+    // 1. 如果有情感指令，自动使用 instruct2 模式（无论用户设置的是什么模式）
+    // 2. 否则使用用户配置的默认模式
+    final effectiveMode = emotionInstructText != null 
+        ? CosyVoiceMode.instruct2 
+        : _cosyvoiceMode;
+    final effectiveInstructText = emotionInstructText 
+        ?? _cosyvoiceInstructText 
+        ?? '用自然的语气说话';
+    
+    debugPrint('[$_tag] CosyVoice 合成: mode=$effectiveMode (原始=$_cosyvoiceMode), baseUrl=$baseUrl, text长度=${cleanText.length}');
+    if (emotionInstructText != null) {
+      debugPrint('[$_tag] CosyVoice 情感指令: $emotionInstructText');
+    }
+    
+    try {
+      // 检查参考音频文件是否存在
+      if (_cloneReferenceAudioPath != null) {
+        final refFile = File(_cloneReferenceAudioPath);
+        if (!await refFile.exists()) {
+          throw StateError('CosyVoice 参考音频文件不存在: $_cloneReferenceAudioPath');
+        }
+        final refSize = await refFile.length();
+        if (refSize < 1024) {
+          throw StateError('CosyVoice 参考音频文件过小（${refSize} bytes），至少需要 3 秒音频');
+        }
+        debugPrint('[$_tag] CosyVoice 参考音频: $_cloneReferenceAudioPath (${refSize} bytes)');
+      }
+      
+      // 使用 Dio 发送 multipart/form-data 请求
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 30);
+      // 根据文本长度动态调整超时：CPU 推理约 10-15 秒/句
+      final estimatedSeconds = (cleanText.length / 20 * 15).ceil().clamp(30, 300);
+      dio.options.receiveTimeout = Duration(seconds: estimatedSeconds);
+      
+      String endpoint;
+      FormData formData;
+      
+      switch (effectiveMode) {
+        case CosyVoiceMode.zero_shot:
+          if (_cloneReferenceAudioPath == null) {
+            throw StateError('CosyVoice 零样本克隆模式需要提供参考音频路径 (cloneReferenceAudioPath)');
+          }
+          endpoint = '$baseUrl/inference_zero_shot';
+          formData = FormData.fromMap({
+            'tts_text': cleanText,
+            'prompt_text': '',
+            'prompt_wav': await MultipartFile.fromFile(_cloneReferenceAudioPath!),
+          });
+          break;
+          
+        case CosyVoiceMode.cross_lingual:
+          if (_cloneReferenceAudioPath == null) {
+            throw StateError('CosyVoice 跨语言克隆模式需要提供参考音频路径 (cloneReferenceAudioPath)');
+          }
+          endpoint = '$baseUrl/inference_cross_lingual';
+          formData = FormData.fromMap({
+            'tts_text': cleanText,
+            'prompt_wav': await MultipartFile.fromFile(_cloneReferenceAudioPath!),
+          });
+          break;
+          
+        case CosyVoiceMode.instruct2:
+          if (_cloneReferenceAudioPath == null) {
+            throw StateError('CosyVoice instruct2 模式需要提供参考音频路径 (cloneReferenceAudioPath)');
+          }
+          endpoint = '$baseUrl/inference_instruct2';
+          formData = FormData.fromMap({
+            'tts_text': cleanText,
+            'instruct_text': effectiveInstructText,
+            'prompt_wav': await MultipartFile.fromFile(_cloneReferenceAudioPath!),
+          });
+          break;
+      }
+      
+      debugPrint('[$_tag] CosyVoice 请求: endpoint=$endpoint, timeout=${estimatedSeconds}s');
+      
+      // 发送请求，接收二进制 PCM 数据
+      final response = await dio.post<List<int>>(
+        endpoint,
+        data: formData,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      
+      final pcmBytes = response.data!;
+      if (pcmBytes.isEmpty) {
+        throw Exception('CosyVoice 返回空音频数据，请检查服务是否正常运行');
+      }
+      
+      debugPrint('[$_tag] CosyVoice 收到 PCM 数据: ${pcmBytes.length} bytes');
+      
+      // 将 PCM int16 数据转换为 WAV 格式（添加 WAV 头部）
+      // CosyVoice2-0.5B 输出：24000Hz, 16-bit, 单声道
+      const sampleRate = 24000;
+      const bitsPerSample = 16;
+      const numChannels = 1;
+      final wavBytes = _pcmToWav(pcmBytes, sampleRate, bitsPerSample, numChannels);
+      
+      // 保存到临时文件
+      final tempDir = await getTemporaryDirectory();
+      final tempPath = outputPath ?? 
+          '${tempDir.path}/cosyvoice_${DateTime.now().millisecondsSinceEpoch}.wav';
+      final file = File(tempPath);
+      await file.writeAsBytes(wavBytes);
+      
+      debugPrint('[$_tag] CosyVoice 合成完成: path=$tempPath, wavSize=${wavBytes.length} bytes');
+      return tempPath;
+      
+    } on DioException catch (e) {
+      // Dio 网络错误细分处理
+      String errorMsg;
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+          errorMsg = 'CosyVoice 连接超时，请确认 Docker 容器是否运行（docker ps）';
+          break;
+        case DioExceptionType.receiveTimeout:
+          errorMsg = 'CosyVoice 合成超时（文本可能过长），请尝试缩短文本';
+          break;
+        case DioExceptionType.connectionError:
+          errorMsg = 'CosyVoice 连接失败，请确认服务地址 $baseUrl 是否正确且容器已启动';
+          break;
+        case DioExceptionType.badResponse:
+          final statusCode = e.response?.statusCode;
+          // ★ 尝试从 bytes 响应中提取服务端错误信息
+          String serverError = '';
+          if (e.response?.data != null) {
+            try {
+              if (e.response!.data is List<int>) {
+                final jsonStr = String.fromCharCodes(e.response!.data as List<int>);
+                final decoded = jsonDecode(jsonStr);
+                if (decoded is Map && decoded.containsKey('error')) {
+                  serverError = decoded['error'].toString();
+                }
+              } else if (e.response!.data is Map) {
+                serverError = e.response!.data['error']?.toString() ?? '';
+              }
+            } catch (_) {}
+          }
+          errorMsg = serverError.isNotEmpty
+              ? 'CosyVoice 服务返回错误 ($statusCode)：$serverError'
+              : 'CosyVoice 服务返回错误 ($statusCode)：${e.response?.data ?? "未知错误"}';
+          break;
+        default:
+          errorMsg = 'CosyVoice 网络错误: ${e.message}';
+      }
+      debugPrint('[$_tag] CosyVoice DioException: $errorMsg');
+      throw Exception(errorMsg);
+    } catch (e, stack) {
+      debugPrint('[$_tag] CosyVoice 合成失败: $e');
+      debugPrint('[$_tag] CosyVoice 堆栈: $stack');
+      rethrow;
+    }
+  }
+
+  /// ★ Fish Audio S2 Pro (MLX) 语音合成
+  /// 
+  /// 基于 Apple Silicon MLX 框架的本地 TTS 服务，支持：
+  /// - 基础 TTS（默认音色）
+  /// - 零样本语音克隆（上传参考音频 + 可选文本转录）
+  /// - 情感标签控制（[happy], [whisper], [sad] 等 15,000+ 内联标签）
+  /// 
+  /// 服务端点：POST /v1/tts（基础TTS + 克隆统一入口）
+  Future<String> _synthesizeWithFishAudio(String text, {String? outputPath}) async {
+    const defaultBaseUrl = 'http://localhost:50001';
+    final baseUrl = _fishaudioBaseUrl ?? defaultBaseUrl;
+    
+    debugPrint('[$_tag] Fish Audio 合成: baseUrl=$baseUrl, text长度=${text.length}');
+    debugPrint('[$_tag] Fish Audio 克隆: refAudio=${_fishaudioReferenceAudioPath}, refText=${_fishaudioReferenceText}');
+    
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 30);
+      // Fish Audio MLX 推理速度远快于 CosyVoice（RTF≈0.2-0.5 vs 3.5）
+      // 但首次推理需要预热，给足超时
+      final estimatedSeconds = (text.length / 50 * 5).ceil().clamp(30, 120);
+      dio.options.receiveTimeout = Duration(seconds: estimatedSeconds);
+      
+      // 构建 FormData
+      final formFields = <String, dynamic>{
+        'text': text,
+        'output_format': 'wav',
+        'speed': _speechRate.toStringAsFixed(1),
+      };
+      
+      // 如果有参考音频，添加语音克隆参数
+      if (_fishaudioReferenceAudioPath != null && _fishaudioReferenceAudioPath!.isNotEmpty) {
+        final refFile = File(_fishaudioReferenceAudioPath!);
+        if (await refFile.exists()) {
+          final refSize = await refFile.length();
+          if (refSize < 1024) {
+            throw StateError('Fish Audio 参考音频文件过小（${refSize} bytes），至少需要 10 秒音频');
+          }
+          debugPrint('[$_tag] Fish Audio 参考音频: $_fishaudioReferenceAudioPath (${refSize} bytes)');
+          formFields['reference_audio'] = await MultipartFile.fromFile(_fishaudioReferenceAudioPath!);
+          if (_fishaudioReferenceText != null && _fishaudioReferenceText!.isNotEmpty) {
+            formFields['reference_text'] = _fishaudioReferenceText!;
+          }
+        } else {
+          debugPrint('[$_tag] Fish Audio 参考音频文件不存在: $_fishaudioReferenceAudioPath，使用默认音色');
+        }
+      }
+      
+      final formData = FormData.fromMap(formFields);
+      
+      debugPrint('[$_tag] Fish Audio 请求: endpoint=$baseUrl/v1/tts, timeout=${estimatedSeconds}s');
+      
+      // 发送请求，接收 WAV 音频数据
+      final response = await dio.post<List<int>>(
+        '$baseUrl/v1/tts',
+        data: formData,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      
+      final audioBytes = response.data!;
+      if (audioBytes.isEmpty) {
+        throw Exception('Fish Audio 返回空音频数据，请检查服务是否正常运行');
+      }
+      
+      // 从响应头获取音频元数据
+      final audioDuration = response.headers.value('X-Audio-Duration') ?? '?';
+      final genTime = response.headers.value('X-Generation-Time') ?? '?';
+      final rtf = response.headers.value('X-RTF') ?? '?';
+      debugPrint('[$_tag] Fish Audio 收到 WAV 数据: ${audioBytes.length} bytes, 时长=${audioDuration}s, 耗时=${genTime}s, RTF=$rtf');
+      
+      // 保存到临时文件
+      final tempDir = await getTemporaryDirectory();
+      final tempPath = outputPath ?? 
+          '${tempDir.path}/fishaudio_${DateTime.now().millisecondsSinceEpoch}.wav';
+      final file = File(tempPath);
+      await file.writeAsBytes(audioBytes);
+      
+      debugPrint('[$_tag] Fish Audio 合成完成: path=$tempPath, wavSize=${audioBytes.length} bytes');
+      return tempPath;
+      
+    } on DioException catch (e) {
+      String errorMsg;
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+          errorMsg = 'Fish Audio 连接超时，请确认 MLX 服务是否运行（python server.py）';
+          break;
+        case DioExceptionType.receiveTimeout:
+          errorMsg = 'Fish Audio 合成超时，请尝试缩短文本或检查模型是否已加载';
+          break;
+        case DioExceptionType.connectionError:
+          errorMsg = 'Fish Audio 连接失败，请确认服务地址 $baseUrl 是否正确且服务已启动';
+          break;
+        case DioExceptionType.badResponse:
+          final statusCode = e.response?.statusCode;
+          String serverError = '';
+          try {
+            if (e.response?.data is List<int>) {
+              final jsonStr = String.fromCharCodes(e.response!.data as List<int>);
+              final decoded = jsonDecode(jsonStr);
+              if (decoded is Map && decoded.containsKey('detail')) {
+                serverError = decoded['detail'].toString();
+              }
+            }
+          } catch (_) {}
+          errorMsg = serverError.isNotEmpty
+              ? 'Fish Audio 服务返回错误 ($statusCode)：$serverError'
+              : 'Fish Audio 服务返回错误 ($statusCode)';
+          break;
+        default:
+          errorMsg = 'Fish Audio 网络错误: ${e.message}';
+      }
+      debugPrint('[$_tag] Fish Audio DioException: $errorMsg');
+      throw Exception(errorMsg);
+    } catch (e, stack) {
+      debugPrint('[$_tag] Fish Audio 合成失败: $e');
+      debugPrint('[$_tag] Fish Audio 堆栈: $stack');
+      rethrow;
+    }
+  }
+
+  /// 将 PCM 原始数据转换为 WAV 格式（添加 44 字节 WAV 头部）
+  /// PCM 格式：16-bit signed integer, little-endian
+  Uint8List _pcmToWav(List<int> pcmData, int sampleRate, int bitsPerSample, int numChannels) {
+    final byteRate = sampleRate * numChannels * bitsPerSample ~/ 8;
+    final blockAlign = numChannels * bitsPerSample ~/ 8;
+    final dataSize = pcmData.length;
+    final fileSize = dataSize + 36;
+    
+    final header = ByteData(44);
+    // RIFF 标识
+    header.setUint32(0, 0x52494646, Endian.big); // 'RIFF'
+    header.setUint32(4, fileSize, Endian.little);
+    header.setUint32(8, 0x57415645, Endian.big); // 'WAVE'
+    // fmt 子块
+    header.setUint32(12, 0x666d7420, Endian.big); // 'fmt '
+    header.setUint32(16, 16, Endian.little); // 子块大小
+    header.setUint16(20, 1, Endian.little); // PCM 格式
+    header.setUint16(22, numChannels, Endian.little);
+    header.setUint32(24, sampleRate, Endian.little);
+    header.setUint32(28, byteRate, Endian.little);
+    header.setUint16(32, blockAlign, Endian.little);
+    header.setUint16(34, bitsPerSample, Endian.little);
+    // data 子块
+    header.setUint32(36, 0x64617461, Endian.big); // 'data'
+    header.setUint32(40, dataSize, Endian.little);
+    
+    final result = Uint8List(44 + dataSize);
+    result.setRange(0, 44, header.buffer.asUint8List());
+    result.setRange(44, 44 + dataSize, pcmData);
+    return result;
+  }
+
+  /// MiMo TTS 合成
   /// API 兼容 OpenAI 格式，使用 /v1/chat/completions 端点
   /// 响应中音频数据以 Base64 编码返回在 choices[0].message.audio.data
+  /// ★ MiMo 音色 ID 映射：将拼音映射为 MiMo API 需要的中文 Voice ID
+  /// MiMo 官方 API 的预置音色使用中文名称（冰糖、茉莉、苏打、白桦），
+  /// 而应用内部存储使用拼音（bingtang、moli、suda、baihua），
+  /// 需要在调用 API 时进行转换
+  static const Map<String, String> _mimoVoiceIdMap = {
+    'mimo_default': 'mimo_default',
+    'bingtang': '冰糖',
+    'moli': '茉莉',
+    'suda': '苏打',
+    'baihua': '白桦',
+    'Mia': 'Mia',
+    'Chloe': 'Chloe',
+    'Milo': 'Milo',
+    'Dean': 'Dean',
+    'default_zh': 'mimo_default',
+    'default_en': 'mimo_default',
+  };
+
+  /// 将内部音色 ID 转换为 MiMo API 需要的 Voice ID
+  static String _resolveMiMoVoiceId(String voiceId) {
+    return _mimoVoiceIdMap[voiceId] ?? voiceId;
+  }
+
   Future<String> _synthesizeWithMiMo(String text, {String? outputPath}) async {
+    debugPrint('[$_tag] _synthesizeWithMiMo() 入口: apiKey长度=${_apiKey?.length ?? 0}, '
+        'mimoVoiceId=${_mimoVoiceId ?? "null"}, mimoVoice=${_mimoVoice.name}, '
+        'cloneReferenceAudioPath=${_cloneReferenceAudioPath ?? "null"}, '
+        'mimoBaseUrl=${_mimoBaseUrl ?? "null(将从SharedPreferences读取)"}');
     if (_apiKey == null || _apiKey.isEmpty) {
       throw StateError('MiMo API key not configured. Please set MiMo API key in voice settings.');
     }
@@ -1691,9 +2149,14 @@ class TTSService {
     final baseUrl = _mimoBaseUrl ?? await _getMiMoBaseUrl();
     final url = '$baseUrl/chat/completions';
     
+    // ★ 修复：优先使用字符串音色 ID（_mimoVoiceId），回退到枚举名（_mimoVoice.name）
+    // 然后通过 _resolveMiMoVoiceId 将拼音映射为 MiMo API 需要的中文 Voice ID
+    final rawVoiceId = _mimoVoiceId ?? _mimoVoice.name;
+    final voiceId = _resolveMiMoVoiceId(rawVoiceId);
+    
     // 解析所有 TTS 控制指令
     var allSegments = TTSStyleParser.parseAll(text);
-    debugPrint('[$_tag] MiMo TTS 请求: url=$url, voice=${_mimoVoice.name}, text长度=${text.length}, 段落数=${allSegments.length}');
+    debugPrint('[$_tag] MiMo TTS 请求: url=$url, voice=$voiceId (rawVoiceId=$rawVoiceId, mimoVoiceId=${_mimoVoiceId ?? "null"}, mimoVoice=${_mimoVoice.name}), text长度=${text.length}, 段落数=${allSegments.length}');
     
     // ★ 优化：多标签不再分段合成，直接将原始文本（保留所有 TTS 标签）作为一次 API 调用
     // MiMo 引擎本身支持解析多个 [tts:...] 标签，分段合成反而更慢且容易触发 429 限流
@@ -1723,11 +2186,13 @@ class TTSService {
       // 构建请求数据
       final requestData = TTSStyleParser.buildMiMoRequest(
         text: text,
-        voice: _mimoVoice.name,
+        voice: voiceId,
         format: 'wav',
         model: 'mimo-v2.5-tts',
       );
 
+      debugPrint('[$_tag] MiMo TTS 即将发出 dio.post: url=$url, model=mimo-v2.5-tts, '
+          'voice=$voiceId, textLength=${text.length}');
       await _waitForRateLimit();
       final response = await dio.post(
         url,
@@ -1783,7 +2248,7 @@ class TTSService {
   /// 多标签分段合成
   ///
   /// 将包含多个 TTS 标签的文本拆分为多个段落，两两合并后合成音频，减少 API 调用次数避免 429 限流。
-  Future<String> _synthesizeMultipleSegments(List<TTSControlData> segments, String url, String? outputPath) async {
+  Future<String> _synthesizeMultipleSegments(List<TTSControlData> segments, String url, String? outputPath, {String? voiceId}) async {
     final tempDir = await getTemporaryDirectory();
     final audioFiles = <String>[];
 
@@ -1822,7 +2287,7 @@ class TTSService {
       try {
         final requestData = TTSStyleParser.buildMiMoRequest(
           text: mergedText,
-          voice: _mimoVoice.name,
+          voice: voiceId ?? _resolveMiMoVoiceId(_mimoVoice.name),
           format: 'wav',
           model: 'mimo-v2.5-tts',
         );
@@ -1950,29 +2415,14 @@ class TTSService {
       throw StateError('MiMo API key not configured. Please set MiMo API key in voice settings.');
     }
 
-    // 读取参考音频文件
-    final audioFile = File(referenceAudioPath);
-    if (!await audioFile.exists()) {
-      throw Exception('参考音频文件不存在: $referenceAudioPath');
-    }
-
-    final audioBytes = await audioFile.readAsBytes();
-    final base64Audio = base64Encode(audioBytes);
-    
-    // 检查文件大小（Base64 字符串不能超过 10MB）
-    if (base64Audio.length > 10 * 1024 * 1024) {
-      throw Exception('参考音频文件过大（最大 10MB），当前: ${(base64Audio.length / 1024 / 1024).toStringAsFixed(2)}MB');
-    }
-
-    // voice 字段必须是 DataURL 格式: data:{MIME_TYPE};base64,$BASE64_AUDIO
-    // MIME 类型必须与实际音频格式匹配：audio/wav 或 audio/mpeg
-    final ext = referenceAudioPath.toLowerCase().split('.').last;
-    final mimeType = (ext == 'mp3' || ext == 'mpeg') ? 'audio/mpeg' : 'audio/wav';
-    final voiceData = 'data:$mimeType;base64,$base64Audio';
+    // ★ 使用 AudioFormatUtils 基于文件头魔数检测实际格式，确保 MIME 类型与内容匹配
+    // 内部已处理：文件读取、大小检查（10MB）、base64 编码、DataURL 构建
+    // 这比仅靠扩展名更可靠（iOS 录音文件扩展名可能不准确）
+    final voiceData = await AudioFormatUtils.prepareMiMoVoiceDataUrl(referenceAudioPath);
 
     // 使用 parseAll 解析所有 TTS 控制指令（支持多标签）
     var allSegments = TTSStyleParser.parseAll(text);
-    debugPrint('[$_tag] MiMo VoiceClone 请求: text长度=${text.length}, audioSize=${audioBytes.length} bytes, 段落数=${allSegments.length}');
+    debugPrint('[$_tag] MiMo VoiceClone 请求: text长度=${text.length}, 段落数=${allSegments.length}');
 
     // 优先使用构造参数，否则从 SharedPreferences 读取自定义地址
     final baseUrl = _mimoBaseUrl ?? await _getMiMoBaseUrl();
@@ -2368,6 +2818,38 @@ class TTSService {
             await _systemTts!.setLanguage('en-US');
           } catch (_) {}
         }
+        // ★ iOS 也需要设置系统 TTS 音色（之前遗漏）
+        if (_systemVoiceId != null && _systemVoiceId.isNotEmpty) {
+          try {
+            final voices = await _systemTts!.getVoices;
+            if (voices != null) {
+              final voiceList = voices.cast<Map<dynamic, dynamic>>();
+              Map<String, String>? matched;
+              for (final v in voiceList) {
+                final vid = v['name']?.toString() ?? '';
+                if (vid == _systemVoiceId) {
+                  matched = {
+                    'name': v['name']?.toString() ?? '',
+                    'locale': v['locale']?.toString() ?? 'zh-CN',
+                  };
+                  break;
+                }
+              }
+              if (matched != null) {
+                await _systemTts!.setVoice(matched);
+                debugPrint('[TTSService] ✅ iOS 设置系统 TTS 音色: name=${matched['name']}, locale=${matched['locale']}');
+              } else {
+                await _systemTts!.setVoice({
+                  'name': _systemVoiceId,
+                  'locale': 'zh-CN',
+                });
+                debugPrint('[TTSService] ⚠️ iOS 未找到匹配音色，按 name=$_systemVoiceId 设置');
+              }
+            }
+          } catch (e) {
+            debugPrint('[TTSService] iOS 设置系统 TTS 音色失败: $e');
+          }
+        }
       } else if (PlatformUtils.isMacOS) {
         try {
           await _systemTts!.setSharedInstance(true);
@@ -2626,6 +3108,8 @@ class TTSService {
   void dispose() {
     _playerStateSubscription?.cancel();
     _playerStateSubscription = null;
+    // ★ 修复：释放 AudioPlayer，避免多实例冲突导致闪退
+    try { _audioPlayer.dispose(); } catch (_) {}
     _sherpaTts?.free();
     _sherpaInitialized = false;
     _systemTts?.stop();
@@ -2649,14 +3133,22 @@ TTSService createTTSService({
   double speechRate = 1.0,
   String? openaiApiKey,
   String? mimoApiKey,
-  MiMoVoice mimoVoice = MiMoVoice.Chloe,
+  MiMoVoice mimoVoice = MiMoVoice.mimo_default,
   String? cloneReferenceAudioPath,
+  String? cosyvoiceBaseUrl,
+  CosyVoiceMode cosyvoiceMode = CosyVoiceMode.cross_lingual,
+  String cosyvoiceInstructText = '用自然的语气说话',
+  String? fishaudioBaseUrl,
+  String? fishaudioReferenceAudioPath,
+  String? fishaudioReferenceText,
 }) {
   final ttsProvider = switch (provider) {
     'sherpa' => TTSProvider.sherpa,
     'system' => TTSProvider.system,
     'openai' => TTSProvider.openai,
     'mimo' => TTSProvider.mimo,
+    'cosyvoice' => TTSProvider.cosyvoice,
+    'fishaudio' => TTSProvider.fishaudio,
     _ => TTSProvider.sherpa, // 默认使用 Sherpa
   };
   
@@ -2664,10 +3156,18 @@ TTSService createTTSService({
     provider: ttsProvider,
     apiKey: provider == 'mimo' ? mimoApiKey : openaiApiKey,
     mimoVoice: mimoVoice,
-    cloneReferenceAudioPath: cloneReferenceAudioPath,
+    cloneReferenceAudioPath: provider == 'cosyvoice' && cloneReferenceAudioPath != null && cloneReferenceAudioPath.isNotEmpty
+        ? cloneReferenceAudioPath
+        : (provider != 'cosyvoice' ? cloneReferenceAudioPath : null),
     sherpaModelId: sherpaModelId,
     speakerId: ttsVoice != null ? int.tryParse(ttsVoice) ?? 0 : 0,
     speechRate: speechRate,
+    cosyvoiceBaseUrl: provider == 'cosyvoice' ? cosyvoiceBaseUrl : null,
+    cosyvoiceMode: cosyvoiceMode,
+    cosyvoiceInstructText: cosyvoiceInstructText,
+    fishaudioBaseUrl: provider == 'fishaudio' ? fishaudioBaseUrl : null,
+    fishaudioReferenceAudioPath: provider == 'fishaudio' ? fishaudioReferenceAudioPath : null,
+    fishaudioReferenceText: provider == 'fishaudio' ? fishaudioReferenceText : null,
   );
 }
 

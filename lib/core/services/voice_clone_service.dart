@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 import 'local_proxy_service.dart';
+import 'audio_format_utils.dart';
 
 /// 克隆音色状态
 enum CloneVoiceStatus {
@@ -24,6 +25,7 @@ class ClonedVoice {
   final DateTime createdAt;
   final CloneVoiceStatus status;
   final String? errorMessage;
+  final String provider; // 所属 TTS 提供商: 'mimo' 或 'cosyvoice'
 
   ClonedVoice({
     required this.id,
@@ -32,6 +34,7 @@ class ClonedVoice {
     required this.createdAt,
     this.status = CloneVoiceStatus.completed,
     this.errorMessage,
+    this.provider = 'mimo', // 默认 MiMo，兼容旧数据
   });
 
   bool get isReady => status == CloneVoiceStatus.completed;
@@ -45,6 +48,7 @@ class ClonedVoice {
     DateTime? createdAt,
     CloneVoiceStatus? status,
     String? errorMessage,
+    String? provider,
   }) {
     return ClonedVoice(
       id: id ?? this.id,
@@ -53,6 +57,7 @@ class ClonedVoice {
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
       errorMessage: errorMessage ?? this.errorMessage,
+      provider: provider ?? this.provider,
     );
   }
 
@@ -63,6 +68,7 @@ class ClonedVoice {
         'createdAt': createdAt.toIso8601String(),
         'status': status.index,
         'errorMessage': errorMessage,
+        'provider': provider,
       };
 
   factory ClonedVoice.fromJson(Map<String, dynamic> json) => ClonedVoice(
@@ -73,6 +79,7 @@ class ClonedVoice {
         status: CloneVoiceStatus
             .values[json['status'] as int? ?? CloneVoiceStatus.completed.index],
         errorMessage: json['errorMessage'] as String?,
+        provider: json['provider'] as String? ?? 'mimo', // 兼容旧数据
       );
 }
 
@@ -132,6 +139,12 @@ class VoiceCloneService {
       debugPrint('[$_tag] Failed to load cloned voices: $e');
       return [];
     }
+  }
+
+  /// 按提供商获取克隆音色
+  Future<List<ClonedVoice>> getClonedVoicesByProvider(String provider) async {
+    final all = await getClonedVoices();
+    return all.where((v) => v.provider == provider).toList();
   }
 
   /// 添加克隆音色
@@ -239,6 +252,44 @@ class VoiceCloneService {
     return clonedVoice;
   }
 
+  /// 提交 CosyVoice 克隆任务（仅保存参考音频，无需远程验证）
+  ///
+  /// CosyVoice 使用本地参考音频进行推理，不需要像 MiMo 那样上传到服务器验证
+  Future<ClonedVoice> submitCosyVoiceCloneTask({
+    required String audioPath,
+    required String voiceName,
+  }) async {
+    // 1. 验证音频
+    final (isValid, errorMsg) = await validateReferenceAudio(audioPath);
+    if (!isValid) {
+      throw Exception(errorMsg ?? '音频验证失败');
+    }
+
+    // 2. 保存参考音频
+    final savedPath = await saveReferenceAudio(audioPath);
+
+    // 3. 创建克隆音色记录（CosyVoice 直接标记为完成，无需远程验证）
+    final clonedVoice = ClonedVoice(
+      id: 'cv_${DateTime.now().millisecondsSinceEpoch}',
+      name: voiceName,
+      referenceAudioPath: savedPath,
+      createdAt: DateTime.now(),
+      status: CloneVoiceStatus.completed,
+      provider: 'cosyvoice',
+    );
+
+    await addClonedVoice(clonedVoice);
+
+    _notifyProgress(CloneTaskProgress(
+      taskId: clonedVoice.id,
+      status: CloneVoiceStatus.completed,
+      message: 'CosyVoice 音色 "$voiceName" 已就绪',
+      progress: 1.0,
+    ));
+
+    return clonedVoice;
+  }
+
   /// 后台执行克隆验证 - 调用 MiMo API 发送测试文本验证克隆效果
   Future<void> _executeCloneVerification(ClonedVoice voice) async {
     try {
@@ -272,26 +323,11 @@ class VoiceCloneService {
       }
       final apiUrl = '$baseUrl/chat/completions';
 
-      // 读取参考音频并编码
-      final audioFile = File(voice.referenceAudioPath);
-      if (!await audioFile.exists()) {
-        throw Exception('参考音频文件不存在');
-      }
+      // ★ 使用 AudioFormatUtils 基于文件头魔数检测实际格式，确保 MIME 类型与内容匹配
+      // 内部已处理：文件存在性检查、大小检查（10MB）、base64 编码、DataURL 构建
+      final voiceData = await AudioFormatUtils.prepareMiMoVoiceDataUrl(voice.referenceAudioPath);
 
-      final audioBytes = await audioFile.readAsBytes();
-      final base64Audio = base64Encode(audioBytes);
-
-      if (base64Audio.length > 10 * 1024 * 1024) {
-        throw Exception('音频文件过大（最大 10MB）');
-      }
-
-      // voice 字段必须是 DataURL 格式: data:{MIME_TYPE};base64,$BASE64_AUDIO
-      // MIME 类型必须与实际音频格式匹配：audio/wav 或 audio/mpeg
-      final ext = voice.referenceAudioPath.toLowerCase().split('.').last;
-      final mimeType = (ext == 'mp3' || ext == 'mpeg') ? 'audio/mpeg' : 'audio/wav';
-      final voiceData = 'data:$mimeType;base64,$base64Audio';
-
-      debugPrint('[$_tag] Clone request: url=$apiUrl, audioSize=${audioBytes.length} bytes');
+      debugPrint('[$_tag] Clone request: url=$apiUrl');
 
       _notifyProgress(CloneTaskProgress(
         taskId: voice.id,
@@ -460,7 +496,7 @@ class VoiceCloneService {
         if (msg.contains('SocketException') ||
             msg.contains('Failed host lookup') ||
             msg.contains('resolve')) {
-          return 'DNS 解析失败，无法连接 api.xiaomimimo.com。请检查网络，或在设置中配置自定义 MiMo API 地址';
+          return 'DNS 解析失败，无法连接 MiMo API。请检查网络，或在设置中配置自定义 MiMo API 地址';
         }
         return '网络连接失败，请检查网络设置';
       case DioExceptionType.unknown:

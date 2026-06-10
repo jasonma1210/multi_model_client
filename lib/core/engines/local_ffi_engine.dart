@@ -233,6 +233,15 @@ class LocalFFIEngine {
       // ★ 安全模式 = CPU 模式，必须同时设置 forceCpuMode
       forceCpuMode = true;
     }
+    
+    // ★★★ iOS 临时方案：默认使用 CPU 模式 ★★★
+    // llamadart 的 Metal 后端在当前 iOS 26 设备上会触发 SIGSEGV，
+    // 该信号无法被 Dart try-catch 捕获，导致 App 直接闪退。
+    // 临时在 iOS 上默认使用 CPU 模式（gpuLayers=0），待 llamadart 修复 Metal 问题后恢复
+    if (Platform.isIOS && !forceCpuMode) {
+      debugPrint('[LocalFFIEngine] 🔧 iOS 平台临时默认使用 CPU 模式（防止 Metal SIGSEGV）');
+      forceCpuMode = true;
+    }
 
     // ★★★ 写入崩溃标记（加载前）★★★
     // 如果加载过程中 SIGABRT 崩溃，标记会保留，下次启动时检测到
@@ -243,26 +252,39 @@ class LocalFFIEngine {
 
     // ★ 修复：处理模型路径
     // 情况1：路径包含 / 或 \，可能是完整路径
-    //   - 如果是 xxx.gguf/xxx.gguf（重复），提取文件名并搜索
-    //   - 否则直接使用
+    //   - 如果文件存在，直接使用
+    //   - 如果文件不存在（iOS 沙盒路径变化等），提取文件名重新搜索
+    //   - 特殊处理 xxx.gguf/xxx.gguf 重复路径
     // 情况2：路径不包含 / 或 \，只保存了文件名，需要搜索
     String fullModelPath = modelPath;
     
     if (modelPath.contains('/') || modelPath.contains('\\')) {
-      // 完整路径，检查是否重复（xxx.gguf/xxx.gguf）
-      final pathParts = modelPath.split('/');
-      if (pathParts.length >= 2) {
-        final lastPart = pathParts.last;
-        final secondLastPart = pathParts[pathParts.length - 2];
-        if (secondLastPart.endsWith('.gguf') && lastPart.endsWith('.gguf')) {
-          // 重复了！提取文件名
-          final fileName = lastPart;
-          debugPrint('LocalFFIEngine: 检测到重复路径，提取文件名: $fileName');
-          final foundPath = await _findModelFile(fileName);
-          if (foundPath != null) {
-            fullModelPath = foundPath;
-            debugPrint('LocalFFIEngine: ✅ 找到模型文件: $fullModelPath');
+      // 完整路径，先检查文件是否存在
+      if (await File(modelPath).exists()) {
+        fullModelPath = modelPath;
+      } else {
+        // ★ iOS 沙盒路径可能变化（每次安装后 UUID 不同），需要重新搜索
+        final fileName = modelPath.split('/').last;
+        debugPrint('LocalFFIEngine: 文件不存在，提取文件名重新搜索: $fileName');
+        
+        // 检查是否重复路径（xxx.gguf/xxx.gguf）
+        final pathParts = modelPath.split('/');
+        if (pathParts.length >= 2) {
+          final lastPart = pathParts.last;
+          final secondLastPart = pathParts[pathParts.length - 2];
+          if (secondLastPart.endsWith('.gguf') && lastPart.endsWith('.gguf')) {
+            debugPrint('LocalFFIEngine: 检测到重复路径，提取文件名: $lastPart');
           }
+        }
+        
+        // 在所有模型目录中搜索
+        final foundPath = await _findModelFile(fileName);
+        if (foundPath != null) {
+          fullModelPath = foundPath;
+          debugPrint('LocalFFIEngine: ✅ 重新搜索找到模型文件: $fullModelPath');
+        } else {
+          // 找不到，保留原路径（会触发后续的文件不存在错误）
+          debugPrint('LocalFFIEngine: ⚠️ 重新搜索未找到文件: $fileName');
         }
       }
     } else {
@@ -441,14 +463,30 @@ class LocalFFIEngine {
         final mmprojFullPath = await _findMmprojFile(mmprojPath, fullModelPath);
         
         if (mmprojFullPath != null) {
-          try {
-            debugPrint('[LocalFFIEngine] 🔄 正在加载 mmproj: $mmprojFullPath');
-            await engine.loadMultimodalProjector(mmprojFullPath);
-            debugPrint('[LocalFFIEngine] ✅ mmproj loaded: $mmprojFullPath');
-          } catch (e, stack) {
-            debugPrint('[LocalFFIEngine] ⚠️ Failed to load mmproj: $e');
-            debugPrint('[LocalFFIEngine] ⚠️ Stack: $stack');
-          }
+          // ★★★ 暂时跳过 mmproj 加载，防止损坏文件触发 C++ SIGSEGV ★★★
+          // llamadart 的 mtmd_init_from_file 在遇到损坏/无效的 mmproj 文件时
+          // 会在 Metal 缓冲区分配阶段触发 SIGSEGV，导致整个 App 闪退
+          // Dart 的 try-catch 无法捕获 SIGSEGV，所以暂时禁用 mmproj 加载
+          // TODO: 找到安全验证 mmproj 文件的方法后再启用
+          debugPrint('[LocalFFIEngine] ⚠️ mmproj 加载已暂时禁用（防止 SIGSEGV 崩溃）');
+          debugPrint('[LocalFFIEngine] ⚠️ 多模态（图片理解）功能暂不可用');
+          // try {
+          //   final mmprojFile = File(mmprojFullPath);
+          //   final mmprojSize = await mmprojFile.length();
+          //   debugPrint('[LocalFFIEngine] mmproj 文件大小: ${mmprojSize ~/ (1024 * 1024)}MB');
+          //   
+          //   // mmproj 文件至少 1MB
+          //   if (mmprojSize < 1024 * 1024) {
+          //     debugPrint('[LocalFFIEngine] ⚠️ mmproj 文件异常（过小: ${mmprojSize ~/ 1024}KB），可能已损坏，跳过加载');
+          //   } else {
+          //     debugPrint('[LocalFFIEngine] 🔄 正在加载 mmproj: $mmprojFullPath');
+          //     await engine.loadMultimodalProjector(mmprojFullPath);
+          //     debugPrint('[LocalFFIEngine] ✅ mmproj loaded: $mmprojFullPath');
+          //   }
+          // } catch (e, stack) {
+          //   debugPrint('[LocalFFIEngine] ⚠️ Failed to load mmproj: $e');
+          //   debugPrint('[LocalFFIEngine] ⚠️ Stack: $stack');
+          // }
         } else {
           debugPrint('[LocalFFIEngine] ⚠️ mmproj file not found anywhere: $mmprojPath');
         }
@@ -476,31 +514,29 @@ class LocalFFIEngine {
       
       // ★★★ SIGSEGV / Metal 崩溃 CPU 回退 ★★★
       // 检测是否是 Metal/GPU 相关的原生崩溃
+      // 注意：匹配模式必须精确，避免误判普通 Dart 异常为 GPU 崩溃
+      // 误判会触发 _llamaEngine?.dispose() + CPU 回退，可能导致 native crash
       final errorStr = e.toString().toLowerCase();
       final isGpuCrash = 
           // SIGSEGV / EXC_BAD_ACCESS
           errorStr.contains('sigsegv') ||
           errorStr.contains('exc_bad_access') ||
-          errorStr.contains('access error') ||
           // Metal specific
-          errorStr.contains('metal') ||
-          errorStr.contains('gpu') ||
-          // Address / pointer
-          errorStr.contains('address') ||
-          // General signal
-          errorStr.contains('signal') ||
-          errorStr.contains('abort') ||
-          // llama.cpp internal
-          errorStr.contains('buffer') && (errorStr.contains('alloc') || errorStr.contains('fail')) ||
-          errorStr.contains('ggml_backend') ||
           errorStr.contains('ggml_metal') ||
-          // SIGILL (也在这里处理，因为也是信号崩溃)
+          errorStr.contains('metal') && errorStr.contains('error') ||
+          errorStr.contains('gpu') && (errorStr.contains('crash') || errorStr.contains('error') || errorStr.contains('fail')) ||
+          // llama.cpp internal
+          errorStr.contains('buffer') && (errorStr.contains('alloc') || errorStr.contains('fail')) && errorStr.contains('ggml') ||
+          errorStr.contains('ggml_backend') ||
+          // SIGILL
           errorStr.contains('sigill') ||
-          errorStr.contains('illegal') ||
+          errorStr.contains('illegal instruction') ||
           errorStr.contains('signal 4') ||
-          errorStr.contains('ill_opc') ||
-          errorStr.contains('sme') ||
-          errorStr.contains('sve');
+          errorStr.contains('signal 11') ||
+          errorStr.contains('signal 6') ||
+          // SME/SVE
+          errorStr.contains('sme') && errorStr.contains('instruction') ||
+          errorStr.contains('sve') && errorStr.contains('instruction');
 
       if (isGpuCrash) {
         debugPrint('[LocalFFIEngine] 🔄 检测到 GPU/Metal 崩溃，准备 CPU 回退...');
@@ -827,12 +863,14 @@ class LocalFFIEngine {
     } catch (e) {
       // 上下文失效错误：尝试自动重载并重试
       final errMsg = e.toString().toLowerCase();
-      // 扩展错误检测：包含 "message"、"class"、"has no instance" 等
+      // ★★★ 精确匹配上下文失效错误，避免误判普通 Dart 异常 ★★★
+      // 误判会触发 _autoReloadContext() → dispose() → native crash
       final isContextError = errMsg.contains('no such instance') ||
-          errMsg.contains('no such') ||
-          errMsg.contains('message') && (errMsg.contains('class') || errMsg.contains('instance')) ||
-          errMsg.contains('context') ||
-          errMsg.contains('instance');
+          errMsg.contains('context') && errMsg.contains('invalid') ||
+          errMsg.contains('context') && errMsg.contains('error') && errMsg.contains('llama') ||
+          errMsg.contains('failed to decode') ||
+          errMsg.contains('context overflow') ||
+          errMsg.contains('kv cache');
       
       if (isContextError && _currentModelPath != null) {
         debugPrint('[LocalFFIEngine] ❌ generate 上下文错误: $e，重试...');
@@ -949,25 +987,20 @@ class LocalFFIEngine {
       final errMsg = e.toString().toLowerCase();
 
       // ★★★ 检测上下文失效错误 ★★★
-      // 扩展错误检测：包含 "message"、"class"、"has no instance" 等
+      // 注意：匹配模式必须精确，避免误判普通 Dart 异常为上下文错误
+      // 误判会导致 _autoReloadContext() 被触发，dispose() 可能导致 native crash
       final isContextError = errMsg.contains('no such instance') ||
-          errMsg.contains('no such') ||
-          errMsg.contains('message') && (errMsg.contains('class') || errMsg.contains('instance')) ||
-          errMsg.contains('context') && (errMsg.contains('invalid') ||
-              errMsg.contains('error') ||
-              errMsg.contains('null') ||
-              errMsg.contains('not found')) ||
-          errMsg.contains('instance') && errMsg.contains('error') ||
+          errMsg.contains('context') && errMsg.contains('invalid') ||
+          errMsg.contains('context') && errMsg.contains('error') && errMsg.contains('llama') ||
           errMsg.contains('failed to decode') ||
           errMsg.contains('context overflow') ||
           errMsg.contains('kv cache');
 
       // ★★★ 检测 SME/SVE 指令集错误 ★★★
       final isSigillError = errMsg.contains('sigill') ||
-          errMsg.contains('illegal') ||
-          errMsg.contains('sme') ||
+          errMsg.contains('illegal instruction') ||
           errMsg.contains('signal 4') ||
-          errMsg.contains('illegal instruction');
+          errMsg.contains('sme') && errMsg.contains('instruction');
 
       // ★★★ 检测 OOM / 内存不足错误 ★★★
       final isOOMError = errMsg.contains('out of memory') ||
@@ -1028,16 +1061,16 @@ class LocalFFIEngine {
       }
 
       // ★★★ 检测 GPU/Metal 崩溃（推理阶段）★★★
-      // 与 loadModel 中的 GPU 崩溃检测逻辑一致
+      // 注意：匹配模式必须精确，避免误判网络错误等普通异常
       final isGpuCrash = errMsg.contains('sigsegv') ||
           errMsg.contains('exc_bad_access') ||
-          errMsg.contains('metal') ||
-          errMsg.contains('gpu') ||
           errMsg.contains('ggml_metal') ||
           errMsg.contains('ggml_backend') ||
-          (errMsg.contains('buffer') && (errMsg.contains('alloc') || errMsg.contains('fail'))) ||
-          errMsg.contains('abort') ||
-          errMsg.contains('signal');
+          errMsg.contains('metal') && errMsg.contains('error') ||
+          errMsg.contains('gpu') && (errMsg.contains('crash') || errMsg.contains('error') || errMsg.contains('fail')) ||
+          (errMsg.contains('buffer') && (errMsg.contains('alloc') || errMsg.contains('fail')) && errMsg.contains('ggml')) ||
+          errMsg.contains('signal 11') ||
+          errMsg.contains('signal 6');
 
       if (isGpuCrash && _currentModelPath != null) {
         debugPrint('[LocalFFIEngine] ❌ 推理阶段 GPU/Metal 崩溃: $e');
@@ -1250,6 +1283,16 @@ class LocalFFIEngine {
       }
     }
 
+    // ★ 安全检查：确保消息列表中至少有一条 user 消息
+    // Hermes 等模板要求必须有 user 消息，否则报 "No user query found in messages"
+    if (!llamaMessages.any((m) => m.role == LlamaChatRole.user)) {
+      debugPrint('[LocalFFIEngine] ⚠️ 消息列表中没有 user 消息，追加占位 user 消息');
+      llamaMessages.add(LlamaChatMessage.fromText(
+        role: LlamaChatRole.user,
+        text: '你好',
+      ));
+    }
+
     return llamaMessages;
   }
 
@@ -1441,6 +1484,13 @@ class LocalFFIEngine {
       // macOS 默认启用 Metal GPU 加速
       // 如果 Metal 初始化失败，loadModel 的 catch 块会自动回退到 CPU
       defaultGpuLayers = 999;
+    } else if (Platform.isIOS) {
+      // ★★★ iOS Metal GPU 加速 ★★★
+      // llama.cpp Metal 后端在 iOS 上可用，iPhone 12+ (A14) 支持 Metal
+      // Release 模式下 Metal 正常工作，Debug 模式因 LLDB bug 会导致崩溃
+      // 设置 gpuLayers=99 让大部分层卸载到 GPU，保留少量层给 CPU
+      // 如果 Metal 初始化失败，catch 块会自动回退到 CPU
+      defaultGpuLayers = 99;
     } else if (isAndroid) {
       defaultGpuLayers = config.gpuLayers;
     } else {
@@ -1500,13 +1550,23 @@ class LocalFFIEngine {
 
     debugPrint('[LocalFFIEngine] 🔧 最终配置: gpuLayers=$gpuLayers, contextSize=$contextSize, threads=$optimalThreads, batchSize=$defaultBatchSize, microBatchSize=$defaultMicroBatchSize, flashAttention=true');
 
-    // ★★★ Android Vulkan 后端选择 ★★★
-    // 骁龙 8 Elite 5 的 Adreno GPU 通过 Vulkan 可获得 3-5 倍推理加速
-    // llamadart 默认 Android 使用 CPU，必须显式指定 GpuBackend.vulkan
-    // 如果 Vulkan 不可用，llamadart 会自动回退到 CPU
-    final preferredBackend = isAndroid
-        ? GpuBackend.vulkan
-        : (isMacOS ? GpuBackend.metal : GpuBackend.auto);
+    // ★★★ 跨平台 GPU 后端选择 ★★★
+    // macOS/iOS: Metal（Apple 原生 GPU API）
+    // Android: Vulkan（跨平台 GPU API，Adreno/Mali 均支持）
+    // Windows: CUDA（NVIDIA GPU）→ Vulkan 回退
+    // Linux: CUDA（NVIDIA GPU）→ Vulkan 回退
+    // 如果指定后端不可用，llamadart 会自动回退到 CPU
+    final GpuBackend preferredBackend;
+    if (Platform.isMacOS || Platform.isIOS) {
+      preferredBackend = GpuBackend.metal;
+    } else if (Platform.isAndroid) {
+      preferredBackend = GpuBackend.vulkan;
+    } else if (Platform.isWindows || Platform.isLinux) {
+      // Windows/Linux: 优先 CUDA（NVIDIA），llamadart 自动回退到 Vulkan/CPU
+      preferredBackend = GpuBackend.cuda;
+    } else {
+      preferredBackend = GpuBackend.cpu;
+    }
 
     debugPrint('[LocalFFIEngine] 🔧 GPU 后端: $preferredBackend');
 

@@ -508,7 +508,7 @@ class _SpiritChatPageState extends ConsumerState<SpiritChatPage> {
     if (!validValues.contains(_selectedVoiceId)) {
       _selectedVoiceId = hasClonedVoice && readyClones.isNotEmpty
           ? 'clone_${readyClones.first.id}'
-          : MiMoVoice.Chloe.name;
+          : MiMoVoice.mimo_default.name;
     }
 
     return Column(

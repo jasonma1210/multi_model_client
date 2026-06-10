@@ -15,6 +15,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -289,12 +290,12 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
       // 如果 lastUsedVoiceId 以 clone_ 开头，使用克隆音色
       // 如果 lastUsedVoiceId 是 MIMO 预设音色名，使用对应预设
       String? ttsApiKey;
-      MiMoVoice mimoVoice = MiMoVoice.Chloe;
+      MiMoVoice mimoVoice = MiMoVoice.mimo_default;
       String? cloneRefAudioPath;
 
       final effectiveVoiceId = persona.lastUsedVoiceId ??
           (persona.clonedVoiceId != null ? 'clone_${persona.clonedVoiceId}' : null) ??
-          'Chloe';
+          'mimo_default';
 
       // 强制使用 mimo 作为 TTS 提供者
       ttsProvider = 'mimo';
@@ -321,7 +322,7 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
         // 尊重用户选择，使用 MIMO 预设音色
         mimoVoice = MiMoVoice.values.firstWhere(
           (v) => v.name == effectiveVoiceId,
-          orElse: () => MiMoVoice.Chloe,
+          orElse: () => MiMoVoice.mimo_default,
         );
         ttsVoice = mimoVoice.name;
         debugPrint('[SpiritVoiceChat] 使用 MIMO 预设音色: ${mimoVoice.name}');
@@ -329,7 +330,7 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
         // 无克隆音色，使用 MIMO 预设音色
         mimoVoice = MiMoVoice.values.firstWhere(
           (v) => v.name == effectiveVoiceId,
-          orElse: () => MiMoVoice.Chloe,
+          orElse: () => MiMoVoice.mimo_default,
         );
         ttsVoice = mimoVoice.name;
       }
@@ -358,6 +359,7 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
         'openai' => TTSProvider.openai,
         'mimo' => TTSProvider.mimo,
         'edge' => TTSProvider.edge,
+        'cosyvoice' => TTSProvider.cosyvoice,
         _ => TTSProvider.system,
       };
 
@@ -368,17 +370,37 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
         orElse: () => EdgeVoice.xiaoxiao,
       );
 
+      // ★ 读取 CosyVoice 设置
+      final cvBaseUrl = prefs.getString('cosyvoice_base_url') ?? 'http://localhost:50000';
+      final cvModeStr = prefs.getString('cosyvoice_mode') ?? 'cross_lingual';
+      final cvInstructText = prefs.getString('cosyvoice_instruct_text') ?? '用自然的语气说话';
+      final cvRefAudioPath = prefs.getString('cosyvoice_ref_audio_path') ?? '';
+      final cvMode = CosyVoiceMode.values.firstWhere(
+        (v) => v.name == cvModeStr,
+        orElse: () => CosyVoiceMode.cross_lingual,
+      );
+
+      // ★ 修复：先释放旧的 TTS 服务实例，避免多实例冲突
+      _ttsService?.dispose();
       _ttsService = TTSService(
         provider: ttsProviderEnum,
         apiKey: ttsApiKey,
         mimoVoice: mimoVoice,
-        edgeVoice: edgeVoice,
-        cloneReferenceAudioPath: cloneRefAudioPath,
+        mimoVoiceId: effectiveVoiceId.startsWith('clone_') ? null : effectiveVoiceId, // ★ 修复：传入字符串音色 ID
+        cloneReferenceAudioPath: ttsProvider == 'cosyvoice' && cvRefAudioPath.isNotEmpty ? cvRefAudioPath : cloneRefAudioPath,
         sherpaModelId: ttsModelId,
         speechRate: ttsSpeed,
         speakerId: int.tryParse(ttsVoice) ?? 0,
+        cosyvoiceBaseUrl: ttsProvider == 'cosyvoice' ? cvBaseUrl : null,
+        cosyvoiceMode: cvMode,
+        cosyvoiceInstructText: cvInstructText,
+        fishaudioBaseUrl: ttsProvider == 'fishaudio' ? prefs.getString('fishaudio_base_url') ?? 'http://localhost:50001' : null,
+        fishaudioReferenceAudioPath: ttsProvider == 'fishaudio' ? prefs.getString('fishaudio_reference_audio_path') : null,
+        fishaudioReferenceText: ttsProvider == 'fishaudio' ? prefs.getString('fishaudio_reference_text') : null,
       );
 
+      // ★ 修复：先释放旧的 AudioPlayer，避免 iOS 上多实例 AVAudioSession 冲突
+      await _audioPlayer?.dispose();
       _audioPlayer = AudioPlayer();
       _dialogueEngine = ref.read(dialogueEngineProvider);
 
@@ -402,6 +424,7 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
   void dispose() {
     _isDisposed = true;
     _stopRecording();
+    _ttsService?.dispose();
     _audioPlayer?.dispose();
     _asrService?.dispose();
     _pulseController.dispose();
@@ -948,10 +971,14 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
       _interruptTTS();
     }
 
-    if (_state != _VoiceState.idle &&
-        _state != _VoiceState.error &&
-        _state != _VoiceState.speaking) {
-      return;
+    // ★★★ 如果 AI 正在思考/生成，打断当前回复，允许用户重新说话 ★★★
+    if (_state == _VoiceState.thinking || _state == _VoiceState.recognizing) {
+      debugPrint('[SpiritVoiceChat] ⚡ AI 正在生成，打断当前回复');
+      if (_dialogueEngine != null) {
+        _dialogueEngine!.cancelGeneration(_sessionId!);
+      }
+      _ttsInterrupted = true;
+      _pulseController.stop();
     }
 
     setState(() {
@@ -1012,6 +1039,16 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
     _recorder = null;
     _tempAudioPath = null;
 
+    // ★★★ iOS/macOS AVAudioSession 恢复 ★★★
+    // 取消录音时也需恢复，避免后续 TTS 无法播放
+    if (Platform.isIOS || Platform.isMacOS) {
+      AudioSession.instance.then((session) {
+        session.configure(AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playback,
+        ));
+      }).catchError((_) {});
+    }
+
     setState(() {
       _state = _VoiceState.idle;
       _statusText = '已取消';
@@ -1028,14 +1065,46 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
 
   Future<void> _startRecording() async {
     try {
+      // ★ 修复：先释放旧的录音器实例，避免资源冲突
+      await _recorder?.stop();
+      _recorder?.dispose();
+      _recorder = null;
+
       _recorder = AudioRecorder();
+
+      // ★★★ iOS 关键修复：禁用 record 包内部的 AVAudioSession 管理 ★★★
+      // record 包默认 manageAudioSession=true，会内部设置 AVAudioSession
+      // 与外部 audio_session 包冲突，导致 iOS 崩溃
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          await _recorder!.ios?.manageAudioSession(false);
+          debugPrint('[SpiritVoiceChat] ✅ 已禁用 record 包内部 AVAudioSession 管理');
+        } catch (e) {
+          debugPrint('[SpiritVoiceChat] ⚠️ 禁用 manageAudioSession 失败: $e');
+        }
+      }
+
       final hasPermission = await _recorder!.hasPermission();
       if (!hasPermission) {
+        _recorder?.dispose();
+        _recorder = null;
         setState(() {
           _errorMsg = '麦克风权限被拒绝';
           _state = _VoiceState.error;
         });
         return;
+      }
+
+      // ★★★ iOS AVAudioSession 配置 ★★★
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          final session = await AudioSession.instance;
+          await session.configure(AudioSessionConfiguration(
+            avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+            avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker,
+            avAudioSessionMode: AVAudioSessionMode.measurement,
+          ));
+        } catch (_) {}
       }
 
       final dir = await getTemporaryDirectory();
@@ -1047,11 +1116,16 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
           encoder: AudioEncoder.wav,
           sampleRate: 16000,
           numChannels: 1,
+          // ★★★ iOS 关键修复：禁用 record 包内部 AVAudioSession 管理 ★★★
+          iosConfig: IosRecordConfig(manageAudioSession: false),
         ),
         path: _tempAudioPath!,
       );
     } catch (e) {
       debugPrint('[SpiritVoiceChat] 启动录音失败: $e');
+      // ★ 修复：录音失败时清理录音器实例
+      _recorder?.dispose();
+      _recorder = null;
       setState(() {
         _errorMsg = '录音失败: $e';
         _state = _VoiceState.error;
@@ -1064,6 +1138,20 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
       await _recorder?.stop();
       _recorder?.dispose();
       _recorder = null;
+
+      // ★★★ iOS/macOS AVAudioSession 恢复 ★★★
+      // 录音结束后恢复为播放模式，让 TTS 可以正常播放
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          final session = await AudioSession.instance;
+          await session.configure(AudioSessionConfiguration(
+            avAudioSessionCategory: AVAudioSessionCategory.playback,
+          ));
+          debugPrint('[SpiritVoiceChat] ✅ AVAudioSession 恢复为 playback');
+        } catch (e) {
+          debugPrint('[SpiritVoiceChat] ⚠️ AVAudioSession 恢复失败: $e');
+        }
+      }
 
       if (_tempAudioPath != null && !_isDisposed) {
         await _recognizeAudio();
@@ -1229,9 +1317,25 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
       return;
     }
 
+    // ★★★ iOS/macOS: 确保 AVAudioSession 为播放模式 ★★★
+    // 录音结束后虽然恢复了 playback，但某些情况下可能被重置
+    if (Platform.isIOS || Platform.isMacOS) {
+      try {
+        final session = await AudioSession.instance;
+        await session.configure(AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playback,
+        ));
+        debugPrint('[SpiritVoiceChat] ✅ AVAudioSession 已配置为 playback');
+      } catch (e) {
+        debugPrint('[SpiritVoiceChat] ⚠️ AVAudioSession 配置失败: $e');
+      }
+    }
+
     setState(() {
       _state = _VoiceState.speaking;
-      _statusText = '正在回复...';
+      // ★ 修复：克隆音色合成较慢，提示用户等待
+      final isClone = _ttsService?.isCloneMode ?? false;
+      _statusText = isClone ? '正在合成克隆音色...' : '正在回复...';
       _ttsInterrupted = false;
     });
 
@@ -1252,6 +1356,17 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
       }
     } catch (e) {
       debugPrint('[SpiritVoiceChat] TTS 播放失败: $e');
+      // ★ 修复：TTS 失败时通知用户，而不是静默失败
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _errorMsg = '语音播放失败: $e';
+        });
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted && !_isDisposed) {
+            setState(() => _errorMsg = null);
+          }
+        });
+      }
     }
 
     if (!_isDisposed && _state != _VoiceState.idle) {
@@ -1312,6 +1427,7 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
   /// ★ 实时打断：AI 说话时按住按钮立即打断
   void _interruptTTS() {
     _ttsInterrupted = true;
+    _ttsService?.stop(); // ★ 修复：停止 TTS 合成和播放，防止合成完成后又自动播放
     _audioPlayer?.stop();
     _pulseController.stop();
 
@@ -1519,19 +1635,27 @@ class _SpiritVoiceChatPageState extends ConsumerState<SpiritVoiceChatPage>
                       },
                     ),
                   ),
+                  const SizedBox(height: 20),
+
+                  // ★ 清除上下文按钮（放在 content 中，避免 actions 中 Spacer 导致大色块）
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(dialogContext);
+                        await _clearContext();
+                      },
+                      icon: Icon(Icons.delete_outline, size: 18, color: theme.colorScheme.error),
+                      label: Text('清除上下文', style: TextStyle(color: theme.colorScheme.error)),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.5)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
                 ],
               ),
               actions: [
-                // ★ 清除上下文按钮
-                TextButton(
-                  onPressed: () async {
-                    Navigator.pop(dialogContext);
-                    await _clearContext();
-                  },
-                  style: TextButton.styleFrom(foregroundColor: theme.colorScheme.error),
-                  child: const Text('清除上下文'),
-                ),
-                const Spacer(),
                 TextButton(
                   onPressed: () => Navigator.pop(dialogContext),
                   child: const Text('取消'),

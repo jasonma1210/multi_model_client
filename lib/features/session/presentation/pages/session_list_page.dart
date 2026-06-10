@@ -312,7 +312,8 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
 
-    return Column(
+    return SafeArea(
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
@@ -365,19 +366,6 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 2),
-              Text('多模型 AI 助手',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                  )),
-            ],
-          ),
-        ),
         const Divider(height: 24),
         Expanded(
           child: SingleChildScrollView(
@@ -401,14 +389,6 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
                       context.push('/spirit');
                     }),
                 const SizedBox(height: 16),
-                // 6. 下载管理
-                _DownloadNavItem(
-                  onTap: () {
-                    setState(() => _sidebarOpen = false);
-                    context.push('/downloads');
-                  },
-                ),
-                const SizedBox(height: 8),
                 // 7. 设置
                 _NavItem(icon: Icons.settings_outlined, label: l10n.settings, isActive: false,
                     onTap: () {
@@ -421,6 +401,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
           ),
         ),
       ],
+    ),
     );
   }
 
@@ -715,7 +696,8 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
 
-    return Column(
+    return SafeArea(
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
@@ -774,29 +756,23 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
             onTap: () => context.push('/spirit')),
         const Spacer(),
         const Divider(height: 1),
-        // 6. 下载管理
-        _DownloadNavItem(
-          onTap: () => context.push('/downloads'),
-        ),
-        const SizedBox(height: 8),
         // 7. 设置
         _NavItem(icon: Icons.settings_outlined, label: l10n.settings, isActive: false,
             onTap: () => context.go('/settings')),
         const SizedBox(height: 12),
       ],
+    ),
     );
   }
-
-  // ────────────────────────── 核心：点击「+」的处理逻辑 ──────────────────────────
 
   Future<void> _handleAddSession(BuildContext context) async {
     // 检查是否有可用模型
     final modelState = ref.read(modelProvider);
 
     if (modelState.isEmpty) {
-      // 没有模型 → 直接跳转到模型市场（无需弹窗确认）
+      // 没有模型 → 跳转到模型管理页面（配置模型，而非下载界面）
       if (context.mounted) {
-        context.go('/model-market');
+        context.go('/settings/models');
       }
       return;
     }
@@ -2304,13 +2280,6 @@ class _DownloadNavItemState extends State<_DownloadNavItem> {
                         ),
                       ),
                   ],
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  AppLocalizations.of(context)!.downloadManager,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
                 ),
               ],
             ),

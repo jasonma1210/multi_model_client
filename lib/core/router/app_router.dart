@@ -76,7 +76,9 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
               GoRoute(
                 path: 'voice/clone',
-                builder: (context, state) => const VoiceClonePage(),
+                builder: (context, state) => VoiceClonePage(
+                  provider: state.uri.queryParameters['provider'] ?? 'mimo',
+                ),
               ),
               GoRoute(
                 path: 'voice/director-templates',

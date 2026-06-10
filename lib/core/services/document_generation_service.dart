@@ -114,7 +114,9 @@ ${DateTime.now().toIso8601String()}
     required String title,
     required Map<String, dynamic> mindMapData,
   }) async {
-    final dir = await getApplicationDocumentsDirectory();
+    // ★ 修复导出失败：使用 getTemporaryDirectory 代替 getApplicationDocumentsDirectory
+    // iOS 上 share_plus 无法访问 Documents 目录的文件，临时目录可以
+    final dir = await getTemporaryDirectory();
     final fileName = '${title}_${DateTime.now().millisecondsSinceEpoch}.xmind';
     final filePath = '${dir.path}/documents/$fileName';
     

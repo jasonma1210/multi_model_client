@@ -2,7 +2,7 @@ name: mj_nexus
 description: "MJ Nexus - Multi-Model AI Assistant with local/remote model support, voice dialogue, RAG knowledge base, and memory engine"
 publish_to: 'none'
 
-version: 0.40.0
+version: 0.41.0
 
 environment:
   sdk: ^3.10.7
@@ -179,6 +179,11 @@ flutter:
     
     # 应用图标
     - assets/icons/
+    
+    # ★★★ 关键修复：添加缺失的资源声明 ★★★
+    # 否则 Flutter 框架在 debug 模式下预加载 widget 树时，会因为
+    # 找不到资源而触发 SIGSEGV 崩溃（地址 0x12XX000c4，指令 ldur x6, [x24, #0x37]）
+    - assets/mj_nexus_logo.png
 
 # ─────────────────────────────────────────────────────────────────────────────
 # llamadart Native Assets 配置
@@ -206,6 +211,25 @@ hooks:
     llamadart:
       llamadart_native_backends:
         platforms:
+          # ★ iOS 配置
+          # 启用 Metal 后端：Release 模式下 Metal 正常工作
+          # Debug 模式因 Xcode 26.4 LLDB bug 会导致崩溃，Release 模式不受影响
+          ios-arm64:
+            backends: [cpu, metal]
+          # ★ macOS 配置
+          # Apple Silicon (M1+) 支持 Metal GPU 加速
+          # Intel Mac 仅使用 CPU
+          macos-arm64:
+            backends: [cpu, metal]
+          # ★ Windows 配置
+          # 支持 CUDA（NVIDIA GPU）和 Vulkan（AMD/Intel GPU）
+          # x86_64 架构
+          windows-x86_64:
+            backends: [cpu, vulkan]
+          # ★ Linux 配置
+          # 支持 CUDA 和 Vulkan
+          linux-x86_64:
+            backends: [cpu, vulkan]
           android-arm64:
             backends: [cpu, vulkan]
             # 只打包不含 SME 的变体，排除 armv9.2_1 和 armv9.2_2

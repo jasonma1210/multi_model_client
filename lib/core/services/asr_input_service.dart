@@ -13,6 +13,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -25,7 +26,7 @@ import 'asr_service.dart';
 /// - 识别结果回调
 /// - 支持系统语音识别（实时流式）和录音文件识别
 class AsrInputService {
-  final AudioRecorder _recorder = AudioRecorder();
+  AudioRecorder? _recorder;
   
   /// 动态 ASR 服务（每次开始录音时根据设置动态创建）
   ASRService? _dynamicAsrService;
@@ -156,8 +157,18 @@ class AsrInputService {
 
   /// 检查麦克风权限
   Future<bool> checkPermission() async {
-    _hasPermission = await _recorder.hasPermission();
+    // ★ 修复：确保 _recorder 实例存在
+    _ensureRecorder();
+    _hasPermission = await _recorder!.hasPermission();
     return _hasPermission;
+  }
+
+  /// 确保 _recorder 实例可用，如果不可用则创建新实例
+  void _ensureRecorder() {
+    if (_recorder == null) {
+      _recorder = AudioRecorder();
+      debugPrint('[AsrInputService] 创建新的 AudioRecorder 实例');
+    }
   }
 
   /// 开始录音或系统语音识别（按住说话时调用）
@@ -165,21 +176,56 @@ class AsrInputService {
     if (_isRecording) return;
 
     try {
+      debugPrint('[AsrInputService] 🎤 startRecording 开始...');
+
+      // ★ 修复：先释放旧的录音器实例，避免资源冲突
+      // 第二次录音时，旧的 _recorder 可能处于不可用状态
+      try {
+        await _recorder?.stop();
+      } catch (_) {}
+      try {
+        _recorder?.dispose();
+      } catch (_) {}
+      _recorder = null;
+
+      // 创建新的录音器实例
+      _ensureRecorder();
+
+      // ★★★ iOS 关键修复：禁用 record 包内部的 AVAudioSession 管理 ★★★
+      // record 包默认 manageAudioSession=true，会内部设置 AVAudioSession
+      // 与外部 audio_session 包冲突，导致 iOS 崩溃
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          await _recorder!.ios?.manageAudioSession(false);
+          debugPrint('[AsrInputService] ✅ 已禁用 record 包内部 AVAudioSession 管理');
+        } catch (e) {
+          debugPrint('[AsrInputService] ⚠️ 禁用 manageAudioSession 失败: $e');
+        }
+      }
+
       // 检查权限
-      _hasPermission = await _recorder.hasPermission();
+      debugPrint('[AsrInputService] 检查麦克风权限...');
+      _hasPermission = await _recorder!.hasPermission();
+      debugPrint('[AsrInputService] 麦克风权限: $_hasPermission');
       if (!_hasPermission) {
+        _recorder?.dispose();
+        _recorder = null;
         _errorController.add('麦克风权限被拒绝，请在系统设置中开启');
         return;
       }
 
       if (_isSystemAsr) {
         // ===== 系统语音识别模式（实时流式识别）=====
+        debugPrint('[AsrInputService] 使用系统语音识别模式');
         await _startSystemAsr();
       } else {
         // ===== 录音文件模式（Sherpa/OpenAI）=====
+        debugPrint('[AsrInputService] 使用录音文件模式 (provider=${_asrService.provider})');
         await _startRecordingFile();
       }
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('[AsrInputService] ❌ 录音启动失败: $e');
+      debugPrint('[AsrInputService] 堆栈: $stack');
       _errorController.add('录音启动失败: $e');
       _isRecording = false;
     }
@@ -191,6 +237,22 @@ class AsrInputService {
     try {
       debugPrint('[AsrInputService] 🚀 启动系统语音实时识别...');
       debugPrint('[AsrInputService] 当前 ASR provider: ${_asrService.provider}');
+      
+      // ★★★ iOS AVAudioSession 配置 ★★★
+      // 系统语音识别也需要 playAndRecord 类别
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          final session = await AudioSession.instance;
+          await session.configure(AudioSessionConfiguration(
+            avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+            avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker,
+            avAudioSessionMode: AVAudioSessionMode.measurement,
+          ));
+          debugPrint('[AsrInputService] ✅ AVAudioSession 切换为 playAndRecord (系统ASR)');
+        } catch (e) {
+          debugPrint('[AsrInputService] ⚠️ AVAudioSession 配置失败: $e');
+        }
+      }
       
       // 重置最近识别文本
       _lastSystemAsrText = '';
@@ -355,6 +417,24 @@ class AsrInputService {
     _systemAsrSubscription?.cancel();
     _systemAsrSubscription = null;
     _isSystemAsrRunning = false;
+
+    // ★★★ iOS AVAudioSession 配置 ★★★
+    // just_audio 使用 .playback 类别，record 需要 .playAndRecord 类别
+    // 如果不正确切换音频会话，iOS 会导致崩溃
+    // 必须在录音前将音频会话切换为 playAndRecord
+    if (Platform.isIOS || Platform.isMacOS) {
+      try {
+        final session = await AudioSession.instance;
+        await session.configure(AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+          avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker,
+          avAudioSessionMode: AVAudioSessionMode.measurement,
+        ));
+        debugPrint('[AsrInputService] ✅ AVAudioSession 切换为 playAndRecord');
+      } catch (e) {
+        debugPrint('[AsrInputService] ⚠️ AVAudioSession 配置失败: $e');
+      }
+    }
     
     // 生成录音文件路径
     // 【修复】Sherpa 模式必须用 WAV，系统/OpenAI 模式用 m4a（AAC 编码更小）
@@ -368,15 +448,26 @@ class AsrInputService {
 
     // 选择编码器：WAV 用 PCM 编码，其他用 AAC
     final encoder = isWav ? AudioEncoder.wav : AudioEncoder.aacLc;
-    await _recorder.start(
-      RecordConfig(
-        encoder: encoder,
-        bitRate: 128000,
-        sampleRate: 16000,
-        numChannels: 1,
-      ),
-      path: _recordingPath!,
-    );
+    debugPrint('[AsrInputService] 调用 _recorder.start()...');
+    try {
+      await _recorder!.start(
+        RecordConfig(
+          encoder: encoder,
+          bitRate: 128000,
+          sampleRate: 16000,
+          numChannels: 1,
+          // ★★★ iOS 关键修复：禁用 record 包内部 AVAudioSession 管理 ★★★
+          // 由外部 audio_session 包统一管理，避免冲突导致崩溃
+          iosConfig: IosRecordConfig(manageAudioSession: false),
+        ),
+        path: _recordingPath!,
+      );
+      debugPrint('[AsrInputService] ✅ _recorder.start() 成功');
+    } catch (e, stack) {
+      debugPrint('[AsrInputService] ❌ _recorder.start() 失败: $e');
+      debugPrint('[AsrInputService] 堆栈: $stack');
+      rethrow;
+    }
 
     _isRecording = true;
 
@@ -392,7 +483,8 @@ class AsrInputService {
   Future<void> _updateAmplitude() async {
     if (!_isRecording || _isSystemAsr) return;
     try {
-      final amp = await _recorder.getAmplitude();
+      final amp = await _recorder?.getAmplitude();
+      if (amp == null) return;
       // amp.current 是分贝值，范围大约 -160 ~ 0
       // 转换为 0.0 ~ 1.0
       final normalized = _normalizeAmplitude(amp.current);
@@ -437,6 +529,47 @@ class AsrInputService {
 
     _isRecording = false;
     _amplitudeController.add(0.0);
+
+    // ★★★ 关键修复：录音停止后立即释放 _recorder（record 包的 AudioRecorder）★★★
+    // 之前 _recorder 只在 dispose() 时释放，导致 ASR 使用后切换到灵感一瞬/语音克隆
+    // 时，flutter_recorder 的 Recorder.instance 无法初始化（iOS 不允许两个录音器共存）
+    // 现在：stopRecording 后立即 dispose _recorder，释放底层音频资源
+    try {
+      _recorder?.dispose();
+      debugPrint('[AsrInputService] ✅ _recorder 已释放 (${cancelled ? "取消" : "正常停止"})');
+    } catch (e) {
+      debugPrint('[AsrInputService] ⚠️ _recorder 释放失败: $e');
+    }
+    _recorder = null;
+
+    // ★★★ 关键修复：录音停止后释放 _dynamicAsrService（ASRService + OfflineRecognizer）★★★
+    // 之前 _dynamicAsrService 从未在 stopRecording 后释放，导致 sherpa_onnx 的
+    // OfflineRecognizer（原生 C++ 对象）一直占用内存和 ONNX Runtime 资源。
+    // 当灵感一瞬页面转录时创建新的 ASRService + OfflineRecognizer，会导致
+    // sherpa_onnx 原生资源冲突，触发 C++ 层面的 SIGSEGV/SIGABRT 闪退。
+    // 现在：stopRecording 后立即释放 _dynamicAsrService，释放原生 C++ 资源
+    try {
+      _dynamicAsrService?.dispose();
+      debugPrint('[AsrInputService] ✅ _dynamicAsrService 已释放 (${cancelled ? "取消" : "正常停止"})');
+    } catch (e) {
+      debugPrint('[AsrInputService] ⚠️ _dynamicAsrService 释放失败: $e');
+    }
+    _dynamicAsrService = null;
+
+    // ★★★ iOS AVAudioSession 恢复 ★★★
+    // 录音结束后恢复为播放模式，让 TTS 可以正常播放
+    if (Platform.isIOS || Platform.isMacOS) {
+      try {
+        final session = await AudioSession.instance;
+        await session.configure(AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playback,
+        ));
+        debugPrint('[AsrInputService] ✅ AVAudioSession 恢复为 playback');
+      } catch (e) {
+        debugPrint('[AsrInputService] ⚠️ AVAudioSession 恢复失败: $e');
+      }
+    }
+
     return null; // 结果通过 resultStream 返回
   }
 
@@ -462,7 +595,7 @@ class AsrInputService {
     final path = _recordingPath;
     
     try {
-      await _recorder.stop();
+      await _recorder?.stop();
     } catch (e) {
       debugPrint('[AsrInputService] stop error: $e');
     }
@@ -587,7 +720,8 @@ class AsrInputService {
   /// 释放资源
   void dispose() {
     _amplitudeTimer?.cancel();
-    _recorder.dispose();
+    _recorder?.dispose();
+    _dynamicAsrService?.dispose();
     _systemAsrSubscription?.cancel();
     _amplitudeController.close();
     _resultController.close();

@@ -530,11 +530,12 @@ class MediaIngestionPipeline {
   /// 1. 用户下载的模型（VoiceModelService）
   /// 2. 按需下载的模型（提示用户下载）
   Future<String> _transcribeWithASR(String audioPath) async {
+    ASRService? asrService;
     try {
       debugPrint('[MediaIngestionPipeline] ASR 转写: $audioPath');
       
       // 使用现有的 ASR 服务（Sherpa-ONNX 本地离线识别）
-      final asrService = ASRService(
+      asrService = ASRService(
         provider: ASRProvider.sherpa,
         sherpaModelId: 'paraformer-zh', // 使用中文 Paraformer 模型
       );
@@ -544,9 +545,6 @@ class MediaIngestionPipeline {
       
       // 执行识别
       final text = await asrService.recognizeFile(audioPath);
-      
-      // 释放资源
-      asrService.dispose();
       
       debugPrint('[MediaIngestionPipeline] ASR 转写完成: ${text.length} 字符');
       return text;
@@ -559,6 +557,9 @@ class MediaIngestionPipeline {
           '语音识别功能需要下载本地模型。\n'
           '请在「语音设置 → 选择 ASR 模型」中下载后重试。\n\n'
           '错误信息: $e';
+    } finally {
+      // ★ 关键修复：确保 ASRService（含 OfflineRecognizer）在 finally 中释放
+      asrService?.dispose();
     }
   }
 

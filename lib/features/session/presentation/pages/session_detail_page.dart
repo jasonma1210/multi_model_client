@@ -26,6 +26,7 @@ import '../../../../core/services/asr_service.dart';
 import '../../../../core/services/voice_dialog_engine.dart';
 import '../../../../core/services/asr_input_service.dart';
 import '../../../../core/services/location_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'realtime_voice_page.dart';
 import '../../../../core/storage/database.dart';
 import '../../../../core/providers/database_provider.dart';
@@ -620,7 +621,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     }
     
     // 初始化 TTS 服务
-    if (ttsProvider == 'openai' || ttsProvider == 'sherpa' || ttsProvider == 'system' || ttsProvider == 'mimo' || ttsProvider == 'edge') {
+    if (ttsProvider == 'openai' || ttsProvider == 'sherpa' || ttsProvider == 'system' || ttsProvider == 'mimo' || ttsProvider == 'edge' || ttsProvider == 'cosyvoice') {
       String? apiKey;
       TTSProvider ttsProviderEnum;
       
@@ -635,6 +636,9 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           break;
         case 'edge':
           ttsProviderEnum = TTSProvider.edge;
+          break;
+        case 'cosyvoice':
+          ttsProviderEnum = TTSProvider.cosyvoice;
           break;
         case 'sherpa':
           ttsProviderEnum = TTSProvider.sherpa;
@@ -659,18 +663,30 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           final cloneService = VoiceCloneService();
           final voices = await cloneService.getClonedVoices();
           final cloneId = mimoVoiceStr.substring(6); // 去掉 'clone_' 前缀
+          debugPrint('[VoiceDialog] 克隆音色查找: cloneId=$cloneId, 已有克隆音色数=${voices.length}');
           final cloneVoice = voices.where((v) => v.id == cloneId).firstOrNull;
           if (cloneVoice != null && cloneVoice.isReady) {
             cloneReferenceAudioPath = cloneVoice.referenceAudioPath;
+            // ★ 验证参考音频文件是否存在
+            final refFile = File(cloneReferenceAudioPath!);
+            final exists = await refFile.exists();
+            final size = exists ? await refFile.length() : 0;
+            debugPrint('[VoiceDialog] 参考音频: path=$cloneReferenceAudioPath, exists=$exists, size=$size bytes');
+            if (!exists || size == 0) {
+              debugPrint('[VoiceDialog] ⚠️ 参考音频文件不存在或为空，克隆音色将无法工作');
+              cloneReferenceAudioPath = null;
+            }
+          } else {
+            debugPrint('[VoiceDialog] ⚠️ 克隆音色未找到或未就绪: found=${cloneVoice != null}, ready=${cloneVoice?.isReady}');
           }
         } catch (e) {
           debugPrint('[SessionDetail] Failed to load clone voice: $e');
         }
-        mimoVoice = MiMoVoice.Chloe; // 克隆模式下回退默认值
+        mimoVoice = MiMoVoice.mimo_default; // 克隆模式下回退默认值
       } else {
         mimoVoice = MiMoVoice.values.firstWhere(
           (v) => v.name == mimoVoiceStr,
-          orElse: () => MiMoVoice.Chloe,
+          orElse: () => MiMoVoice.mimo_default,
         );
       }
       
@@ -681,21 +697,65 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
         orElse: () => EdgeVoice.xiaoxiao,
       );
       
+      // ★ 读取 CosyVoice 设置
+      final cosyvoiceBaseUrl = prefs.getString('cosyvoice_base_url') ?? 'http://localhost:50000';
+      final cosyvoiceModeStr = prefs.getString('cosyvoice_mode') ?? 'cross_lingual';
+      final cosyvoiceInstructText = prefs.getString('cosyvoice_instruct_text') ?? '用自然的语气说话';
+      final cosyvoiceRefAudioPath = prefs.getString('cosyvoice_ref_audio_path') ?? '';
+      final cosyvoiceVoiceId = prefs.getString('cosyvoice_voice_id') ?? 'default';
+      final cosyvoiceMode = CosyVoiceMode.values.firstWhere(
+        (v) => v.name == cosyvoiceModeStr,
+        orElse: () => CosyVoiceMode.cross_lingual,
+      );
+
+      // ★ CosyVoice 参考音频路径：优先使用 VoiceSettings 中的路径
+      // 如果选择了克隆音色（cv_ 开头），参考音频路径已由音色选择时自动设置
+      String cvRefAudio = cosyvoiceRefAudioPath;
+      
       ttsService = TTSService(
         provider: ttsProviderEnum,
         apiKey: apiKey,
         mimoVoice: mimoVoice,
+        mimoVoiceId: mimoVoiceStr.startsWith('clone_') ? null : mimoVoiceStr, // ★ 修复：传入字符串音色 ID
         edgeVoice: edgeVoice,
-        cloneReferenceAudioPath: cloneReferenceAudioPath,
+        // ★★★ 关键修复：mimo 克隆音色时也要传 cloneReferenceAudioPath ★★★
+        // 否则 TTS 会使用普通的 mimo API 而不是 voiceclone endpoint
+        cloneReferenceAudioPath: ttsProvider == 'mimo' && cloneReferenceAudioPath != null
+            ? cloneReferenceAudioPath
+            : (ttsProvider == 'cosyvoice' && cvRefAudio.isNotEmpty ? cvRefAudio : null),
         sherpaModelId: ttsProvider == 'sherpa' ? selectedTtsModelId : null,
         speakerId: speakerId,
         speechRate: ttsProvider == 'system' ? systemTtsSpeed : 1.0,
+        // ★ 修复：传递 system TTS 音色 ID
+        systemVoiceId: ttsProvider == 'system' && mimoVoiceStr.isNotEmpty ? mimoVoiceStr : null,
+        cosyvoiceBaseUrl: ttsProvider == 'cosyvoice' ? cosyvoiceBaseUrl : null,
+        cosyvoiceMode: cosyvoiceMode,
+        cosyvoiceInstructText: cosyvoiceInstructText,
+        fishaudioBaseUrl: ttsProvider == 'fishaudio' ? (prefs.getString('fishaudio_base_url') ?? 'http://localhost:50001') : null,
+        fishaudioReferenceAudioPath: ttsProvider == 'fishaudio' ? prefs.getString('fishaudio_reference_audio_path') : null,
+        fishaudioReferenceText: ttsProvider == 'fishaudio' ? prefs.getString('fishaudio_reference_text') : null,
       );
       
       // ★ 修复：非系统 TTS 时，预热系统 TTS 引擎作为降级备用
       // 避免主 TTS 失败时降级到系统 TTS 还需要等待引擎绑定
       if (ttsProviderEnum != TTSProvider.system) {
         ttsService.warmUpSystemTts();
+      }
+
+      // ★ 修复：用户配置了非系统 TTS provider（如 mimo/cosyvoice/fishaudio/edge），
+      // 但当前会话的 enableVoiceOutput 还是 false（默认），TTS 不会触发。
+      // 在 initService 里自动开启一次，保留后续在 UI 手动关闭的权限。
+      if (ttsProvider != 'system' &&
+          ttsProvider != 'sherpa' &&  // sherpa 仍走原来的 session 开关兜底
+          sessionState.activeSession != null &&
+          !sessionState.activeSession!.enableVoiceOutput) {
+        final sid = sessionState.activeSession!.id;
+        debugPrint('[SessionDetail] initService: TTS provider=$ttsProvider 但 enableVoiceOutput=false，自动开启会话 $sid 的语音播报');
+        try {
+          await ref.read(sessionManagerProvider).updateSessionVoiceOutput(sid, true);
+        } catch (e) {
+          debugPrint('[SessionDetail] initService: 自动开启语音播报失败: $e');
+        }
       }
     }
     
@@ -1382,6 +1442,10 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                     child: MessageBubble(
                       message: message,
                       modelId: state.activeSession?.modelId ?? 'default',
+                      // ★ AI 消息：传入 TTS 播放回调
+                      onPlayVoice: message.role == 'assistant'
+                          ? () => _playAssistantVoice(message.content as String? ?? '', manualTrigger: true)
+                          : null,
                     ),
                   );
                 },
@@ -3757,8 +3821,14 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       return;
     }
 
-    // 如果正在生成中，则不发送
-    if (_isGenerating) return;
+    // ★★★ 如果 AI 正在生成回复，先打断当前生成，再发送新消息 ★★★
+    // 用户通过语音输入新消息时，期望打断 AI 回复并按新内容处理
+    if (_isGenerating) {
+      debugPrint('[SessionDetail] ⚡ AI 正在生成，打断当前回复并发送新消息');
+      _stopGeneration();
+      // 等待一帧，确保流式响应的 await for 循环退出
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
 
     // ★ 防重复发送：如果正在发送中，则不重复调用
     if (_isSending) {
@@ -4151,14 +4221,14 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
 
           // ★ 修复：TTS 播报改为非阻塞，避免 TTS 卡死导致整个会话 UI 冻住
           // 不使用 await，让 TTS 在后台执行，主流程立即继续
-          // 跳过 TTS 播报"系统提示"消息（如"模型未产生输出..."），避免噪音
-          if (response.content.isNotEmpty &&
-              !response.content.startsWith('（') &&
-              !response.content.startsWith('(')) {
+          // AI 角色扮演里 `（动作描写/旁白/内心独白）` 这种括号内文字只是提供情绪价值，
+          // 不读出来；但**整段如果包含 `[tts:...]` 标签或括号外有可读文本**仍要 TTS。
+          // 例：`（轻轻叹了口气...）[tts:style=温柔耐心]妹妹别着急...[/tts]` → 读 `妹妹别着急...`
+          if (response.content.isNotEmpty && _hasReadableTtsContent(response.content)) {
             debugPrint('[SessionDetail] 流式响应完成，触发 TTS 播报: 响应长度=${response.content.length}');
             _playAssistantVoice(response.content);
           } else {
-            debugPrint('[SessionDetail] 跳过 TTS 播报（系统提示）: ${response.content}');
+            debugPrint('[SessionDetail] 跳过 TTS 播报（无可读内容/系统提示）: ${response.content.substring(0, response.content.length > 60 ? 60 : response.content.length)}...');
           }
         }
       }
@@ -4174,6 +4244,10 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           if (errMsg.contains('401')) {
             // 401 认证错误
             displayMessage = 'API 认证失败 (401)：请检查 API Key 是否正确、是否过期';
+          } else if (errMsg.contains('上下文失效') || errMsg.contains('no such instance') || errMsg.contains('context') && errMsg.contains('invalid')) {
+            // ★★★ 修复 LlamaException：上下文失效时自动重载模型 ★★★
+            displayMessage = '模型上下文已失效，正在自动重载...';
+            _autoLoadModel();
           } else if (errMsg.contains('未加载') || errMsg.contains('not loaded') || errMsg.contains('未就绪')) {
             // 本地模型未加载 → 自动尝试加载
             displayMessage = '模型正在加载中，请稍候...';
@@ -4242,7 +4316,19 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
   void _stopGeneration() {
     final dialogueEngine = ref.read(dialogueEngineProvider);
     dialogueEngine.cancelGeneration(widget.sessionId);
-    setState(() => _isGenerating = false);
+    // ★ 停止 TTS 播放
+    try {
+      _cachedTtsService?.stop();
+    } catch (_) {}
+    try {
+      ref.read(ttsServiceProvider).stop();
+    } catch (_) {}
+    _isSpeaking = false;
+    // 注意：dialogue_engine 的 finally 块会自动保存已生成的部分回复到数据库
+    setState(() {
+      _isGenerating = false;
+      _streamingText = '';
+    });
   }
 
   /// ✅ 流式响应优化：节流滚动到底部
@@ -4288,7 +4374,28 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
   /// 缓存的 TTS 设置指纹（用于检测设置是否变化）
   String _ttsSettingsFingerprint = '';
 
-  Future<void> _playAssistantVoice(String text) async {
+  /// 判断消息是否包含"可读"的 TTS 内容（剥除 `（动作描写/旁白）` 后仍有文本或 tts 标签）
+  /// 整段仅由"（...）"括号内容构成时不触发 TTS（无声音内容）
+  /// 包含 `[tts:...]` 标签或括号外有非空白字符时 → 触发 TTS
+  bool _hasReadableTtsContent(String content) {
+    if (content.isEmpty) return false;
+    // 1) 含 [tts:] 标签 → 有可读内容
+    if (RegExp(r'\[tts:(style|emotion|natural|director)').hasMatch(content)) {
+      return true;
+    }
+    // 2) 剥除所有 `（...）` 与 `(...)` 形式的旁白/动作描写，看剩余是否非空
+    final stripped = content
+        .replaceAll(RegExp(r'（[^）]*）', dotAll: true), '')
+        .replaceAll(RegExp(r'\([^)]*\)', dotAll: true), '')
+        .trim();
+    return stripped.isNotEmpty;
+  }
+
+  /// 判断消息是否为"系统兜底提示"（如模型加载失败、网络错误等），这种消息不该 TTS 播报
+  /// 之前用 startsWith('（'/'(') 判断会把角色扮演里"（动作描写）"开头的正文误判为系统提示
+  /// （已撤销，保留以 `（` 或 `(` 开头即为"动作/旁白/内心独白"不读的语义）
+
+  Future<void> _playAssistantVoice(String text, {bool manualTrigger = false}) async {
     debugPrint('[VoiceOutput] ========== TTS 播报流程开始 ==========');
     debugPrint('[VoiceOutput] 原始文本长度: ${text.length}, 前100字: ${text.length > 100 ? text.substring(0, 100) : text}');
     
@@ -4306,7 +4413,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     // ★ 全局超时保护：整个 TTS 流程最多 60 秒，防止引擎卡死
     try {
       debugPrint('[VoiceOutput] 调用 _doPlayAssistantVoice（60s超时保护）');
-      await _doPlayAssistantVoice(text).timeout(
+      await _doPlayAssistantVoice(text, manualTrigger: manualTrigger).timeout(
         const Duration(seconds: 60),
         onTimeout: () {
           debugPrint('[VoiceOutput] ⚠️ TTS 全局超时（60s），强制结束');
@@ -4322,7 +4429,28 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
   }
 
   /// 实际的 TTS 播报逻辑（被 _playAssistantVoice 超时包裹）
-  Future<void> _doPlayAssistantVoice(String text) async {
+  Future<void> _doPlayAssistantVoice(String text, {bool manualTrigger = false}) async {
+    debugPrint('[VoiceOutput] [_doPlay] 函数体进入，text.length=${text.length}');
+    // ★★★ iOS/macOS: 恢复 AVAudioSession 为播放模式 ★★★
+    // 录音后 AVAudioSession 处于 playAndRecord，TTS 播放需要切回 playback
+    if (Platform.isIOS || Platform.isMacOS) {
+      try {
+        debugPrint('[VoiceOutput] [_doPlay] 正在配置 AVAudioSession → playback...');
+        final session = await AudioSession.instance
+            .timeout(const Duration(seconds: 3), onTimeout: () {
+          throw TimeoutException('AudioSession.instance 3s 超时');
+        });
+        await session.configure(AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playback,
+        )).timeout(const Duration(seconds: 3), onTimeout: () {
+          throw TimeoutException('session.configure 3s 超时');
+        });
+        debugPrint('[VoiceOutput] ✅ AVAudioSession 恢复为 playback');
+      } catch (e) {
+        debugPrint('[VoiceOutput] ⚠️ AVAudioSession 恢复失败（已忽略，不阻塞 TTS）: $e');
+      }
+    }
+
     // ★★★ 清洗 reasoning 内容，只保留实际回答 ★★★
     String cleanedText = _cleanReasoningForTTS(text);
     debugPrint('[VoiceOutput] [步骤1] 文本清洗: 原始${text.length}字 → 清洗后${cleanedText.length}字');
@@ -4330,6 +4458,23 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     if (cleanedText.trim().isEmpty) {
       debugPrint('[VoiceOutput] ❌ 清洗后文本为空，跳过播报');
       return;
+    }
+
+    // ★★★ 剥除 `（动作描写/旁白/内心独白）` 与 `(...)` 括号内容 ★★★
+    // 角色扮演里 `（轻轻叹了口气...）` 这类括号是给读者想象画面的，不应该被 TTS 读出来
+    // 例：`（轻轻叹了口气...）[tts:style=温柔]妹妹别着急...[/tts]` → 读 `妹妹别着急...`
+    final beforeStripLen = cleanedText.length;
+    String strippedText = cleanedText
+        .replaceAll(RegExp(r'（[^）]*）', dotAll: true), '')
+        .replaceAll(RegExp(r'\([^)]*\)', dotAll: true), '')
+        .trim();
+    if (strippedText.isEmpty) {
+      debugPrint('[VoiceOutput] [步骤1.5] 剥除括号旁白后为空，整段都是动作描写，跳过 TTS');
+      return;
+    }
+    if (strippedText.length != beforeStripLen) {
+      debugPrint('[VoiceOutput] [步骤1.5] 剥除括号旁白: ${beforeStripLen}字 → ${strippedText.length}字');
+      cleanedText = strippedText;
     }
 
     // 获取当前会话状态
@@ -4342,12 +4487,13 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       debugPrint('[VoiceOutput] ❌ activeSession 为 null，跳过播报');
       return;
     }
-    if (!session.enableVoiceOutput) {
+    if (!session.enableVoiceOutput && !manualTrigger) {
       debugPrint('[VoiceOutput] ❌ session.enableVoiceOutput=false，语音播报未开启');
       return;
     }
 
     try {
+      _isSpeaking = true; // ★ 修复：标记正在播报，防止重叠调用
       // ★ 修复：直接从 SharedPreferences 读取 TTS 设置，
       // 避免 voiceSettingsProvider 异步加载竞态导致读到默认值 'system'
       final settingsService = ref.read(settingsServiceProvider);
@@ -4374,6 +4520,15 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                            session.modelId.startsWith('ffi-') ||
                            session.modelId.contains('gguf');
       debugPrint('[VoiceOutput] [步骤4] OOM检测: isMobile=$isMobile, isLocalModel=$isLocalModel, modelId=${session.modelId}');
+
+      // ★★★ 修复 LlamaException：本地模型推理期间避免同时初始化 Sherpa TTS ★★★
+      // Sherpa 加载 ONNX 模型会占用大量内存，可能导致 llama.cpp 上下文失效
+      // 如果正在推理中，跳过 Sherpa TTS 播报，降级到系统 TTS
+      if (isLocalModel && _isGenerating && ttsProvider == 'sherpa') {
+        debugPrint('[VoiceOutput] ⚠️ 本地模型推理中，Sherpa TTS 可能导致内存冲突，降级到系统 TTS');
+        ttsProvider = 'system';
+      }
+
       if (isMobile && isLocalModel && ttsProvider == 'sherpa') {
         debugPrint('[VoiceOutput] ⚠️ 移动端+本地模型：Sherpa TTS 可能有 OOM 风险，但已恢复用户选择');
         // ★ 不再静默降级，保留用户选择的 sherpa
@@ -4390,9 +4545,10 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
 
       debugPrint('[VoiceOutput] [步骤5] 最终 TTS 引擎: $ttsProvider, 模型: $ttsModelId, 音色: $ttsVoice, 语速: $ttsSpeed');
 
-      // ★ 修复：为 MiMo TTS 传入 apiKey 和 mimoVoice
+      // ★ 修复：为 MiMo TTS 传入 apiKey 和 mimoVoiceId（字符串，直接传给 API）
       String? ttsApiKey;
-      MiMoVoice mimoVoice = MiMoVoice.Chloe;
+      MiMoVoice mimoVoice = MiMoVoice.mimo_default;
+      String? mimoVoiceId; // ★ 字符串音色 ID，优先于枚举
       String? cloneRefAudioPath;
       if (ttsProvider == 'mimo') {
         // ★ 修复：使用异步方法读取 API Key（支持加密存储）
@@ -4402,48 +4558,101 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
           debugPrint('[VoiceOutput] ⚠️ MiMo API Key 未配置，降级为系统 TTS');
           ttsProvider = 'system';
         } else {
-          // 读取用户选择的 MiMo 音色
-          final mimoVoiceStr = ttsVoice.isNotEmpty ? ttsVoice : 'Chloe';
+          // ★ 修复：直接使用字符串音色 ID 传给 API，不再依赖枚举匹配
+          // MiMo 官方支持的音色：mimo_default, bingtang, moli, suda, baihua, Mia, Chloe, Milo, Dean
+          // 默认使用 mimo_default（MiMo 官方推荐）
+          final mimoVoiceStr = ttsVoice.isNotEmpty ? ttsVoice : 'mimo_default';
           if (mimoVoiceStr.startsWith('clone_')) {
             // 克隆音色模式
             try {
               final cloneService = VoiceCloneService();
               final voices = await cloneService.getClonedVoices();
               final cloneId = mimoVoiceStr.substring(6);
+              debugPrint('[VoiceOutput] [步骤6] 克隆音色查找: mimoVoiceStr=$mimoVoiceStr, cloneId=$cloneId, 已有克隆音色数=${voices.length}');
+              for (final v in voices) {
+                debugPrint('[VoiceOutput] [步骤6]   - id=${v.id}, name=${v.name}, isReady=${v.isReady}, status=${v.status}, refAudioPath=${v.referenceAudioPath}');
+              }
               final cloneVoice = voices.where((v) => v.id == cloneId).firstOrNull;
-              if (cloneVoice != null && cloneVoice.isReady) {
-                cloneRefAudioPath = cloneVoice.referenceAudioPath;
+              if (cloneVoice != null) {
+                debugPrint('[VoiceOutput] [步骤6] 找到克隆音色: id=${cloneVoice.id}, isReady=${cloneVoice.isReady}, refAudioPath=${cloneVoice.referenceAudioPath}');
+                if (cloneVoice.isReady) {
+                  cloneRefAudioPath = cloneVoice.referenceAudioPath;
+                  // 验证参考音频文件是否存在
+                  final refFile = File(cloneRefAudioPath!);
+                  final exists = await refFile.exists();
+                  final size = exists ? await refFile.length() : 0;
+                  debugPrint('[VoiceOutput] [步骤6] 参考音频文件: path=$cloneRefAudioPath, exists=$exists, size=$size bytes');
+                  if (!exists || size == 0) {
+                    debugPrint('[VoiceOutput] [步骤6] ⚠️ 参考音频文件不存在或为空，克隆音色将无法工作');
+                    cloneRefAudioPath = null;
+                  }
+                } else {
+                  debugPrint('[VoiceOutput] [步骤6] ⚠️ 克隆音色未就绪: status=${cloneVoice.status}');
+                }
+              } else {
+                debugPrint('[VoiceOutput] [步骤6] ⚠️ 未找到匹配的克隆音色: cloneId=$cloneId');
               }
             } catch (e) {
               debugPrint('[VoiceOutput] Failed to load clone voice: $e');
             }
-            debugPrint('[VoiceOutput] [步骤6] MiMo 克隆音色: cloneId=${mimoVoiceStr.substring(6)}, audioPath=$cloneRefAudioPath');
+            debugPrint('[VoiceOutput] [步骤6] MiMo 克隆音色最终结果: cloneId=${mimoVoiceStr.substring(6)}, audioPath=$cloneRefAudioPath');
           } else {
+            // ★ 关键修复：直接使用字符串音色 ID，不再通过枚举匹配
+            // 之前用 MiMoVoice.values.firstWhere 匹配，如果 ttsVoice 是 "bingtang" 等不在枚举中的值就会回退到 Chloe
+            mimoVoiceId = mimoVoiceStr;
+            // 兼容：同时设置枚举值（用于回退场景）
             mimoVoice = MiMoVoice.values.firstWhere(
               (v) => v.name == mimoVoiceStr,
-              orElse: () => MiMoVoice.Chloe,
+              orElse: () => MiMoVoice.mimo_default,
             );
           }
-          debugPrint('[VoiceOutput] [步骤6] MiMo 音色: $mimoVoice (原始值: "$ttsVoice")');
+          debugPrint('[VoiceOutput] [步骤6] MiMo 音色: mimoVoiceId=$mimoVoiceId, mimoVoice=$mimoVoice (原始值: "$ttsVoice")');
         }
       }
 
       // ★ 优化：使用缓存的 TTS 服务实例，避免每次创建新实例导致系统TTS绑定丢失
-      final settingsFingerprint = '$ttsProvider|$ttsModelId|$ttsVoice|$ttsSpeed|$ttsApiKey';
+      // ★ 修复：fingerprint 包含 cloneRefAudioPath，确保克隆音色切换时重建 TTSService
+      final settingsFingerprint = '$ttsProvider|$ttsModelId|$ttsVoice|$ttsSpeed|$ttsApiKey|$cloneRefAudioPath';
       final needRecreate = _cachedTtsService == null || _ttsSettingsFingerprint != settingsFingerprint;
       debugPrint('[VoiceOutput] [步骤7] TTS服务缓存: cached=${_cachedTtsService != null}, fingerprint匹配=${_ttsSettingsFingerprint == settingsFingerprint}, 需要重建=$needRecreate');
       if (needRecreate) {
-        debugPrint('[VoiceOutput] [步骤7] 创建 TTSService: provider=$_getTTSProvider(ttsProvider), apiKey=${ttsApiKey != null ? "有" : "无"}, mimoVoice=$mimoVoice, speechRate=$ttsSpeed, systemVoiceId=$ttsVoice');
+        debugPrint('[VoiceOutput] [步骤7] 创建 TTSService: provider=$_getTTSProvider(ttsProvider), apiKey=${ttsApiKey != null ? "有" : "无"}, mimoVoice=$mimoVoice, mimoVoiceId=$mimoVoiceId, cloneRefAudioPath=$cloneRefAudioPath, speechRate=$ttsSpeed, systemVoiceId=$ttsVoice');
+        // ★ 读取 CosyVoice 设置
+        final cvBaseUrl = prefs.getString('cosyvoice_base_url') ?? 'http://localhost:50000';
+        final cvModeStr = prefs.getString('cosyvoice_mode') ?? 'cross_lingual';
+        final cvInstructText = prefs.getString('cosyvoice_instruct_text') ?? '用自然的语气说话';
+        final cvRefAudioPath = prefs.getString('cosyvoice_ref_audio_path') ?? '';
+        final cvVoiceId = prefs.getString('cosyvoice_voice_id') ?? 'default';
+        final cvMode = CosyVoiceMode.values.firstWhere(
+          (v) => v.name == cvModeStr,
+          orElse: () => CosyVoiceMode.cross_lingual,
+        );
+
+        // ★ CosyVoice 参考音频路径：优先使用 VoiceSettings 中的路径
+        // 如果选择了克隆音色（cv_ 开头），参考音频路径已由音色选择时自动设置
+        String cvRefAudio = cvRefAudioPath;
+
+        // ★ 修复：先释放旧的 TTS 服务实例，避免 FlutterTts/AudioPlayer 多实例冲突导致闪退
+        _cachedTtsService?.dispose();
         _cachedTtsService = TTSService(
           provider: _getTTSProvider(ttsProvider),
           apiKey: ttsApiKey,
           mimoVoice: mimoVoice,
-          cloneReferenceAudioPath: cloneRefAudioPath,
+          mimoVoiceId: mimoVoiceId, // ★ 修复：传入字符串音色 ID，优先于枚举
+          cloneReferenceAudioPath: ttsProvider == 'cosyvoice' && cvRefAudio.isNotEmpty ? cvRefAudio : cloneRefAudioPath,
           speechRate: ttsSpeed,
           sherpaModelId: ttsProvider == 'sherpa' ? ttsModelId : null,
           speakerId: ttsProvider == 'sherpa' && ttsVoice.isNotEmpty ? int.tryParse(ttsVoice) ?? 0 : 0,
           // ★ 修复：传递 system TTS 音色 ID（之前完全被忽略）
           systemVoiceId: ttsProvider == 'system' && ttsVoice.isNotEmpty ? ttsVoice : null,
+          // ★ CosyVoice 参数
+          cosyvoiceBaseUrl: ttsProvider == 'cosyvoice' ? cvBaseUrl : null,
+          cosyvoiceMode: cvMode,
+          cosyvoiceInstructText: cvInstructText,
+          // ★ Fish Audio 参数
+          fishaudioBaseUrl: ttsProvider == 'fishaudio' ? (prefs.getString('fishaudio_base_url') ?? 'http://localhost:50001') : null,
+          fishaudioReferenceAudioPath: ttsProvider == 'fishaudio' ? prefs.getString('fishaudio_reference_audio_path') : null,
+          fishaudioReferenceText: ttsProvider == 'fishaudio' ? prefs.getString('fishaudio_reference_text') : null,
         );
         _ttsSettingsFingerprint = settingsFingerprint;
         // 仅 system TTS 需要预热（MiMo/OpenAI/Sherpa 不需要系统 TTS 绑定）
@@ -4527,6 +4736,10 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
         return TTSProvider.openai;
       case 'mimo':
         return TTSProvider.mimo;
+      case 'edge':
+        return TTSProvider.edge;
+      case 'cosyvoice':
+        return TTSProvider.cosyvoice;
       case 'system':
       default:
         return TTSProvider.system;

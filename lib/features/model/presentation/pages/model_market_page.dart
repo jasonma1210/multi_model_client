@@ -602,6 +602,13 @@ class _ModelMarketPageState extends ConsumerState<ModelMarketPage>
       
       debugPrint('[ModelMarket] 下载路径: $savePath');
 
+      // ★ 确保目标目录存在（删除模型后重新下载时目录可能已被删除）
+      final modelDirObj = Directory(modelDir);
+      if (!await modelDirObj.exists()) {
+        await modelDirObj.create(recursive: true);
+        debugPrint('[ModelMarket] 已创建下载目录: $modelDir');
+      }
+
       // 创建下载任务
       final task = await _taskManager.createTask(
         modelId: model.id,
