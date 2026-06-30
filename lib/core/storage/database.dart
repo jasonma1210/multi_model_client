@@ -218,10 +218,15 @@ class McpServerConfigs extends Table {
   TextColumn get id => text()();
   TextColumn get serverId => text()(); // Unique identifier
   TextColumn get name => text()();
-  TextColumn get type => text()(); // 'stdio', 'http'
+  // v0.43.0: 扩展传输类型 - 'stdio' | 'websocket' | 'streamable_http' | 'in_app'
+  TextColumn get type => text()();
   TextColumn get command => text()(); // Command to start server
   TextColumn get args => text().nullable()(); // JSON array of arguments
   TextColumn get env => text().nullable()(); // JSON object for environment variables
+  // v0.43.0 新增：HTTP/SSE 端点（streamable_http 用）
+  TextColumn get endpoint => text().nullable()();
+  // v0.43.0 新增：Bearer Token（streamable_http 用）
+  TextColumn get authToken => text().nullable()();
   BoolColumn get isEnabled => boolean().withDefault(const Constant(false))();
   BoolColumn get isAutoStart => boolean().withDefault(const Constant(false))();
   TextColumn get lastError => text().nullable()();

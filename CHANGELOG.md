@@ -5,6 +5,88 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-06-30
+
+### ✨ Added - 新增功能
+
+#### 多模态统一抽象（Multimodal Abstraction）— P0
+- ✨ **ContentPart sealed class** — `TextPart / ImagePart / AudioPart / FilePart` 4 个子类强制类型安全 + 模式匹配
+- ✨ **MultimodalMessage** — 替代 v0.42.0 的 ChatMessage；向下兼容 `text` / `images` getter
+- ✨ **跨 LLM 序列化** — `toProviderFormat()` 支持 OpenAI / Anthropic / Gemini / Ollama / llama.cpp 5 大 Provider
+- ✨ **ImagePart 3 种源** — base64 / HTTP URL / 本地文件 URI；断言保证 sourceType 与数据一致
+- ✨ **Token 估算** — OpenAI vision 公式：512x512=85 tokens，每翻倍 token 数翻倍
+
+#### 多模态适配器矩阵（4 大 LLM）— P0
+- ✨ **OpenAI Vision 适配器** — `image_url` 格式（data URI / URL）
+- ✨ **Anthropic Vision 适配器** — `image` block + `source: { type, media_type, data }`
+- ✨ **Gemini 多模态适配器** — `inline_data: { mime_type, data }`
+- ✨ **Ollama Vision 适配器** — 顶层 `images: [base64]` 数组
+- ✨ **流式多模态** — 4 个适配器都支持 `chatStream()` 流式响应
+- ✨ **思考预算 + 多模态** — Anthropic 适配器集成 Extended Thinking（v0.42.0 已支持）
+
+#### 图片预处理服务 — P0
+- ✨ **ImagePreprocessService** — 压缩（max 2048px）/ 格式转换（JPEG/PNG）/ 元数据提取
+- ✨ **错误处理** — 完整覆盖空字节、解码失败、编码失败、格式不支持
+- ✨ **Token 预估算** — 通过 ImagePart.estimateTokens() 提前估算上传成本
+
+#### A2A 协议 v0.2 — P0
+- ✨ **AgentCard** — Agent 自描述（capabilities / skills / interfaces / 4 种安全模式）
+- ✨ **Task 生命周期** — submitted/working/input-required/completed/failed/canceled
+- ✨ **Artifact & Part** — 任务产出物（text / file / data）
+- ✨ **A2AServer SDK** — JSON-RPC over HTTP 处理 SendMessage / GetTask / ListTasks / CancelTask
+- ✨ **A2AClient** — 同步调用 + 流式订阅
+
+#### A2A 客户端流式事件 + 自动重连 — P0
+- ✨ **A2AStreamEvent sealed class** — 6 个子类：TaskEvent / MessageEvent / ArtifactEvent / StatusEvent / EndEvent / UnknownEvent
+- ✨ **心跳超时检测** — 默认 45s 无事件触发重连（移动端关键）
+- ✨ **指数退避重连** — 3s → 6s → 12s → 24s → 30s (capped)；可配 maxRetries
+- ✨ **Last-Event-ID 续传** — SSE 协议原生支持，断线后从最后事件 ID 继续
+- ✨ **优雅关闭** — cancel() 取消所有 timer + cancelToken + 当前订阅
+
+#### A2A Riverpod Provider 层 — P0
+- ✨ **a2aSettingsProvider** — 持久化 A2A 服务器配置（SharedPreferences）
+- ✨ **a2aClientManagerProvider** — 按 serverId 缓存 A2AClient 实例
+- ✨ **a2aAgentsProvider** — 自动刷新所有启用服务器的 AgentCard
+- ✨ **a2aTaskRuntimeProvider** — 当前 A2A 任务运行时状态（事件累积/状态机/取消）
+- ✨ **selectedA2AAgentProvider** — 会话级选中的 A2A Agent
+
+#### A2A UI 组件 — P0
+- ✨ **A2AAgentPanel** — Agent 列表 + 选中高亮 + 添加服务器对话框（含测试连接）
+- ✨ **A2ATaskMonitorCard** — 实时显示任务状态（6 种状态色 + 旋转图标 + 累积文本 + 事件数）
+- ✨ **ChatPage 集成** — 工具菜单新增 A2A / MCP 入口；消息流顶部挂载任务监控卡片
+
+#### MCP 移动端增强 — P0
+- ✨ **McpStreamableHttpTransport** — 基于 SSE 单向流的 HTTP MCP 传输（mobile-friendly）
+- ✨ **InAppMcpServer 抽象** — 应用内 MCP Server 框架
+- ✨ **FilesystemInAppMcpServer** — 内置文件系统 MCP（read_file/write_file/list_dir/search_files）
+- ✨ **NotesInAppMcpServer** — 内置笔记 MCP（list_notes/search_notes）
+- ✨ **沙盒安全** — 拒绝绝对路径 + 规范化 `..` 相对路径
+- ✨ **数据库扩展** — `McpServerConfig` 表新增 `type` (stdio/websocket/streamable_http/in_app)、`endpoint`、`authToken`
+
+### 🔧 Changed - 改进优化
+
+- 🔧 **ChatPage 工具菜单扩展** — 新增 2 个入口：A2A 远程 Agent / MCP 工具
+- 🔧 **ChatPage 消息流** — 顶部挂载 `A2ATaskMonitorCard`（仅 A2A 任务运行时显示）
+- 🔧 **A2AStreamEvent 改 sealed** — 替代旧 `A2AStreamEvent` 字段类，支持模式匹配
+
+### 🐛 Fixed - 修复
+
+- 🐛 **FilesystemInAppMcpServer 沙盒绕过** — 修复绝对路径（如 `/etc/passwd`）通过 `path.join` 拼接绕过 `startsWith` 检查的漏洞；改用 `path.normalize` 规范化路径
+- 🐛 **a2a_server.dart 旧 A2AStreamEvent 引用** — 切换到 sealed class 子类（A2AStatusEvent 等）
+- 🐛 **A2A 局部函数前向引用** — `connect` / `scheduleReconnect` 改用 `late` 变量闭包
+- 🐛 **DioExceptionType 判断** — 替代不存在的 `CancelException`
+
+### 📦 Technical Details
+
+- **测试覆盖**: 50 个新测试（4 个 A2A 重连 + 4 个 Provider 集成 + 17 个 A2A 协议 + 7 个 MCP v0.43 + 12 个多模态 + 6 个图片预处理）
+- **新增文件**: 7 个 (a2a_stream_event.dart / a2a_providers.dart / a2a_agent_panel.dart / a2a_task_monitor.dart / 2 个 test 文件 + 修复 FilesystemInAppMcpServer)
+- **修改文件**: 4 个 (a2a_client.dart / a2a_server.dart / database.dart / session_detail_page.dart)
+- **代码行数**: +1200 行（核心 + UI + 测试）
+- **IPA 大小**: 54 MB（与 v0.42.0 持平）
+- **构建时间**: 50.1s (iOS release, no codesign)
+
+---
+
 ## [0.42.0] - 2026-06-30
 
 ### ✨ Added - 新增功能

@@ -7390,6 +7390,28 @@ class $McpServerConfigsTable extends McpServerConfigs
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _endpointMeta = const VerificationMeta(
+    'endpoint',
+  );
+  @override
+  late final GeneratedColumn<String> endpoint = GeneratedColumn<String>(
+    'endpoint',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _authTokenMeta = const VerificationMeta(
+    'authToken',
+  );
+  @override
+  late final GeneratedColumn<String> authToken = GeneratedColumn<String>(
+    'auth_token',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _isEnabledMeta = const VerificationMeta(
     'isEnabled',
   );
@@ -7463,6 +7485,8 @@ class $McpServerConfigsTable extends McpServerConfigs
     command,
     args,
     env,
+    endpoint,
+    authToken,
     isEnabled,
     isAutoStart,
     lastError,
@@ -7528,6 +7552,18 @@ class $McpServerConfigsTable extends McpServerConfigs
       context.handle(
         _envMeta,
         env.isAcceptableOrUnknown(data['env']!, _envMeta),
+      );
+    }
+    if (data.containsKey('endpoint')) {
+      context.handle(
+        _endpointMeta,
+        endpoint.isAcceptableOrUnknown(data['endpoint']!, _endpointMeta),
+      );
+    }
+    if (data.containsKey('auth_token')) {
+      context.handle(
+        _authTokenMeta,
+        authToken.isAcceptableOrUnknown(data['auth_token']!, _authTokenMeta),
       );
     }
     if (data.containsKey('is_enabled')) {
@@ -7605,6 +7641,14 @@ class $McpServerConfigsTable extends McpServerConfigs
         DriftSqlType.string,
         data['${effectivePrefix}env'],
       ),
+      endpoint: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}endpoint'],
+      ),
+      authToken: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}auth_token'],
+      ),
       isEnabled: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_enabled'],
@@ -7642,6 +7686,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
   final String command;
   final String? args;
   final String? env;
+  final String? endpoint;
+  final String? authToken;
   final bool isEnabled;
   final bool isAutoStart;
   final String? lastError;
@@ -7655,6 +7701,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
     required this.command,
     this.args,
     this.env,
+    this.endpoint,
+    this.authToken,
     required this.isEnabled,
     required this.isAutoStart,
     this.lastError,
@@ -7674,6 +7722,12 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
     }
     if (!nullToAbsent || env != null) {
       map['env'] = Variable<String>(env);
+    }
+    if (!nullToAbsent || endpoint != null) {
+      map['endpoint'] = Variable<String>(endpoint);
+    }
+    if (!nullToAbsent || authToken != null) {
+      map['auth_token'] = Variable<String>(authToken);
     }
     map['is_enabled'] = Variable<bool>(isEnabled);
     map['is_auto_start'] = Variable<bool>(isAutoStart);
@@ -7696,6 +7750,12 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
       command: Value(command),
       args: args == null && nullToAbsent ? const Value.absent() : Value(args),
       env: env == null && nullToAbsent ? const Value.absent() : Value(env),
+      endpoint: endpoint == null && nullToAbsent
+          ? const Value.absent()
+          : Value(endpoint),
+      authToken: authToken == null && nullToAbsent
+          ? const Value.absent()
+          : Value(authToken),
       isEnabled: Value(isEnabled),
       isAutoStart: Value(isAutoStart),
       lastError: lastError == null && nullToAbsent
@@ -7721,6 +7781,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
       command: serializer.fromJson<String>(json['command']),
       args: serializer.fromJson<String?>(json['args']),
       env: serializer.fromJson<String?>(json['env']),
+      endpoint: serializer.fromJson<String?>(json['endpoint']),
+      authToken: serializer.fromJson<String?>(json['authToken']),
       isEnabled: serializer.fromJson<bool>(json['isEnabled']),
       isAutoStart: serializer.fromJson<bool>(json['isAutoStart']),
       lastError: serializer.fromJson<String?>(json['lastError']),
@@ -7741,6 +7803,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
       'command': serializer.toJson<String>(command),
       'args': serializer.toJson<String?>(args),
       'env': serializer.toJson<String?>(env),
+      'endpoint': serializer.toJson<String?>(endpoint),
+      'authToken': serializer.toJson<String?>(authToken),
       'isEnabled': serializer.toJson<bool>(isEnabled),
       'isAutoStart': serializer.toJson<bool>(isAutoStart),
       'lastError': serializer.toJson<String?>(lastError),
@@ -7757,6 +7821,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
     String? command,
     Value<String?> args = const Value.absent(),
     Value<String?> env = const Value.absent(),
+    Value<String?> endpoint = const Value.absent(),
+    Value<String?> authToken = const Value.absent(),
     bool? isEnabled,
     bool? isAutoStart,
     Value<String?> lastError = const Value.absent(),
@@ -7770,6 +7836,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
     command: command ?? this.command,
     args: args.present ? args.value : this.args,
     env: env.present ? env.value : this.env,
+    endpoint: endpoint.present ? endpoint.value : this.endpoint,
+    authToken: authToken.present ? authToken.value : this.authToken,
     isEnabled: isEnabled ?? this.isEnabled,
     isAutoStart: isAutoStart ?? this.isAutoStart,
     lastError: lastError.present ? lastError.value : this.lastError,
@@ -7787,6 +7855,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
       command: data.command.present ? data.command.value : this.command,
       args: data.args.present ? data.args.value : this.args,
       env: data.env.present ? data.env.value : this.env,
+      endpoint: data.endpoint.present ? data.endpoint.value : this.endpoint,
+      authToken: data.authToken.present ? data.authToken.value : this.authToken,
       isEnabled: data.isEnabled.present ? data.isEnabled.value : this.isEnabled,
       isAutoStart: data.isAutoStart.present
           ? data.isAutoStart.value
@@ -7809,6 +7879,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
           ..write('command: $command, ')
           ..write('args: $args, ')
           ..write('env: $env, ')
+          ..write('endpoint: $endpoint, ')
+          ..write('authToken: $authToken, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('isAutoStart: $isAutoStart, ')
           ..write('lastError: $lastError, ')
@@ -7827,6 +7899,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
     command,
     args,
     env,
+    endpoint,
+    authToken,
     isEnabled,
     isAutoStart,
     lastError,
@@ -7844,6 +7918,8 @@ class McpServerConfig extends DataClass implements Insertable<McpServerConfig> {
           other.command == this.command &&
           other.args == this.args &&
           other.env == this.env &&
+          other.endpoint == this.endpoint &&
+          other.authToken == this.authToken &&
           other.isEnabled == this.isEnabled &&
           other.isAutoStart == this.isAutoStart &&
           other.lastError == this.lastError &&
@@ -7859,6 +7935,8 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
   final Value<String> command;
   final Value<String?> args;
   final Value<String?> env;
+  final Value<String?> endpoint;
+  final Value<String?> authToken;
   final Value<bool> isEnabled;
   final Value<bool> isAutoStart;
   final Value<String?> lastError;
@@ -7873,6 +7951,8 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
     this.command = const Value.absent(),
     this.args = const Value.absent(),
     this.env = const Value.absent(),
+    this.endpoint = const Value.absent(),
+    this.authToken = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.isAutoStart = const Value.absent(),
     this.lastError = const Value.absent(),
@@ -7888,6 +7968,8 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
     required String command,
     this.args = const Value.absent(),
     this.env = const Value.absent(),
+    this.endpoint = const Value.absent(),
+    this.authToken = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.isAutoStart = const Value.absent(),
     this.lastError = const Value.absent(),
@@ -7908,6 +7990,8 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
     Expression<String>? command,
     Expression<String>? args,
     Expression<String>? env,
+    Expression<String>? endpoint,
+    Expression<String>? authToken,
     Expression<bool>? isEnabled,
     Expression<bool>? isAutoStart,
     Expression<String>? lastError,
@@ -7923,6 +8007,8 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
       if (command != null) 'command': command,
       if (args != null) 'args': args,
       if (env != null) 'env': env,
+      if (endpoint != null) 'endpoint': endpoint,
+      if (authToken != null) 'auth_token': authToken,
       if (isEnabled != null) 'is_enabled': isEnabled,
       if (isAutoStart != null) 'is_auto_start': isAutoStart,
       if (lastError != null) 'last_error': lastError,
@@ -7940,6 +8026,8 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
     Value<String>? command,
     Value<String?>? args,
     Value<String?>? env,
+    Value<String?>? endpoint,
+    Value<String?>? authToken,
     Value<bool>? isEnabled,
     Value<bool>? isAutoStart,
     Value<String?>? lastError,
@@ -7955,6 +8043,8 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
       command: command ?? this.command,
       args: args ?? this.args,
       env: env ?? this.env,
+      endpoint: endpoint ?? this.endpoint,
+      authToken: authToken ?? this.authToken,
       isEnabled: isEnabled ?? this.isEnabled,
       isAutoStart: isAutoStart ?? this.isAutoStart,
       lastError: lastError ?? this.lastError,
@@ -7988,6 +8078,12 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
     if (env.present) {
       map['env'] = Variable<String>(env.value);
     }
+    if (endpoint.present) {
+      map['endpoint'] = Variable<String>(endpoint.value);
+    }
+    if (authToken.present) {
+      map['auth_token'] = Variable<String>(authToken.value);
+    }
     if (isEnabled.present) {
       map['is_enabled'] = Variable<bool>(isEnabled.value);
     }
@@ -8019,6 +8115,8 @@ class McpServerConfigsCompanion extends UpdateCompanion<McpServerConfig> {
           ..write('command: $command, ')
           ..write('args: $args, ')
           ..write('env: $env, ')
+          ..write('endpoint: $endpoint, ')
+          ..write('authToken: $authToken, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('isAutoStart: $isAutoStart, ')
           ..write('lastError: $lastError, ')
@@ -21229,6 +21327,8 @@ typedef $$McpServerConfigsTableCreateCompanionBuilder =
       required String command,
       Value<String?> args,
       Value<String?> env,
+      Value<String?> endpoint,
+      Value<String?> authToken,
       Value<bool> isEnabled,
       Value<bool> isAutoStart,
       Value<String?> lastError,
@@ -21245,6 +21345,8 @@ typedef $$McpServerConfigsTableUpdateCompanionBuilder =
       Value<String> command,
       Value<String?> args,
       Value<String?> env,
+      Value<String?> endpoint,
+      Value<String?> authToken,
       Value<bool> isEnabled,
       Value<bool> isAutoStart,
       Value<String?> lastError,
@@ -21294,6 +21396,16 @@ class $$McpServerConfigsTableFilterComposer
 
   ColumnFilters<String> get env => $composableBuilder(
     column: $table.env,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get endpoint => $composableBuilder(
+    column: $table.endpoint,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get authToken => $composableBuilder(
+    column: $table.authToken,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -21367,6 +21479,16 @@ class $$McpServerConfigsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get endpoint => $composableBuilder(
+    column: $table.endpoint,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get authToken => $composableBuilder(
+    column: $table.authToken,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get isEnabled => $composableBuilder(
     column: $table.isEnabled,
     builder: (column) => ColumnOrderings(column),
@@ -21422,6 +21544,12 @@ class $$McpServerConfigsTableAnnotationComposer
 
   GeneratedColumn<String> get env =>
       $composableBuilder(column: $table.env, builder: (column) => column);
+
+  GeneratedColumn<String> get endpoint =>
+      $composableBuilder(column: $table.endpoint, builder: (column) => column);
+
+  GeneratedColumn<String> get authToken =>
+      $composableBuilder(column: $table.authToken, builder: (column) => column);
 
   GeneratedColumn<bool> get isEnabled =>
       $composableBuilder(column: $table.isEnabled, builder: (column) => column);
@@ -21487,6 +21615,8 @@ class $$McpServerConfigsTableTableManager
                 Value<String> command = const Value.absent(),
                 Value<String?> args = const Value.absent(),
                 Value<String?> env = const Value.absent(),
+                Value<String?> endpoint = const Value.absent(),
+                Value<String?> authToken = const Value.absent(),
                 Value<bool> isEnabled = const Value.absent(),
                 Value<bool> isAutoStart = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
@@ -21501,6 +21631,8 @@ class $$McpServerConfigsTableTableManager
                 command: command,
                 args: args,
                 env: env,
+                endpoint: endpoint,
+                authToken: authToken,
                 isEnabled: isEnabled,
                 isAutoStart: isAutoStart,
                 lastError: lastError,
@@ -21517,6 +21649,8 @@ class $$McpServerConfigsTableTableManager
                 required String command,
                 Value<String?> args = const Value.absent(),
                 Value<String?> env = const Value.absent(),
+                Value<String?> endpoint = const Value.absent(),
+                Value<String?> authToken = const Value.absent(),
                 Value<bool> isEnabled = const Value.absent(),
                 Value<bool> isAutoStart = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
@@ -21531,6 +21665,8 @@ class $$McpServerConfigsTableTableManager
                 command: command,
                 args: args,
                 env: env,
+                endpoint: endpoint,
+                authToken: authToken,
                 isEnabled: isEnabled,
                 isAutoStart: isAutoStart,
                 lastError: lastError,

@@ -2,7 +2,7 @@ name: mj_nexus
 description: "MJ Nexus - Multi-Model AI Assistant with local/remote model support, voice dialogue, RAG knowledge base, and memory engine"
 publish_to: 'none'
 
-version: 0.42.0
+version: 0.43.0+1
 
 environment:
   sdk: ^3.10.7
@@ -140,6 +140,12 @@ dependencies:
   graphview: ^1.2.1
   # Markdown 渲染增强
   markdown: ^7.3.0
+
+  # ===== v0.43.0 新增依赖 =====
+  # 图片处理（多模态图片预处理：压缩/格式转换/缩略图）
+  image: ^4.3.0
+  # Server-Sent Events 客户端（Streamable HTTP Transport / A2A SSE 流）
+  # 注：移动端 SSE 流解析直接使用 Dart 标准库 + Dio stream（无需专用包）
 
 dev_dependencies:
   flutter_test:

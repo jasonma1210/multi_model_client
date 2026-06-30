@@ -30,6 +30,9 @@ import 'package:audio_session/audio_session.dart';
 import 'realtime_voice_page.dart';
 import '../../../../core/storage/database.dart';
 import '../../../../core/providers/database_provider.dart';
+import '../../../a2a/presentation/a2a_agent_panel.dart';
+import '../../../a2a/presentation/a2a_task_monitor.dart';
+import '../../../mcp/presentation/pages/mcp_config_page.dart';
 import 'package:mj_nexus/generated/app_localizations.dart';
 import 'package:mj_nexus/generated/app_localizations_en.dart';
 // voice_settings_page.dart import removed — _speakText now reads directly from SharedPreferences
@@ -1414,7 +1417,10 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
         // 语音对话状态条（当有语音对话活动时显示）
         if (_voiceDialogState != VoiceDialogState.idle)
           _buildVoiceDialogStatusBar(theme),
-        
+
+        // v0.43.0: A2A 任务监控卡片（仅在 A2A 任务运行时显示）
+        const A2ATaskMonitorCard(),
+
         // 消息列表
         Expanded(
           child: Center(
@@ -3082,12 +3088,62 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                   _openRealtimeVoicePage();
                 },
               ),
+              // v0.43.0: A2A 远程 Agent
+              _ToolMenuItem(
+                icon: Icons.psychology_outlined,
+                label: 'A2A 远程 Agent',
+                subtitle: '委派任务给外部 Agent',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showA2APanel(context);
+                },
+              ),
+              // v0.43.0: MCP 工具配置
+              _ToolMenuItem(
+                icon: Icons.extension_outlined,
+                label: 'MCP 工具',
+                subtitle: '管理 In-App / HTTP MCP 服务器',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showMcpPanel(context);
+                },
+              ),
             ],
           ),
         ),
       );
     },
   );
+  }
+
+  /// v0.43.0: 显示 A2A Agent 面板
+  void _showA2APanel(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          child: const A2AAgentPanel(),
+        ),
+      ),
+    );
+  }
+
+  /// v0.43.0: 显示 MCP 配置页
+  void _showMcpPanel(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const McpConfigPage(),
+      ),
+    );
   }
 
   /// 显示搜索模式选择底部弹窗
