@@ -877,6 +877,31 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
   String? _translatedText;
   bool _isTranslating = false;
 
+  // v0.44.0: MessageParser 结果缓存（LRU，容量 50）
+  // key: '${messageId}_${content.hashCode}'
+  // value: ParsedMessage
+  // 避免每次 build 重复正则扫描相同消息
+  static final Map<String, ParsedMessage> _parseCache = {};
+  static const int _maxCacheSize = 50;
+
+  /// v0.44.0: 查询或填充解析缓存（LRU）
+  ParsedMessage _parseWithCache(String cacheKey, String content) {
+    final cached = _parseCache[cacheKey];
+    if (cached != null) {
+      // LRU: 移到末尾（最近使用）
+      _parseCache.remove(cacheKey);
+      _parseCache[cacheKey] = cached;
+      return cached;
+    }
+    final parsed = MessageParser.parse(content);
+    _parseCache[cacheKey] = parsed;
+    // LRU 淘汰最久未用
+    if (_parseCache.length > _maxCacheSize) {
+      _parseCache.remove(_parseCache.keys.first);
+    }
+    return parsed;
+  }
+
   /// 检测文本是否主要为英文
   bool _isMainlyEnglish(String text) {
     final cleaned = text.replaceAll(RegExp(r'[\s\d\p{P}]', unicode: true), '');
@@ -927,7 +952,9 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final content = widget.message.content as String? ?? '';
-    final parsed = MessageParser.parse(content);
+    // v0.44.0: 优先查缓存，避免重复正则扫描
+    final cacheKey = '${widget.message.id}_${content.hashCode}';
+    final parsed = _parseWithCache(cacheKey, content);
     final showTranslate = _isMainlyEnglish(parsed.mainContent);
 
     return Column(

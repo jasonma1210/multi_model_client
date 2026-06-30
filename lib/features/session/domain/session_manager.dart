@@ -281,6 +281,30 @@ class SessionManager implements ISessionManager {
     ));
   }
 
+  // v0.43.0: 更新指定消息的内容（用于 A2A 流式回复占位消息的回填）
+  Future<void> updateMessageContent(String messageId, String content) async {
+    await _messageRepository.updateMessageContent(messageId, content);
+    final updated = _currentState.messages
+        .map((m) => m.id == messageId
+            ? Message(
+                id: m.id,
+                sessionId: m.sessionId,
+                role: m.role,
+                content: content,
+                type: m.type,
+                hasImages: m.hasImages,
+                tokenCount: m.tokenCount,
+                toolCallInfo: m.toolCallInfo,
+                thinking: m.thinking,
+                thinkingTokens: m.thinkingTokens,
+                showThinking: m.showThinking,
+                createdAt: m.createdAt,
+              )
+            : m)
+        .toList();
+    _updateState(_currentState.copyWith(messages: updated));
+  }
+
   // Get messages for active session
   Future<List<Message>> getMessages() async {
     if (_currentState.activeSession == null) {
@@ -366,6 +390,15 @@ class _SessionStateNotifier extends StateNotifier<SessionState> {
   _SessionStateNotifier(this._manager) : super(_manager.currentState) {
     _sub = _manager.sessionStateStream.listen((s) => state = s);
   }
+
+  // v0.43.0: 转发 SessionManager 方法给 Riverpod 调用方
+  Future<void> addMessage(String role, String content) =>
+      _manager.addMessage(role, content);
+
+  Future<void> updateMessageContent(String messageId, String content) =>
+      _manager.updateMessageContent(messageId, content);
+
+  Future<void> refreshCurrentSession() => _manager.refreshCurrentSession();
 
   @override
   void dispose() {

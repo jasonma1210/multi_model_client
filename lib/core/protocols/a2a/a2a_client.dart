@@ -5,10 +5,13 @@
 // 传输：HTTP POST（同步） + SSE（流式，含 Last-Event-ID 续传）
 //
 // 移动端关键能力：
-// 1. 心跳检测：服务端超过 30s 无事件则视为断开
-// 2. 指数退避自动重连：3s -> 6s -> 12s -> 24s -> 30s (capped)
+// 1. 心跳检测：服务端超过 heartbeatTimeout 无事件则视为断开
+// 2. 指数退避自动重连：initialBackoff → maxBackoff (含 jitter 防止雪崩)
 // 3. Last-Event-ID 续传：SSE 协议原生支持，断线后从最后收到的事件 ID 继续
 // 4. 优雅关闭：cancel() 后停止重连
+// 5. 重连状态事件：通过 A2AStreamSubscription.events 监听（reconnecting/connected/closed）
+// 6. 可重试错误分类：网络/超时/5xx 重试，4xx 立即失败
+// 7. 暂停/恢复：pause() / resume() 用于移动端网络切换场景
 
 import 'dart:async';
 import 'dart:convert';
@@ -45,14 +48,55 @@ class A2AReconnectConfig {
   /// 心跳超时：超过这个时间没收到任何事件就视为断开
   final Duration heartbeatTimeout;
 
+  /// jitter 比例（0.0 - 1.0），用于防止雷鸣群
+  final double jitterRatio;
+
+  /// 连接建立后的空闲超时
+  final Duration idleTimeout;
+
   const A2AReconnectConfig({
     this.initialBackoff = const Duration(seconds: 3),
     this.maxBackoff = const Duration(seconds: 30),
     this.maxRetries = 0,
     this.heartbeatTimeout = const Duration(seconds: 45),
+    this.jitterRatio = 0.3,
+    this.idleTimeout = const Duration(seconds: 120),
   });
 
   static const defaultConfig = A2AReconnectConfig();
+}
+
+/// 重连状态（用于 UI 反馈）
+enum A2AReconnectState {
+  /// 正在连接
+  connecting,
+
+  /// 已连接
+  connected,
+
+  /// 等待重连
+  reconnecting,
+
+  /// 已关闭（最终态）
+  closed,
+}
+
+/// A2A 重连状态事件（与业务事件 A2AStreamEvent 分开传输）
+class A2AReconnectEvent {
+  final A2AReconnectState state;
+  final int attempt;
+  final Duration? nextBackoff;
+  final String? reason;
+
+  const A2AReconnectEvent({
+    required this.state,
+    this.attempt = 0,
+    this.nextBackoff,
+    this.reason,
+  });
+
+  @override
+  String toString() => 'A2AReconnectEvent($state, attempt=$attempt, backoff=$nextBackoff, reason=$reason)';
 }
 
 /// A2A 客户端
@@ -61,6 +105,7 @@ class A2AClient {
   final Dio _dio;
   final Map<String, String> _headers;
   final A2AReconnectConfig _reconnectConfig;
+  final math.Random _random = math.Random();
 
   A2AClient({
     required this.agentUrl,
@@ -73,6 +118,9 @@ class A2AClient {
           'Content-Type': 'application/json',
           if (apiKey != null) 'Authorization': 'Bearer $apiKey',
         };
+
+  /// 暴露 reconnect config（用于 UI 展示）
+  A2AReconnectConfig get reconnectConfig => _reconnectConfig;
 
   // === 同步 API ===
 
@@ -154,7 +202,7 @@ class A2AClient {
   ///
   /// 内部会处理：
   /// - 心跳超时
-  /// - 断线自动重连（指数退避）
+  /// - 断线自动重连（指数退避 + jitter）
   /// - Last-Event-ID 续传
   ///
   /// 取消订阅：调用返回的 [A2AStreamSubscription].cancel()
@@ -195,66 +243,114 @@ class A2AClient {
     required String method,
     required Map<String, dynamic> params,
   }) {
-    final controller = StreamController<A2AStreamEvent>.broadcast();
+    final businessController = StreamController<A2AStreamEvent>.broadcast();
+    final reconnectController = StreamController<A2AReconnectEvent>.broadcast();
     final state = _StreamState();
     bool cancelled = false;
+    bool paused = false;
 
     Timer? reconnectTimer;
     Timer? heartbeatTimer;
+    Timer? idleTimer;
     StreamSubscription<String>? currentSub;
     CancelToken? cancelToken;
+
+    void emitReconnect(A2AReconnectEvent event) {
+      if (reconnectController.isClosed) return;
+      reconnectController.add(event);
+    }
 
     // 使用 late 变量避开 Dart 局部函数前向引用问题
     late Future<void> Function({String? lastEventId}) connect;
 
-    void scheduleReconnect() {
-      if (cancelled) return;
+    void scheduleReconnect(String reason) {
+      if (cancelled || paused) return;
       if (_reconnectConfig.maxRetries > 0 &&
           state.retryAttempt >= _reconnectConfig.maxRetries) {
-        controller.addError(
+        emitReconnect(A2AReconnectEvent(
+          state: A2AReconnectState.closed,
+          attempt: state.retryAttempt,
+          reason: '超过最大重试次数（${_reconnectConfig.maxRetries}）',
+        ));
+        businessController.addError(
           A2AStreamException('超过最大重试次数（${_reconnectConfig.maxRetries}）'),
         );
-        controller.close();
+        businessController.close();
         return;
       }
-      final backoffMs = math.min(
+      final baseMs = math.min(
         _reconnectConfig.initialBackoff.inMilliseconds *
             math.pow(2, state.retryAttempt).toInt(),
         _reconnectConfig.maxBackoff.inMilliseconds,
       );
+      // jitter: [base * (1 - r), base * (1 + r)]
+      final jitterMs = _reconnectConfig.jitterRatio > 0
+          ? (baseMs * _reconnectConfig.jitterRatio * (_random.nextDouble() * 2 - 1)).round()
+          : 0;
+      final backoffMs = (baseMs + jitterMs).clamp(0, _reconnectConfig.maxBackoff.inMilliseconds);
       state.retryAttempt++;
+      final backoff = Duration(milliseconds: backoffMs);
       debugPrint(
-        '[A2A] 将在 ${backoffMs}ms 后重连 (第 ${state.retryAttempt} 次)，Last-Event-ID: ${state.lastEventId}',
+        '[A2A] 将在 ${backoff.inMilliseconds}ms 后重连 (第 ${state.retryAttempt} 次)，Last-Event-ID: ${state.lastEventId}, reason: $reason',
       );
+      emitReconnect(A2AReconnectEvent(
+        state: A2AReconnectState.reconnecting,
+        attempt: state.retryAttempt,
+        nextBackoff: backoff,
+        reason: reason,
+      ));
       reconnectTimer?.cancel();
-      reconnectTimer = Timer(Duration(milliseconds: backoffMs), () {
-        if (!cancelled) connect(lastEventId: state.lastEventId);
+      reconnectTimer = Timer(backoff, () {
+        if (!cancelled && !paused) connect(lastEventId: state.lastEventId);
       });
     }
 
     void startHeartbeat() {
       heartbeatTimer?.cancel();
       heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-        if (cancelled) return;
+        if (cancelled || paused) return;
         final elapsed = DateTime.now().difference(state.lastEventTime);
         if (elapsed > _reconnectConfig.heartbeatTimeout) {
           debugPrint('[A2A] heartbeat timeout (${elapsed.inSeconds}s)，触发重连');
           currentSub?.cancel();
-          scheduleReconnect();
+          scheduleReconnect('heartbeat-timeout');
         }
       });
     }
 
+    void startIdleTimer() {
+      idleTimer?.cancel();
+      idleTimer = Timer(_reconnectConfig.idleTimeout, () {
+        if (cancelled || paused) return;
+        // 长时间无事件主动断开触发重连（保持 Last-Event-ID 续传）
+        debugPrint('[A2A] idle timeout (${_reconnectConfig.idleTimeout.inSeconds}s)，触发 keep-alive 重连');
+        currentSub?.cancel();
+        scheduleReconnect('idle-keep-alive');
+      });
+    }
+
+    void resetAllTimers() {
+      state.lastEventTime = DateTime.now();
+      startHeartbeat();
+      startIdleTimer();
+    }
+
     connect = ({String? lastEventId}) async {
-      if (cancelled) return;
+      if (cancelled || paused) return;
       cancelToken?.cancel('reconnecting');
       cancelToken = CancelToken();
+
+      emitReconnect(A2AReconnectEvent(
+        state: A2AReconnectState.connecting,
+        attempt: state.retryAttempt,
+      ));
 
       final body = _buildRpcBody(method, params);
       try {
         final headers = <String, String>{
           ..._headers,
           'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache',
           if (lastEventId != null) 'Last-Event-ID': lastEventId,
         };
         final response = await _dio.post<ResponseBody>(
@@ -268,71 +364,134 @@ class A2AClient {
           cancelToken: cancelToken,
         );
 
-        if (cancelled) return;
+        if (cancelled || paused) return;
         state.connected = true;
         state.retryAttempt = 0;
+        state.receivedEnd = false;
+        emitReconnect(const A2AReconnectEvent(state: A2AReconnectState.connected));
 
-        startHeartbeat();
+        resetAllTimers();
 
         final lineStream = response.data!.stream
             .map((chunk) => utf8.decode(chunk))
             .transform(const LineSplitter());
         currentSub = lineStream.listen(
           (line) {
-            if (cancelled) return;
+            if (cancelled || paused) return;
             _handleSseLine(
               line,
               state: state,
-              controller: controller,
+              controller: businessController,
             );
             // 收到事件，重置心跳
-            startHeartbeat();
+            resetAllTimers();
           },
           onError: (e, st) {
             debugPrint('[A2A] stream error: $e');
             state.connected = false;
-            if (!cancelled) scheduleReconnect();
+            if (!cancelled && !paused) scheduleReconnect('stream-error: $e');
           },
           onDone: () {
             debugPrint('[A2A] stream done');
             state.connected = false;
-            if (!state.receivedEnd && !cancelled) {
-              scheduleReconnect();
+            if (!state.receivedEnd && !cancelled && !paused) {
+              scheduleReconnect('stream-done-without-end');
+            } else if (state.receivedEnd) {
+              emitReconnect(const A2AReconnectEvent(state: A2AReconnectState.closed, reason: 'completed'));
             }
           },
           cancelOnError: true,
         );
       } on DioException catch (e) {
-        if (cancelled) return;
+        if (cancelled || paused) return;
         debugPrint('[A2A] connect error: ${e.message}');
         state.connected = false;
-        if (e.type != DioExceptionType.cancel) {
-          scheduleReconnect();
+        if (e.type == DioExceptionType.cancel) return;
+        if (!_isRetryableDioError(e)) {
+          // 不可重试错误：直接关闭
+          emitReconnect(A2AReconnectEvent(
+            state: A2AReconnectState.closed,
+            reason: 'non-retryable: ${e.type}',
+          ));
+          businessController.addError(A2AStreamException('A2A 不可重试错误: ${e.message}'));
+          await businessController.close();
+          return;
         }
+        scheduleReconnect('dio-${e.type}');
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled || paused) return;
         debugPrint('[A2A] unexpected error: $e');
         state.connected = false;
-        scheduleReconnect();
+        scheduleReconnect('unexpected: $e');
       }
     };
+
+    Future<void> doCancel() async {
+      cancelled = true;
+      paused = false;
+      reconnectTimer?.cancel();
+      heartbeatTimer?.cancel();
+      idleTimer?.cancel();
+      cancelToken?.cancel('user-cancelled');
+      await currentSub?.cancel();
+      if (!businessController.isClosed) {
+        await businessController.close();
+      }
+      if (!reconnectController.isClosed) {
+        emitReconnect(const A2AReconnectEvent(state: A2AReconnectState.closed, reason: 'cancelled'));
+        await reconnectController.close();
+      }
+    }
+
+    void doPause() {
+      if (cancelled) return;
+      paused = true;
+      reconnectTimer?.cancel();
+      heartbeatTimer?.cancel();
+      idleTimer?.cancel();
+      cancelToken?.cancel('paused');
+      currentSub?.cancel();
+      state.connected = false;
+      debugPrint('[A2A] stream paused (lastEventId=${state.lastEventId})');
+    }
+
+    void doResume() {
+      if (cancelled || !paused) return;
+      paused = false;
+      state.retryAttempt = 0; // 用户主动恢复时重置重试计数
+      debugPrint('[A2A] stream resuming from lastEventId=${state.lastEventId}');
+      connect(lastEventId: state.lastEventId);
+    }
 
     // 启动第一次连接
     connect();
 
     return A2AStreamSubscription._(
-      controller: controller,
-      cancel: () async {
-        cancelled = true;
-        reconnectTimer?.cancel();
-        heartbeatTimer?.cancel();
-        cancelToken?.cancel('user-cancelled');
-        await currentSub?.cancel();
-        if (!controller.isClosed) {
-          await controller.close();
-        }
-      },
+      businessController: businessController,
+      reconnectController: reconnectController,
+      cancel: doCancel,
+      pause: doPause,
+      resume: doResume,
     );
+  }
+
+  /// 判断 Dio 错误是否可重试
+  bool _isRetryableDioError(DioException e) {
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+      case DioExceptionType.connectionError:
+      case DioExceptionType.unknown:
+        return true;
+      case DioExceptionType.badCertificate:
+      case DioExceptionType.cancel:
+        return false;
+      case DioExceptionType.badResponse:
+        final code = e.response?.statusCode ?? 0;
+        // 5xx 和 408/429 重试，其他 4xx 立即失败
+        return code >= 500 || code == 408 || code == 429;
+    }
   }
 
   void _handleSseLine(
@@ -351,6 +510,8 @@ class A2AClient {
       state.eventType = line.substring(6).trim();
       return;
     }
+    // SSE 注释行（心跳），忽略
+    if (line.startsWith(':')) return;
     if (!line.startsWith('data:')) return;
     final data = line.substring(5).trim();
     if (data.isEmpty || data == '[DONE]') return;
@@ -361,7 +522,7 @@ class A2AClient {
       if (event is A2AEndEvent) {
         state.receivedEnd = true;
       }
-      controller.add(event);
+      if (!controller.isClosed) controller.add(event);
     } catch (e) {
       debugPrint('[A2A] parse error: $e, data: $data');
     }
@@ -397,21 +558,47 @@ class A2AClient {
 
 /// SSE 流订阅句柄
 class A2AStreamSubscription {
+  /// 业务事件流（A2AStreamEvent）
   final Stream<A2AStreamEvent> stream;
+
+  /// 重连状态事件流（用于 UI 提示"正在重连..."）
+  final Stream<A2AReconnectEvent> events;
+
+  /// 取消订阅（不可恢复）
   final Future<void> Function() cancel;
 
+  /// 暂停（保留 Last-Event-ID，可 resume）
+  final void Function() pause;
+
+  /// 恢复（从 Last-Event-ID 继续）
+  final void Function() resume;
+
   A2AStreamSubscription._({
-    required StreamController<A2AStreamEvent> controller,
+    required StreamController<A2AStreamEvent> businessController,
+    required StreamController<A2AReconnectEvent> reconnectController,
     required this.cancel,
-  }) : stream = controller.stream;
+    required this.pause,
+    required this.resume,
+  })  : stream = businessController.stream,
+        events = reconnectController.stream;
 
   /// 测试用工厂构造器
   @visibleForTesting
   factory A2AStreamSubscription.test({
     required StreamController<A2AStreamEvent> controller,
+    required StreamController<A2AReconnectEvent>? reconnectController,
     required Future<void> Function() cancel,
+    void Function()? pause,
+    void Function()? resume,
   }) {
-    return A2AStreamSubscription._(controller: controller, cancel: cancel);
+    final rc = reconnectController ?? StreamController<A2AReconnectEvent>.broadcast();
+    return A2AStreamSubscription._(
+      businessController: controller,
+      reconnectController: rc,
+      cancel: cancel,
+      pause: pause ?? () {},
+      resume: resume ?? () {},
+    );
   }
 }
 

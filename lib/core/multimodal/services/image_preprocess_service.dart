@@ -117,6 +117,50 @@ enum ImageProcessErrorCode {
   unsupportedFormat,
 }
 
+/// v0.44.0: 顶层函数 - 在 Isolate 中执行图片处理（compute 要求）
+/// 解码、缩放、编码全部在后台 Isolate 完成，避免阻塞 UI 线程
+/// 参数和返回值用 Map 传递，确保可序列化
+Map<String, dynamic> _processBytesInIsolate(Map<String, dynamic> params) {
+  final bytes = params['bytes'] as Uint8List;
+  final maxLongEdge = params['maxLongEdge'] as int;
+  final outputFormat = params['outputFormat'] as String;
+  final jpegQuality = params['jpegQuality'] as int;
+
+  final image = img.decodeImage(bytes);
+  if (image == null) {
+    throw StateError('Failed to decode image in isolate');
+  }
+
+  // 等比缩放
+  final longEdge = image.width > image.height ? image.width : image.height;
+  img.Image resized = image;
+  if (longEdge > maxLongEdge) {
+    final scale = maxLongEdge / longEdge;
+    final newWidth = (image.width * scale).round();
+    final newHeight = (image.height * scale).round();
+    resized = img.copyResize(image, width: newWidth, height: newHeight);
+  }
+
+  // 编码
+  List<int> encoded;
+  switch (outputFormat) {
+    case 'image/png':
+      encoded = img.encodePng(resized);
+      break;
+    case 'image/jpeg':
+    default:
+      encoded = img.encodeJpg(resized, quality: jpegQuality);
+      break;
+  }
+
+  return {
+    'encodedBytes': Uint8List.fromList(encoded),
+    'width': resized.width,
+    'height': resized.height,
+    'fileSizeBytes': encoded.length,
+  };
+}
+
 /// 图片预处理服务
 class ImagePreprocessService {
   final ImageProcessConfig config;
@@ -135,6 +179,7 @@ class ImagePreprocessService {
   }
 
   /// 从字节数组处理
+  /// v0.44.0: 优先在 Isolate 中处理，避免阻塞 UI 线程；Isolate 失败时回退同步
   Future<ImageProcessResult> processBytes(Uint8List bytes, {String? originalName}) async {
     if (bytes.isEmpty) {
       throw const ImageProcessException('Empty image data', ImageProcessErrorCode.decodeFailed);
@@ -146,9 +191,43 @@ class ImagePreprocessService {
       );
     }
 
+    try {
+      // v0.44.0: 在后台 Isolate 中执行解码/缩放/编码，避免阻塞 UI
+      final result = await compute(
+        _processBytesInIsolate,
+        {
+          'bytes': bytes,
+          'maxLongEdge': config.maxLongEdge,
+          'outputFormat': config.outputFormat,
+          'jpegQuality': config.jpegQuality,
+        },
+      );
+
+      final tokens = _estimateTokens(
+        result['width'] as int,
+        result['height'] as int,
+      );
+
+      return ImageProcessResult(
+        bytes: result['encodedBytes'] as Uint8List,
+        mimeType: config.outputFormat,
+        width: result['width'] as int,
+        height: result['height'] as int,
+        fileSizeBytes: result['fileSizeBytes'] as int,
+        estimatedTokens: tokens,
+        originalName: originalName,
+      );
+    } catch (e) {
+      // fallback: Isolate 不可用或失败时回退到主 Isolate 同步处理
+      debugPrint('[ImagePreprocess] Isolate 失败，回退同步: $e');
+      return _processBytesSync(bytes, originalName: originalName);
+    }
+  }
+
+  /// v0.44.0: 同步处理 fallback（Isolate 不可用时使用，保留原逻辑）
+  Future<ImageProcessResult> _processBytesSync(Uint8List bytes, {String? originalName}) async {
     img.Image? image;
     try {
-      // 解码
       image = img.decodeImage(bytes);
     } catch (e) {
       throw ImageProcessException(
@@ -160,20 +239,12 @@ class ImagePreprocessService {
       throw const ImageProcessException('Failed to decode image', ImageProcessErrorCode.decodeFailed);
     }
 
-    final originalWidth = image.width;
-    final originalHeight = image.height;
-    final originalSize = bytes.length;
-
-    // 缩放
     final resized = _resizeIfNeeded(image);
-
-    // 编码
     final encoded = _encode(resized);
     if (encoded == null) {
       throw const ImageProcessException('Failed to encode image', ImageProcessErrorCode.encodeFailed);
     }
 
-    // 估算 token
     final tokens = _estimateTokens(resized.width, resized.height);
 
     return ImageProcessResult(

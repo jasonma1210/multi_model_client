@@ -30,9 +30,15 @@ import 'package:audio_session/audio_session.dart';
 import 'realtime_voice_page.dart';
 import '../../../../core/storage/database.dart';
 import '../../../../core/providers/database_provider.dart';
+import '../../../../core/protocols/a2a/a2a_client.dart';
+import '../../../../core/multimodal/services/image_preprocess_service.dart';
 import '../../../a2a/presentation/a2a_agent_panel.dart';
 import '../../../a2a/presentation/a2a_task_monitor.dart';
+import '../../../a2a/providers/a2a_providers.dart';
+import '../../../a2a/services/a2a_delegation_service.dart';
 import '../../../mcp/presentation/pages/mcp_config_page.dart';
+import '../../../mcp/presentation/mcp_tool_call_card.dart';
+import '../../../mcp/presentation/pages/mcp_tool_explorer_page.dart';
 import 'package:mj_nexus/generated/app_localizations.dart';
 import 'package:mj_nexus/generated/app_localizations_en.dart';
 // voice_settings_page.dart import removed — _speakText now reads directly from SharedPreferences
@@ -335,6 +341,8 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
   StreamSubscription<String>? _voiceResultSub;
   StreamSubscription<String>? _voiceErrorSub;
   StreamSubscription<String>? _voiceIntermediateSub;
+  // v0.44.0: 振幅节流时间戳，避免高频 setState 导致 UI 卡顿
+  DateTime? _lastAmplitudeUpdate;
   /// 浮窗气泡实时转写文本
   String _voiceBubbleText = '';
   /// 是否正在发送消息（防止重复发送）
@@ -371,6 +379,9 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
   final Set<String> _activeMcpTools = {}; // 当前激活的 MCP 工具
   String? _activeKnowledgeBaseId; // 当前关联的知识库 ID
   List<KnowledgeBase> _knowledgeBases = []; // 可用的知识库列表
+
+  // v0.43.0: A2A 委派服务（按消息流式委派给远程 Agent）
+  A2ADelegationService? _a2aDelegation;
 
   // 文件处理状态
   bool _isProcessingFiles = false;
@@ -419,6 +430,13 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     // 当 sessionId 变化时，重新初始化会话
     if (oldWidget.sessionId != widget.sessionId) {
       debugPrint('[SessionDetail] sessionId 变化: ${oldWidget.sessionId} -> ${widget.sessionId}');
+      // v0.44.0: 先清理定时器和订阅，避免旧会话的回调影响新会话（修复内存泄漏）
+      _contextPollTimer?.cancel();
+      _voiceAmplitudeSub?.cancel();
+      _voiceResultSub?.cancel();
+      _voiceErrorSub?.cancel();
+      _voiceIntermediateSub?.cancel();
+      _lastAmplitudeUpdate = null;
       // 重置状态
       _streamingText = '';
       _isGenerating = false;
@@ -432,6 +450,10 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       _selectedFiles = [];
       // 重新初始化会话
       _initSession();
+      // v0.44.0: 重建上下文轮询定时器（_initSession 不会重建）
+      _contextPollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        _updateContextUsage();
+      });
     }
   }
   
@@ -805,7 +827,13 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     _voiceIntermediateSub?.cancel();
 
     _voiceAmplitudeSub = _asrInputService?.amplitudeStream.listen((amp) {
-      if (mounted) setState(() => _voiceAmplitude = amp);
+      // v0.44.0: 200ms 节流，避免高频 setState 导致 UI 卡顿
+      final now = DateTime.now();
+      if (_lastAmplitudeUpdate == null ||
+          now.difference(_lastAmplitudeUpdate!) >= const Duration(milliseconds: 200)) {
+        _lastAmplitudeUpdate = now;
+        if (mounted) setState(() => _voiceAmplitude = amp);
+      }
     });
 
     // 最终识别结果 → 弹出微信风格可编辑弹出层
@@ -1420,6 +1448,9 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
 
         // v0.43.0: A2A 任务监控卡片（仅在 A2A 任务运行时显示）
         const A2ATaskMonitorCard(),
+
+        // v0.43.0: MCP 工具调用卡片（仅在有调用记录时显示）
+        const McpToolCallCard(),
 
         // 消息列表
         Expanded(
@@ -2269,7 +2300,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
   Widget _buildActiveExpertBanner(ThemeData theme) {
     final expert = _skillDispatcher.getSkill(_activeExpertId!);
     if (expert == null) return const SizedBox.shrink();
-    
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -2294,6 +2325,51 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
             icon: Icon(Icons.close, size: 18, color: theme.colorScheme.onSurfaceVariant),
             onPressed: () => setState(() => _activeExpertId = null),
             tooltip: '取消专家',
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// v0.43.0: 当前激活的 MCP 工具横幅（输入区上方显示）
+  Widget _buildActiveMcpToolsBanner(ThemeData theme) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: theme.colorScheme.secondary.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.extension_outlined,
+            size: 16,
+            color: theme.colorScheme.secondary,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'MCP 工具: ${_activeMcpTools.length} 个已激活',
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSecondaryContainer,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          TextButton.icon(
+            icon: const Icon(Icons.close, size: 14),
+            label: const Text('清除', style: TextStyle(fontSize: 12)),
+            onPressed: () => setState(_activeMcpTools.clear),
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 28),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              visualDensity: VisualDensity.compact,
+            ),
           ),
         ],
       ),
@@ -2462,6 +2538,8 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                 if (_selectedImages.isNotEmpty) _buildImagePreview(theme),
                 // 已选择的文件列表
                 if (_selectedFiles.isNotEmpty) _buildFilePreview(theme),
+                // v0.43.0: 当前激活的 MCP 工具横幅
+                if (_activeMcpTools.isNotEmpty) _buildActiveMcpToolsBanner(theme),
                 // 输入行
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -2489,30 +2567,35 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                     const SizedBox(width: 4),
                     // 右侧：发送按钮（仅文本模式显示，语音模式下隐藏）
                     if (!_isVoiceMode)
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: _isGenerating
-                            ? _ActionButton(
-                                key: const ValueKey('stop'),
-                                icon: Icons.stop,
-                                color: theme.colorScheme.error,
-                                onTap: _stopGeneration,
-                              )
-                            : _ActionButton(
-                                key: const ValueKey('send'),
-                                icon: Icons.send,
-                                color: (_messageController.text.trim().isNotEmpty ||
-                                        _selectedImages.isNotEmpty ||
-                                        _selectedFiles.isNotEmpty)
-                                    ? theme.colorScheme.primary
-                                    : theme.colorScheme.surfaceContainerHighest,
-                                onTap: () => _sendMessage(l10n),
-                                iconColor: (_messageController.text.trim().isNotEmpty ||
-                                        _selectedImages.isNotEmpty ||
-                                        _selectedFiles.isNotEmpty)
-                                    ? theme.colorScheme.onPrimary
-                                    : theme.colorScheme.onSurfaceVariant,
-                              ),
+                      // v0.44.0: 用 ValueListenableBuilder 监听输入框，避免每次文字变化都 setState 重建整棵树
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: _messageController,
+                        builder: (context, value, child) {
+                          final hasInput = value.text.trim().isNotEmpty ||
+                              _selectedImages.isNotEmpty ||
+                              _selectedFiles.isNotEmpty;
+                          return AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: _isGenerating
+                                ? _ActionButton(
+                                    key: const ValueKey('stop'),
+                                    icon: Icons.stop,
+                                    color: theme.colorScheme.error,
+                                    onTap: _stopGeneration,
+                                  )
+                                : _ActionButton(
+                                    key: const ValueKey('send'),
+                                    icon: Icons.send,
+                                    color: hasInput
+                                        ? theme.colorScheme.primary
+                                        : theme.colorScheme.surfaceContainerHighest,
+                                    onTap: () => _sendMessage(l10n),
+                                    iconColor: hasInput
+                                        ? theme.colorScheme.onPrimary
+                                        : theme.colorScheme.onSurfaceVariant,
+                                  ),
+                          );
+                        },
                       ),
                   ],
                 ),
@@ -3108,12 +3191,143 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
                   _showMcpPanel(context);
                 },
               ),
+              // v0.43.0: MCP 工具快捷切换（轻量弹窗）
+              _ToolMenuItem(
+                icon: Icons.tune,
+                label: 'MCP 工具快捷',
+                subtitle: _activeMcpTools.isEmpty
+                    ? '快速启用/停用当前会话的 MCP 工具'
+                    : '${_activeMcpTools.length} 个已激活',
+                isActive: _activeMcpTools.isNotEmpty,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showMcpToolsQuickSheet(context);
+                },
+              ),
+              // v0.43.0: MCP 工具浏览（手动调用工具，调试用）
+              _ToolMenuItem(
+                icon: Icons.build_circle_outlined,
+                label: 'MCP 工具浏览',
+                subtitle: '查看/手动调用 MCP 工具（调试）',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openMcpToolExplorer();
+                },
+              ),
             ],
           ),
         ),
       );
     },
   );
+  }
+
+  /// v0.43.0: MCP 工具快捷切换底部弹窗
+  void _showMcpToolsQuickSheet(BuildContext context) {
+    final theme = Theme.of(context);
+    final sessionState = ref.read(sessionStateProvider);
+    final enabledMcpJson = sessionState.activeSession?.enabledMcpServerIds;
+    final List<String> enabledMcpIds = enabledMcpJson != null && enabledMcpJson.isNotEmpty
+        ? (enabledMcpJson.startsWith('[')
+            ? List<String>.from(jsonDecode(enabledMcpJson))
+            : [enabledMcpJson])
+        : [];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scrollController) => Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.outlineVariant,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(Icons.extension, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Text('MCP 工具快捷切换', style: theme.textTheme.titleMedium),
+                  const Spacer(),
+                  if (_activeMcpTools.isNotEmpty)
+                    TextButton(
+                      onPressed: () {
+                        setState(_activeMcpTools.clear);
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('清除全部'),
+                    ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView(
+                controller: scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                children: [
+                  if (enabledMcpIds.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 36, color: theme.colorScheme.outline),
+                          const SizedBox(height: 12),
+                          Text(
+                            '当前会话未启用任何 MCP 服务器',
+                            style: TextStyle(color: theme.colorScheme.outline),
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton.icon(
+                            icon: const Icon(Icons.settings),
+                            label: const Text('去启用 MCP 服务器'),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _showMcpPanel(context);
+                            },
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ...enabledMcpIds.map((serverId) {
+                      final isActive = _activeMcpTools.contains(serverId);
+                      return SwitchListTile(
+                        title: Text(serverId, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: Text(isActive ? '已激活' : '未激活'),
+                        value: isActive,
+                        onChanged: (v) {
+                          setState(() {
+                            if (v) {
+                              _activeMcpTools.add(serverId);
+                            } else {
+                              _activeMcpTools.remove(serverId);
+                            }
+                          });
+                        },
+                      );
+                    }),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// v0.43.0: 显示 A2A Agent 面板
@@ -3142,6 +3356,15 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => const McpConfigPage(),
+      ),
+    );
+  }
+
+  /// v0.43.0: 打开 MCP 工具浏览页（手动调用 + 调试）
+  void _openMcpToolExplorer() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => McpToolExplorerPage(sessionId: widget.sessionId),
       ),
     );
   }
@@ -3869,6 +4092,150 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     }
   }
 
+  /// v0.43.0: 把消息流式委派给 A2A 远程 Agent
+  ///
+  /// 流程：
+  /// 1. 在 UI 中插入用户消息和占位 AI 气泡
+  /// 2. 启动 A2ADelegationService 流式获取文本
+  /// 3. onDelta 增量更新流式气泡
+  /// 4. onComplete 把累积文本保存为消息入库
+  /// 5. onError 显示错误并清理状态
+  Future<void> _sendA2AMessage(AppLocalizations l10n, {
+    required String agentName,
+    required String text,
+  }) async {
+    final theme = Theme.of(context);
+    final sessionState = ref.read(sessionStateProvider);
+    final session = sessionState.activeSession;
+    if (session == null) {
+      _isSending = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('会话未加载，无法委派 A2A 任务')),
+        );
+      }
+      return;
+    }
+
+    // 图片元数据说明（不直接发送 base64，提示 Agent 用户携带了图片）
+    String finalText = text;
+    if (_selectedImages.isNotEmpty) {
+      finalText = '$text\n\n[用户携带了 ${_selectedImages.length} 张图片]';
+    }
+    if (_selectedFiles.isNotEmpty) {
+      finalText = '$finalText\n\n[用户携带了 ${_selectedFiles.length} 个文件]';
+    }
+
+    // 准备用户消息并入库
+    final List<Map<String, String>> imagesMeta = _selectedImages
+        .map((img) => {'name': img.name, 'path': img.path})
+        .toList();
+
+    // 清空输入
+    _messageController.clear();
+    setState(() {
+      _isGenerating = true;
+      _streamingText = '';
+      _selectedImages = [];
+      _selectedFiles = [];
+    });
+
+    try {
+      // 入库：用户消息
+      await ref.read(sessionStateProvider.notifier).addMessage('user', finalText);
+      // 入库：占位 AI 消息（空内容），并取到它的 ID 用于回填
+      await ref.read(sessionStateProvider.notifier).addMessage('assistant', '');
+      // 重新加载消息列表拿到占位消息 ID
+      await ref.read(sessionStateProvider.notifier).refreshCurrentSession();
+      final state = ref.read(sessionStateProvider);
+      final placeholder = state.messages.isNotEmpty ? state.messages.last : null;
+      final assistantMessageId = placeholder?.id;
+
+      // 通过 A2A 委派服务流式获取
+      _a2aDelegation = A2ADelegationService(ref);
+      final messenger = ScaffoldMessenger.of(context);
+      await _a2aDelegation!.delegate(
+        agentName: agentName,
+        text: finalText,
+        contextId: widget.sessionId,
+        onDelta: (delta) {
+          if (!mounted) return;
+          setState(() {
+            _streamingText += delta;
+          });
+          _scheduleScrollToBottom();
+        },
+        onReconnect: (event) {
+          if (!mounted) return;
+          if (event.state == A2AReconnectState.reconnecting) {
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text('A2A 连接已断开，${event.nextBackoff?.inSeconds ?? 0}s 后重连'),
+                duration: const Duration(milliseconds: 1500),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        },
+        onComplete: (fullText) async {
+          if (!mounted) return;
+          setState(() {
+            _isGenerating = false;
+            _streamingText = '';
+          });
+          // 更新 AI 消息内容
+          if (assistantMessageId != null) {
+            await ref.read(sessionStateProvider.notifier).updateMessageContent(
+                  assistantMessageId,
+                  fullText,
+                );
+          }
+          debugPrint('[A2A] 委派完成，回复长度 ${fullText.length} 字符');
+        },
+        onError: (e) async {
+          debugPrint('[A2A] 委派失败: $e');
+          if (!mounted) return;
+          setState(() {
+            _isGenerating = false;
+            _streamingText = '';
+          });
+          if (assistantMessageId != null) {
+            await ref.read(sessionStateProvider.notifier).updateMessageContent(
+                  assistantMessageId,
+                  '⚠️ A2A 委派失败: $e',
+                );
+          }
+          if (mounted) {
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text('A2A 委派失败: $e'),
+                backgroundColor: theme.colorScheme.error,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        },
+      );
+    } catch (e, stack) {
+      debugPrint('[A2A] 委派异常: $e\n$stack');
+      if (mounted) {
+        setState(() {
+          _isGenerating = false;
+          _streamingText = '';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('A2A 委派异常: $e'),
+            backgroundColor: theme.colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      // 释放 subscription（不取消 runtime，让用户继续看到任务监控）
+      await _a2aDelegation?.dispose();
+    }
+  }
+
   Future<void> _sendMessage(AppLocalizations l10n) async {
     final text = _messageController.text.trim();
 
@@ -3892,6 +4259,14 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
       return;
     }
     _isSending = true;
+
+    // v0.43.0: A2A 委派分支 - 选中了远程 Agent 时直接把消息委派给 Agent
+    final selectedAgent = ref.read(selectedA2AAgentProvider);
+    if (selectedAgent != null && selectedAgent.isNotEmpty) {
+      await _sendA2AMessage(l10n, agentName: selectedAgent, text: text);
+      _isSending = false;
+      return;
+    }
 
     // 确保会话已加载完成
     final currentSessionState = ref.read(sessionStateProvider);
@@ -4047,42 +4422,55 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage>
     // 构建包含文件内容的消息内容
     String finalContent = textToSend;
     
-    // 处理图片：读取图片数据并发送给多模态模型
+    // 处理图片：使用 ImagePreprocessService 预处理后 base64 注入对话
     if (imagesToSend.isNotEmpty) {
       final imageDataList = <Map<String, String>>[];
-      for (final img in imagesToSend) {
+      final preprocessor = const ImagePreprocessService();
+      var totalEstimatedTokens = 0;
+      for (final xfile in imagesToSend) {
         try {
-          final bytes = await img.readAsBytes();
-          final base64Data = base64Encode(bytes);
-          final ext = img.name.toLowerCase().split('.').last;
-          String mimeType = 'image/jpeg';
-          if (ext == 'png') {
-            mimeType = 'image/png';
-          } else if (ext == 'gif') {
-            mimeType = 'image/gif';
-          } else if (ext == 'webp') {
-            mimeType = 'image/webp';
-          } else if (ext == 'bmp') {
-            mimeType = 'image/bmp';
-          }
-          
+          final bytes = await xfile.readAsBytes();
+          // v0.43.0: 预处理 - 压缩到 2K JPEG、估算 token
+          final result = await preprocessor.processBytes(bytes, originalName: xfile.name);
+          totalEstimatedTokens += result.estimatedTokens;
+          final base64Data = base64Encode(result.bytes);
           imageDataList.add({
-            'name': img.name,
-            'mimeType': mimeType,
+            'name': xfile.name,
+            'mimeType': result.mimeType,
             'data': base64Data,
+            'width': '${result.width}',
+            'height': '${result.height}',
+            'estimatedTokens': '${result.estimatedTokens}',
           });
-          debugPrint('[图片] 已加载: ${img.name}, 大小: ${bytes.length} bytes');
+          debugPrint(
+            '[图片] 已处理: ${xfile.name}, '
+            '${bytes.length} → ${result.fileSizeBytes} bytes, '
+            '${result.width}x${result.height}, ~${result.estimatedTokens} tokens',
+          );
         } catch (e) {
-          debugPrint('[图片] 加载失败: ${img.name}, 错误: $e');
+          debugPrint('[图片] 处理失败: ${xfile.name}, 错误: $e');
         }
       }
-      
+
       if (imageDataList.isNotEmpty) {
         // 将图片数据编码为 JSON 字符串传递给对话引擎
         final imageJson = json.encode(imageDataList);
         // 在消息中标记有多模态图片数据
         finalContent = '$textToSend\n\n[多模态图片数据:$imageJson]';
-        debugPrint('[图片] 准备发送 ${imageDataList.length} 张图片给模型');
+        debugPrint(
+          '[图片] 准备发送 ${imageDataList.length} 张图片给模型, '
+          '估算 ~$totalEstimatedTokens vision tokens',
+        );
+        // 提示用户大图片的 token 成本
+        if (totalEstimatedTokens > 1500 && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('已压缩 ${imagesToSend.length} 张图片 (~${totalEstimatedTokens} vision tokens)'),
+              duration: const Duration(milliseconds: 1500),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
     }
     

@@ -255,6 +255,15 @@ class A2ATaskRuntime {
   final TaskState state;
   final String? accumulatedText;
   final A2AStreamSubscription? subscription;
+
+  /// 重连状态（用于 UI 提示"正在重连..."）
+  final A2AReconnectState reconnectState;
+
+  /// 当前重试次数
+  final int retryAttempt;
+
+  /// 下一次重连退避时间
+  final Duration? nextBackoff;
   final DateTime createdAt;
 
   const A2ATaskRuntime({
@@ -267,6 +276,9 @@ class A2ATaskRuntime {
     this.state = TaskState.submitted,
     this.accumulatedText,
     this.subscription,
+    this.reconnectState = A2AReconnectState.connecting,
+    this.retryAttempt = 0,
+    this.nextBackoff,
     required this.createdAt,
   });
 
@@ -274,6 +286,9 @@ class A2ATaskRuntime {
     List<A2AStreamEvent>? events,
     TaskState? state,
     String? accumulatedText,
+    A2AReconnectState? reconnectState,
+    int? retryAttempt,
+    Duration? nextBackoff,
   }) {
     return A2ATaskRuntime(
       taskId: taskId,
@@ -285,6 +300,9 @@ class A2ATaskRuntime {
       state: state ?? this.state,
       accumulatedText: accumulatedText ?? this.accumulatedText,
       subscription: subscription,
+      reconnectState: reconnectState ?? this.reconnectState,
+      retryAttempt: retryAttempt ?? this.retryAttempt,
+      nextBackoff: nextBackoff ?? this.nextBackoff,
       createdAt: createdAt,
     );
   }
@@ -297,6 +315,7 @@ class A2ATaskRuntimeNotifier extends StateNotifier<A2ATaskRuntime?> {
 
   late final Ref _ref;
   A2AStreamSubscription? _sub;
+  StreamSubscription<A2AReconnectEvent>? _reconnectSub;
 
   void _appendEvent(A2AStreamEvent event) {
     if (state == null) return;
@@ -320,6 +339,21 @@ class A2ATaskRuntimeNotifier extends StateNotifier<A2ATaskRuntime?> {
     state = state!.copyWith(events: events, state: newState, accumulatedText: acc);
   }
 
+  void _handleReconnectEvent(A2AReconnectEvent event) {
+    if (state == null) return;
+    state = state!.copyWith(
+      reconnectState: event.state,
+      retryAttempt: event.attempt,
+      nextBackoff: event.nextBackoff,
+    );
+    if (event.state == A2AReconnectState.connected) {
+      // 重新连接后，业务事件流会继续投递，状态回到 working
+      if (state!.state == TaskState.submitted || state!.state == TaskState.working) {
+        state = state!.copyWith(state: TaskState.working);
+      }
+    }
+  }
+
   /// 启动 A2A 流式任务
   Future<void> startStreaming({
     required String agentName,
@@ -337,6 +371,12 @@ class A2ATaskRuntimeNotifier extends StateNotifier<A2ATaskRuntime?> {
     final manager = _ref.read(a2aClientManagerProvider);
     final client = manager.getOrCreate(config);
 
+    // 先清理旧订阅
+    await _sub?.cancel();
+    await _reconnectSub?.cancel();
+    _sub = null;
+    _reconnectSub = null;
+
     final taskId = const Uuid().v4();
     state = A2ATaskRuntime(
       taskId: taskId,
@@ -345,6 +385,7 @@ class A2ATaskRuntimeNotifier extends StateNotifier<A2ATaskRuntime?> {
       contextId: contextId,
       userMessageId: userMessageId,
       createdAt: DateTime.now(),
+      reconnectState: A2AReconnectState.connecting,
     );
 
     _sub = client.sendStreamingMessage(
@@ -353,7 +394,7 @@ class A2ATaskRuntimeNotifier extends StateNotifier<A2ATaskRuntime?> {
       parts: [TextPart(text)],
     );
 
-    // 监听事件
+    // 监听业务事件
     _sub!.stream.listen(
       _appendEvent,
       onError: (e) {
@@ -369,26 +410,51 @@ class A2ATaskRuntimeNotifier extends StateNotifier<A2ATaskRuntime?> {
         }
       },
     );
+
+    // 监听重连状态（v0.43.0 增强）
+    _reconnectSub = _sub!.events.listen(
+      _handleReconnectEvent,
+      onError: (e) => debugPrint('[A2ATask] reconnect events error: $e'),
+    );
   }
 
   /// 取消当前任务
   Future<void> cancel() async {
     await _sub?.cancel();
+    await _reconnectSub?.cancel();
+    _sub = null;
+    _reconnectSub = null;
     if (state != null) {
-      state = state!.copyWith(state: TaskState.canceled);
+      state = state!.copyWith(
+        state: TaskState.canceled,
+        reconnectState: A2AReconnectState.closed,
+      );
     }
+  }
+
+  /// 暂停（保留 Last-Event-ID）
+  void pause() {
+    _sub?.pause();
+  }
+
+  /// 恢复（从 Last-Event-ID 继续）
+  void resume() {
+    _sub?.resume();
   }
 
   /// 清理
   void clear() {
     _sub?.cancel();
+    _reconnectSub?.cancel();
     _sub = null;
+    _reconnectSub = null;
     state = null;
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _reconnectSub?.cancel();
     super.dispose();
   }
 }

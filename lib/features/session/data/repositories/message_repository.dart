@@ -39,6 +39,11 @@ class MessageRepository {
     return await _db.getSessionMessages(sessionId);
   }
 
+  /// v0.43.0: 更新消息内容（用于 A2A 流式回复回填）
+  Future<void> updateMessageContent(String messageId, String content) async {
+    await _db.updateMessageContent(messageId, content);
+  }
+
   Future<void> deleteSessionMessages(String sessionId) async {
     await _db.deleteSessionMessages(sessionId);
   }

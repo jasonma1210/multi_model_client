@@ -1,11 +1,12 @@
 // v0.43.0 实现 A2A 任务监控 UI
 //
 // 用途：在 ChatPage 中显示 A2A 任务的实时状态
-// 展示：当前状态、累积文本、已收到事件数
+// 展示：当前状态、累积文本、已收到事件数、重连状态
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/protocols/a2a/a2a_client.dart';
 import '../../../core/protocols/a2a/a2a_protocol.dart';
 import '../providers/a2a_providers.dart';
 
@@ -77,6 +78,12 @@ class A2ATaskMonitorCard extends ConsumerWidget {
                 ),
             ],
           ),
+          // v0.43.0: 重连状态条
+          if (task.reconnectState == A2AReconnectState.reconnecting)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: _ReconnectBanner(task: task),
+            ),
           if (task.accumulatedText != null && task.accumulatedText!.isNotEmpty) ...[
             const SizedBox(height: 8),
             Container(
@@ -90,12 +97,26 @@ class A2ATaskMonitorCard extends ConsumerWidget {
             ),
           ],
           const SizedBox(height: 4),
-          Text(
-            '${task.events.length} 个事件',
-            style: TextStyle(
-              fontSize: 10,
-              color: theme.colorScheme.outline,
-            ),
+          Row(
+            children: [
+              Text(
+                '${task.events.length} 个事件',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+              if (task.retryAttempt > 0) ...[
+                const SizedBox(width: 8),
+                Text(
+                  '已重试 ${task.retryAttempt} 次',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
@@ -243,5 +264,48 @@ class _StatusIconState extends State<_StatusIcon>
       default:
         return Colors.grey;
     }
+  }
+}
+
+/// v0.43.0: 重连状态横幅
+class _ReconnectBanner extends StatelessWidget {
+  final A2ATaskRuntime task;
+  const _ReconnectBanner({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final backoff = task.nextBackoff;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 12, height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              valueColor: AlwaysStoppedAnimation(Colors.orange),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              backoff != null
+                  ? '连接已断开，${(backoff.inMilliseconds / 1000).toStringAsFixed(1)}s 后重连（第 ${task.retryAttempt} 次）'
+                  : '正在重连（第 ${task.retryAttempt} 次）...',
+              style: TextStyle(
+                fontSize: 11,
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

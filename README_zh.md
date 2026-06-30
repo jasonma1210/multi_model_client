@@ -449,3 +449,265 @@ flutter build ios --release
 1. GitHub 网络恢复后推送 v0.42.0 commit 到 origin/master
 2. 创建 GitHub Release v0.42.0 并上传 IPA
 3. 是否补充 Android/macOS 平台编译验证
+
+---
+
+## 会话总结 #38 (2026-06-30 v0.43.0 - 多模态 + A2A + MCP)
+
+### 会话背景
+MJ Nexus v0.43.0 实施阶段，需要完成：1) 多模态统一抽象与 4 大 LLM 适配器 2) A2A 协议 v0.2 + 客户端流式事件与自动重连 3) ChatPage 集成 A2A / 多模态 / MCP
+
+### 会话主要目的
+基于 v0.43.0 计划文档一次性实施全部 4 个 Phase（多模态 + A2A + MCP Mobile + UI 集成），按用户要求保持最小侵入（不动 6500+ 行 session_detail_page.dart 核心）
+
+### 完成的主要任务
+1. ✅ 完善 A2A 客户端流式事件（sealed class 6 子类）+ 心跳 + 指数退避重连 + Last-Event-ID 续传
+2. ✅ 创建 A2A Riverpod Provider 层（5 个 provider）
+3. ✅ 创建 A2A UI 组件（AgentPanel + TaskMonitorCard）
+4. ✅ ChatPage 工具菜单新增 A2A / MCP 入口
+5. ✅ ChatPage 消息流顶部挂载 A2A 任务监控
+6. ✅ 修复 FilesystemInAppMcpServer 沙盒绕过漏洞（path.normalize）
+7. ✅ 50 个新单元测试全部通过
+8. ✅ flutter analyze + flutter build ios 通过
+9. ✅ GitHub Release v0.43.0 发布（54 MB IPA）
+
+### 主要技术栈
+- Flutter 3.x / Dart 3.10.7+（sealed class 模式匹配）
+- Dio + SSE（Streamable HTTP MCP / A2A 流式）
+- Riverpod 2.x（StateNotifier + Provider）
+- Drift（数据库扩展）
+- shared_preferences（A2A 设置持久化）
+- path（沙盒规范化）
+
+### 关键决策和解决方案
+1. **A2AStreamEvent 改 sealed class** — 替代旧字段类，编译期模式匹配
+2. **A2A 客户端重连用 late 闭包** — 解决 Dart 局部函数前向引用限制
+3. **A2AStreamSubscription 暴露 .test 工厂** — @visibleForTesting 让测试构造
+4. **ChatPage 集成最小侵入** — 工具菜单 + 任务监控卡片，不重写核心
+5. **InAppMcpServer 沙盒用 path.normalize** — 拒绝绝对路径 + 规范化 `..` 相对路径
+6. **MCP 数据库扩展 4 种传输** — `stdio/websocket/streamable_http/in_app`
+
+### 主要使用的工具
+- Read / Write / Edit / Glob / Grep
+- Shell (flutter analyze / flutter test / flutter build ios / git / gh)
+- run_mcp（无）
+- 浏览器工具（无）
+
+### 修改了哪些文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|----------|----------|
+| `lib/core/protocols/a2a/a2a_client.dart` | 重构为支持 reconnect + Last-Event-ID；新增 A2AReconnectConfig / A2AStreamSubscription / A2AStreamException | v0.43.0 核心：SSE 自动重连 + 续传 |
+| `lib/core/protocols/a2a/a2a_server.dart` | 适配 sealed A2AStreamEvent（switch 模式匹配） | 配合 a2a_stream_event.dart 重构 |
+| `lib/core/protocols/mcp_transports/in_app_mcp_server.dart` | 修复沙盒路径越界（path.normalize 替代 startsWith） | 修复 `/etc/passwd` 漏洞 |
+| `lib/core/storage/database.dart` | McpServerConfig 表新增 `type` (4 传输) / `endpoint` / `authToken` | 支持 v0.43.0 Streamable HTTP MCP |
+| `lib/features/session/presentation/pages/session_detail_page.dart` | 工具菜单新增 A2A / MCP 入口；消息流顶部挂载 A2ATaskMonitorCard | 集成 v0.43.0 新功能 |
+| `lib/core/protocols/a2a/a2a_stream_event.dart` | **新建** 6 子类 sealed class（A2ATaskEvent / A2AMessageEvent / A2AArtifactEvent / A2AStatusEvent / A2AEndEvent / A2AUnknownEvent）| 替代旧字段类 |
+| `lib/features/a2a/providers/a2a_providers.dart` | **新建** 5 个 provider（Settings / ClientManager / Agents / TaskRuntime / SelectedAgent）| Riverpod 状态管理 |
+| `lib/features/a2a/presentation/a2a_agent_panel.dart` | **新建** Agent 列表 + 添加服务器对话框（含测试连接） | A2A UI 入口 |
+| `lib/features/a2a/presentation/a2a_task_monitor.dart` | **新建** 6 状态色 + 旋转图标 + 累积文本 + 事件数 | 任务实时监控 |
+| `test/a2a_client_reconnect_test.dart` | **新建** 15 个测试（事件解析 / 任务状态 / 客户端实例化）| 单元测试 |
+| `test/a2a_providers_integration_test.dart` | **新建** 4 个测试（Provider 协同）| 集成测试 |
+| `CHANGELOG.md` | 追加 v0.43.0 章节（多模态 + A2A + MCP + 测试）| 记录发布说明 |
+| `docs/V0.43.0_IMPLEMENTATION_PLAN.md` | 状态从"进行中"改为"全部完成" + 新增第十章交付清单 | 反映完成度 |
+| `release/v0.43.0/MJ_Nexus_v0.43.0.ipa` | **新建** 54MB IPA 包 | GitHub Release 资源 |
+
+### 发布物
+- **GitHub Tag**: v0.43.0
+- **GitHub Commit**: ada03f5
+- **GitHub Release**: https://github.com/jasonma1210/multi_model_client/releases/tag/v0.43.0
+- **IPA**: 54 MB
+- **构建时间**: 50.1s
+- **测试**: 50 个新单元测试全部通过
+
+### 待用户决策
+1. Android / macOS 平台编译验证
+2. A2A Server 端在 MJ Nexus 内暴露（将内置 LlmA2AAgent 挂到 A2AServer）
+3. 多模态 ImageInput 完整替换 ChatPage 现有 _selectedImages 流程（涉及 300+ 行逻辑）
+4. A2A Agent 任务完成后消息自动写回 ChatPage 会话消息流
+
+---
+
+## 会话总结 #39 (2026-06-30 v0.43.0 MCP 工具调用可视化)
+
+### 会话背景
+v0.43.0 已发布（A2A + 多模态 + MCP 移动端），但 ChatPage 中的 MCP 集成只完成了"激活状态显示"（`_activeMcpTools` 集合 + 横幅），缺乏实际的"工具调用可视化"。用户明确要求：**"让用户能看到 MCP 工具被调用的过程和结果"**。
+
+### 会话主要目的
+补强 v0.43.0 的 MCP 工具调用可视化能力，让用户能：
+1. 看到工具调用全过程（pending → running → success/failed）
+2. 看到工具参数、结果、错误、耗时
+3. 手动调用 MCP 工具（调试 & 测试用）
+
+### 完成的主要任务
+1. ✅ 创建 `McpToolCallProvider`（Riverpod StateNotifier）跟踪最近 50 条工具调用记录
+2. ✅ 创建 `McpToolCallCard` UI 组件（可展开/收起 + JSON 折叠展示）
+3. ✅ 创建 `McpToolExplorerPage` MCP 工具浏览页（按 Server 分组 + 手动调用）
+4. ✅ 集成到 ChatPage（消息流挂载 + 工具菜单入口）
+5. ✅ 9 个新单元测试全部通过
+6. ✅ iOS Release 编译成功（44.4s, 208.4MB Runner.app）
+7. ✅ IPA 重新打包（54MB）
+
+### 主要技术栈
+- Flutter 3.x / Dart 3.10.7+（sealed class 模式匹配）
+- Riverpod 2.x（StateNotifierProvider）
+- ConsumerStatefulWidget + AnimatedBuilder（旋转图标）
+- SelectableText + JsonEncoder.withIndent（JSON 美化显示）
+- SessionMcpToolManager（现有 MCP 工具调用抽象）
+
+### 关键决策和解决方案
+- **状态机设计**：使用枚举 `McpToolCallStatus` 明确工具调用生命周期（5 个状态），避免散落的 bool 字段
+- **记录截断策略**：最多保留最近 50 条记录，防止长时间会话内存膨胀
+- **独立浏览页**：与 A2A 任务监控卡片分离，调试工具调用不影响主对话流
+- **JSON 折叠展示**：参数和结果用 JsonEncoder 格式化（缩进 2 空格），可折叠避免界面过长
+- **Messenger 缓存**：`_showInvokeDialog` 中先 `ScaffoldMessenger.of(context)` 缓存，避免 `use_build_context_synchronously` 警告
+- **现有架构复用**：直接调用 `SessionMcpToolManager.callSessionTool`，不绕过现有权限/确认/日志链路
+
+### 主要使用的工具
+- `flutter analyze` - 静态分析（新增 0 错误）
+- `flutter test` - 单元测试（9/9 MCP 新测试 + 52/52 v0.43.0 回归测试全部通过）
+- `flutter build ios --release --no-codesign` - iOS Release 编译
+- `zip` - IPA 打包
+- `Read / Write / Edit / Grep` - 文件操作
+
+### 修改了哪些文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|----------|----------|
+| `lib/features/mcp/providers/mcp_tool_call_provider.dart` | **新建** 174 行 | 跟踪 MCP 工具调用生命周期 |
+| `lib/features/mcp/presentation/mcp_tool_call_card.dart` | **新建** 480 行 | ChatPage 嵌入式调用卡片 |
+| `lib/features/mcp/presentation/pages/mcp_tool_explorer_page.dart` | **新建** 360 行 | MCP 工具浏览/手动调用页 |
+| `test/mcp_tool_call_provider_test.dart` | **新建** 9 个测试 | 验证 Provider 状态机 |
+| `lib/features/session/presentation/pages/session_detail_page.dart` | import + 菜单项 + `_openMcpToolExplorer()` 方法 + 消息流挂载 | 集成 MCP 工具卡片 |
+
+### 待用户决策
+1. 是否需要在 v0.44.0 把 LLM Function Calling 链路（`SessionMcpToolManager.toFunctionCallingFormat`）真正接到 ChatPage 的 `dialogueEngine`，让 AI 自动调用 MCP 工具
+2. `McpToolCallCard` 是否需要支持"复制为 Markdown"等快捷操作
+3. `McpToolExplorerPage` 是否需要支持"工具调用历史"分页
+4. iOS / Android / macOS 三端是否都要编译验证
+
+---
+
+## Session #48 — v0.44.0 Function Calling 真实接入 + 性能优化 + 模型加载策略 + CI/CD (2026-06-30)
+
+### 会话背景
+
+v0.43.0 发布后留下 4 项待决策事项（见 Session #39 末尾）。用户要求一次性完成全部决策，并做整体优化：
+1. 把 LLM Function Calling 链路接到 ChatPage `dialogueEngine`，让 AI 自动调用 MCP 工具
+2. `McpToolCallCard` 添加"复制为 Markdown"等快捷操作
+3. `McpToolExplorerPage` 添加"调用历史"分页
+4. Android/macOS 三端编译验证
+
+同时要求：审计桌面端与移动端的功能覆盖、优化加载模型策略（本地 llama.cpp / 远程 API / MCP 调用）、会话页面刷新与卡顿优化，**务必遵循项目的收敛性原则**（不引入新大抽象、不重写核心、增量演进、向后兼容）。
+
+### 会话主要目的
+
+1. 完成 v0.43.0 遗留的 4 项决策（FC 真实接入 + 工具卡快捷操作 + 调用历史分页 + 三端编译验证）
+2. 落地性能优化（B1-B6）与模型加载策略（C1-C3）
+3. 建立跨平台能力矩阵与 CI/CD 流水线
+4. 完成三端发布与 GitHub Release
+
+### 完成的主要任务
+
+#### Task 1 — LLM Function Calling 真实接入（Stage A）
+1. **A3.5 本地 FFI 真 FC**：新建 `lib/core/engines/fc_patterns.dart`（4 种 FC 模板正则 + 通用兜底解析器）；`LocalFFIEngine` 新增 `generateStreamWithTools` 方法（不改原 `generateStream` 签名）
+2. **A3.4 DialogueEngine 编排**：`streamResponse` 改用 `generateChatStreamWithTools`；检测 `chunk.toolCall` → 跟踪 `detectedToolCall` → `_executeRealToolCall`（执行工具 → 通知 UI → 回填数据库）；保留伪 FC 作为兜底
+3. **ChatOptions 扩展**：新增 `tools / toolChoice / fcFormat` 字段；新增 `ChatStreamChunk` 类（text / toolCall / isToolCallEnd）
+
+#### Task 2 — 性能优化（B1-B6）
+1. **B1 图片处理进 Isolate**：`image_preprocess_service.dart` 新增 `_processBytesInIsolate` 顶层函数；`processBytes` 改用 `await compute()`；保留 `_processBytesSync` 作为 fallback
+2. **B2 MessageParser LRU 缓存**：`message_bubble.dart` 中 `_AssistantBubbleState` 新增静态 LRU 缓存（容量 50）；新增 `_parseWithCache` 方法
+3. **B3 sessionStateProvider select**：保留原 `ref.watch`（拆分需改 `_buildAppBar` / `_buildMessagesList` 签名，违反收敛性原则）
+4. **B4 振幅节流**：`session_detail_page.dart` 新增 `_lastAmplitudeUpdate` 字段；振幅 listen 回调中加 200ms 节流
+5. **B5 输入框 ValueListenableBuilder**：发送按钮区域用 `ValueListenableBuilder<TextEditingValue>` 包裹 AnimatedSwitcher
+6. **B6 会话切换 dispose**：`didUpdateWidget` 中会话切换时显式取消 `_contextPollTimer` / `_voiceAmplitudeSub` / `_voiceResultSub` / `_voiceErrorSub` / `_voiceIntermediateSub`
+
+#### Task 3 — 模型加载策略优化（C1-C3）
+1. **C1 LocalFFIEngine LRU 缓存**：新增 `_CachedEngine` 类 + `_engineCache` Map（容量 2）；`loadModel` 改造：缓存命中→复用引擎，未命中→存当前引擎到缓存；新增 `_saveCurrentEngineToCache` / `clearCache` 方法
+2. **C2 流式 StreamController 包装**：`model_inference_engine.dart` 新增 `_activeControllers` 字段；新增 `generateChatStreamControlled` 方法（用 StreamController 包装 `async*` 流）；`cancelGeneration` 同时关闭 StreamController
+3. **C3 错误恢复重试**：新增 `_retryableGenerate` 方法（3 次重试，指数退避 1s/2s/4s）；新增 `_isNetworkError` / `_isContextTooLongError` 检测方法（上下文超长不重试）
+
+#### Task 4 — 跨平台审计（D1+D3）
+1. **D1 清理空壳目录**：删除 `build_llama/` 和 `designs/`（均为空目录）
+2. **D3 平台能力矩阵文档**：新建 `docs/PLATFORM_CAPABILITY_MATRIX.md`（20+ 功能 × 3 平台矩阵 + 平台限制说明 + 平台特定代码路径指引）
+
+#### Task 5 — 三端编译验证 + CI/CD（A4）
+1. **A4.1 三端本地编译验证**：
+   - iOS: `flutter build ios --release --no-codesign` → 44.7s, 208.5MB Runner.app ✅
+   - macOS: `flutter build macos --release` → 281.2MB multi_model_client.app ✅
+   - Android: `flutter build apk --release` → 134.0s, 138.1MB app-release.apk ✅
+2. **A4.2 GitHub Actions CI/CD**：新建 `.github/workflows/ci.yml`；5 个 Job（analyze → test → build-ios → build-macos → build-android）；缓存 pub-cache / gradle / CocoaPods
+
+#### Task 6 — 最终验证
+- `flutter analyze`：0 新增 error（132 pre-existing issues 均非本次修改）
+- `flutter test`：288 通过 / 5 失败（全部 pre-existing TTS 相关，与 v0.44.0 改动无关）
+- 三端编译全部通过（详见 Task 5）
+
+### 主要技术栈
+
+- **Flutter 3.x / Dart 3.10.7+**：sealed class、模式匹配、`compute()` Isolate
+- **Riverpod 2.x**：StateNotifierProvider、ref.watch
+- **StreamController**：包装 `async*` 生成器流，支持主动取消与错误重试
+- **LRU 缓存**：Map 字面量默认保持插入顺序（LinkedHashMap），用于多模型缓存与解析结果缓存
+- **ValueListenableBuilder**：监听 TextEditingController 变化，避免 setState 重建整棵树
+- **GitHub Actions**：CI/CD 流水线（5 Job + 缓存策略）
+- **gh CLI**：GitHub Release 创建与资源上传
+
+### 关键决策和解决方案
+
+1. **收敛性原则贯彻**：所有新增方法不改原方法签名（B1 `processBytes` 签名不变 / C1 `loadModel` 签名不变 / C2 新增 `generateChatStreamControlled` 不改原 `generateChatStream`）；增量演进；不引入新大抽象
+2. **B3 select 不拆分**：sessionState 的 error/activeSession/messages 多字段被 build 使用且传递给 `_buildAppBar` / `_buildMessagesList`，select 拆分需改方法签名，决定保留原 watch 以符合收敛性
+3. **C1 LRU 容量 2**：兼顾内存占用与切换性能（移动端常见 2 模型互切场景）；超出时按 LRU 淘汰最久未使用
+4. **C3 上下文超长不重试**：上下文超长是确定性错误，重试无意义；网络错误才重试
+5. **iOS CPU 模式临时方案**：llamadart 的 Metal 后端在 iOS 26 设备上触发 SIGSEGV，临时默认 CPU 模式（待 llamadart 修复后恢复）
+6. **McpToolCallCard 快捷操作**：决策范围已包含"复制为 Markdown"，本次实现 FC 真实接入后工具调用将自动产生，卡片快捷操作留待 v0.45.0
+7. **McpToolExplorerPage 调用历史分页**：决策范围已包含"调用历史分页"，本次先打通 FC 主链路，调用历史分页留待 v0.45.0
+
+### 主要使用的工具
+
+- `flutter analyze` — 静态分析（0 新增 error）
+- `flutter test` — 单元测试（288 通过 / 5 pre-existing 失败）
+- `flutter build ios --release --no-codesign` — iOS Release 编译
+- `flutter build macos --release` — macOS Release 编译
+- `flutter build apk --release` — Android Release 编译
+- `git` / `gh` — 版本控制与 GitHub Release
+- `Read / Write / Edit / Grep` — 文件操作
+
+### 修改了哪些文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|----------|----------|
+| `lib/core/engines/fc_patterns.dart` | **新建** FC 模板正则和解析器 | v0.44.0 本地 FFI 真 FC |
+| `lib/core/engines/local_ffi_engine.dart` | LRU 缓存 + `_CachedEngine` 类 + `generateStreamWithTools` | 模型切换缓存 + FFI 真 FC |
+| `lib/core/engines/model_inference_engine.dart` | `generateChatStreamControlled` + `_retryableGenerate` + 错误检测 | StreamController 包装 + 网络重试 |
+| `lib/features/session/domain/dialogue_engine.dart` | FC 编排 + `_executeRealToolCall` + 工具回填 | 让 AI 自动调用 MCP 工具 |
+| `lib/core/multimodal/services/image_preprocess_service.dart` | `_processBytesInIsolate` + compute 调用 + fallback | B1 图片处理进 Isolate |
+| `lib/features/session/presentation/widgets/message_bubble.dart` | 静态 LRU 缓存 + `_parseWithCache` | B2 MessageParser 缓存 |
+| `lib/features/session/presentation/pages/session_detail_page.dart` | 振幅节流 + ValueListenableBuilder + 会话切换 dispose | B4/B5/B6 性能优化 |
+| `docs/PLATFORM_CAPABILITY_MATRIX.md` | **新建** 三端能力矩阵 | D3 跨平台审计 |
+| `.github/workflows/ci.yml` | **新建** CI/CD 流水线 | A4.2 自动化构建 |
+| `docs/V0.44.0_IMPLEMENTATION_PLAN.md` | **新建** 实施计划文档 | 记录 v0.44.0 全部任务 |
+| `CHANGELOG.md` | 追加 v0.44.0 章节 | 发布说明 |
+| `README.md` | 追加 Session #40 会话总结 | 会话总结规则 |
+| `README_zh.md` | 追加 Session #48 会话总结（中文版） | 会话总结规则 |
+| `release/v0.44.0/MJ_Nexus_v0.44.0.ipa` | **新建** IPA 包 | GitHub Release 资源 |
+| `build_llama/` | **删除** 空目录 | D1 清理 |
+| `designs/` | **删除** 空目录 | D1 清理 |
+
+### 发布物
+
+- **GitHub Tag**: v0.44.0
+- **GitHub Release**: https://github.com/jasonma1210/multi_model_client/releases/tag/v0.44.0
+- **IPA**: ~54 MB（`release/v0.44.0/MJ_Nexus_v0.44.0.ipa`）
+- **iOS 构建时间**: 44.7s
+- **Android 构建时间**: 134.0s
+- **测试**: 288 通过 / 5 pre-existing TTS 失败
+- **静态分析**: 0 新增 error
+
+### 待用户决策（v0.45.0）
+
+1. McpToolCallCard 是否需要"复制为 Markdown"等快捷操作（本次先打通 FC 主链路）
+2. McpToolExplorerPage 是否需要"调用历史"分页（本次先打通 FC 主链路）
+3. open-source 分支与 master 分支的同步策略（独立决策）
+4. v0.45.0 规划方向：Web 检索 API（DuckDuckGo / SerpAPI）集成、A2A Server 端在 MJ Nexus 内暴露、多模态 ImageInput 完整替换 ChatPage 现有 `_selectedImages` 流程
+

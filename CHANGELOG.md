@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] - 2026-06-30
+
+### ✨ Added - 新增功能
+
+#### LLM Function Calling 真实接入（Stage A）— P0
+- ✨ **fc_patterns.dart** — 4 种 FC 模板正则（Qwen/Hermes/Llama 3.1/Mistral）+ 通用兜底解析器
+- ✨ **FcPromptTemplates** — 注入工具描述到 System Prompt
+- ✨ **FcOutputParser** — 解析流式输出中的工具调用（含增量 JSON 累积）
+- ✨ **LocalFFIEngine.generateStreamWithTools** — 新增方法（不改原 `generateStream` 签名）
+- ✨ **DialogueEngine FC 编排** — 检测 `chunk.toolCall` → 执行工具 → 通知 UI → 回填数据库
+- ✨ **伪 FC 兜底** — 保留原 `_checkAndExecuteMcpTools` 作为兼容回退路径
+- ✨ **ChatOptions 扩展** — 新增 `tools / toolChoice / fcFormat` 字段（向后兼容）
+- ✨ **ChatStreamChunk** — 统一流式分块（text / toolCall / isToolCallEnd）
+
+#### 跨平台能力矩阵 — P0
+- ✨ **docs/PLATFORM_CAPABILITY_MATRIX.md** — 三端功能覆盖矩阵（20+ 功能 × 3 平台）
+- ✨ 平台限制说明（iOS / Android / macOS）
+- ✨ 平台特定代码路径指引
+- ✨ 已知不支持的功能列表
+
+#### CI/CD 自动化 — P0
+- ✨ **.github/workflows/ci.yml** — GitHub Actions 流水线
+- ✨ 5 个 Job：analyze → test → build-ios → build-macos → build-android
+- ✨ 缓存策略：pub-cache / gradle / CocoaPods
+- ✨ Artifact 上传：Runner.app / multi_model_client.app / app-release.apk
+
+### 🔧 Changed - 改进优化
+
+#### 性能优化（B1-B6）
+- 🔧 **B1 图片处理进 Isolate** — `processBytes` 改用 `compute()`，Isolate 失败时 fallback 到同步实现
+- 🔧 **B2 MessageParser LRU 缓存** — `_AssistantBubbleState` 新增静态缓存（容量 50），避免每次 build 重复正则扫描
+- 🔧 **B4 振幅节流** — 200ms 时间窗口节流，避免高频 setState 导致 UI 卡顿
+- 🔧 **B5 输入框 ValueListenableBuilder** — 发送按钮区域用 `ValueListenableBuilder<TextEditingValue>` 包裹，避免整树重建
+- 🔧 **B6 会话切换 dispose** — `didUpdateWidget` 中显式取消定时器和订阅，修复内存泄漏
+- 🔧 **B3 select 拆分** — 保留原 `ref.watch(sessionStateProvider)`（拆分会违反收敛性原则，需改方法签名）
+
+#### 模型加载策略（C1-C3）
+- 🔧 **C1 LocalFFIEngine LRU 缓存** — `_CachedEngine` 类 + `_engineCache` Map（容量 2）；模型 A→B→A 切换时第二次加载秒命中
+- 🔧 **C2 流式 StreamController 包装** — `generateChatStreamControlled` 方法，支持主动取消；`cancelGeneration` 同时关闭 StreamController
+- 🔧 **C3 网络错误自动重试** — `_retryableGenerate` 方法（3 次重试，指数退避 1s/2s/4s）；上下文超长错误不重试
+- 🔧 **`_isNetworkError` / `_isContextTooLongError`** — 网络错误和上下文超长错误检测方法
+
+### 🗑️ Removed - 移除
+
+- 🗑️ **build_llama/** — 空目录清理
+- 🗑️ **designs/** — 空目录清理
+
+### 📦 Technical Details
+
+- **iOS**: `flutter build ios --release --no-codesign` → 44.7s, 208.5MB Runner.app
+- **macOS**: `flutter build macos --release` → 281.2MB multi_model_client.app
+- **Android**: `flutter build apk --release` → 134.0s, 138.1MB app-release.apk
+- **测试**: 288 通过 / 5 失败（全部 pre-existing TTS 相关，与 v0.44.0 改动无关）
+- **静态分析**: 0 新增 error（132 pre-existing issues 均非本次修改）
+
+### ⚠️ Known Issues
+
+- 5 个 pre-existing TTS 测试失败（`tts_style_parser_v11_test.dart` / `tts_service_test.dart`，与本次改动无关）
+- iOS 平台仍默认使用 CPU 模式（待 llamadart 修复 Metal SIGSEGV 问题后恢复 Metal 加速）
+- B3 sessionStateProvider select 未拆分（保持收敛性，避免改方法签名）
+
+### 🔗 Migration Notes
+
+- **向后兼容**：所有新增方法未改原方法签名，旧调用方无需修改
+- **数据库**：v0.44.0 无 schema 变更（v0.42.0 已完成双写迁移）
+- **配置**：`ChatOptions` 新增字段为可选，旧代码无需显式传入
+
 ## [0.43.0] - 2026-06-30
 
 ### ✨ Added - 新增功能

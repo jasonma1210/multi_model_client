@@ -30,7 +30,8 @@ import '../services/hardware_compatibility_checker.dart';
 import '../services/hardware_feature_detector.dart';
 import '../services/model_path_cache.dart';
 import '../services/security_bookmark_service.dart';
-import 'model_inference_engine.dart' show ChatMessage, ChatOptions;
+import 'model_inference_engine.dart' show ChatMessage, ChatOptions, ChatStreamChunk;
+import 'fc_patterns.dart';
 
 /// 预编译的正则表达式 - 性能优化
 /// 避免每次调用 _cleanThinkTags 时重复编译正则
@@ -96,6 +97,32 @@ String _cleanThinkTags(String text) {
 ///
 /// 使用 llamadart 的 LlamaEngine + ChatSession API
 /// 推理在后台执行，不阻塞 UI 线程
+/// v0.44.0: 缓存的引擎实例（LRU 缓存项）
+/// 用于多模型切换时保留最近使用的模型，避免重复加载
+class _CachedEngine {
+  final LlamaEngine engine;
+  final ChatSession? chatSession;
+  final String modelPath;
+  final LocalModelParams? params;
+  final int? contextMaxSize;
+  final bool? visionSupported;
+  DateTime lastUsed;
+
+  _CachedEngine({
+    required this.engine,
+    required this.chatSession,
+    required this.modelPath,
+    required this.params,
+    required this.contextMaxSize,
+    required this.visionSupported,
+    required this.lastUsed,
+  });
+
+  Future<void> dispose() async {
+    await engine.dispose();
+  }
+}
+
 class LocalFFIEngine {
   static final LocalFFIEngine _instance = LocalFFIEngine._();
   static LocalFFIEngine get instance => _instance;
@@ -132,6 +159,11 @@ class LocalFFIEngine {
 
   // ★★★ 缓存加载时的参数（用于自动重载）★★★
   LocalModelParams? _cachedParams;
+
+  // v0.44.0: LRU 缓存 - 保留最近使用的模型，避免频繁切换时重复加载
+  // Map 字面量默认保持插入顺序（LinkedHashMap），可用于 LRU 淘汰
+  final Map<String, _CachedEngine> _engineCache = {};
+  static const int _maxCacheSize = 2;
 
   // ★★★ 安全模式：上次加载是否崩溃 ★★★
   bool _lastLoadCrashed = false;
@@ -192,8 +224,40 @@ class LocalFFIEngine {
     // ★★★ 加载前自动优化系统内存 ★★★
     await _optimizeSystemMemory();
 
-    // 如果已有模型，先卸载
-    await dispose();
+    // v0.44.0: LRU 缓存命中检查 - 避免频繁切换时重复加载
+    final cached = _engineCache[modelPath];
+    if (cached != null) {
+      debugPrint('[LocalFFIEngine] v0.44.0: ✅ 缓存命中，复用已加载的引擎: $modelPath');
+      // LRU: 移到末尾（最近使用）
+      _engineCache.remove(modelPath);
+      cached.lastUsed = DateTime.now();
+      _engineCache[modelPath] = cached;
+      // 设置当前激活引擎
+      _llamaEngine = cached.engine;
+      _chatSession = cached.chatSession;
+      _currentModelPath = cached.modelPath;
+      _cachedParams = cached.params;
+      _contextMaxSize = cached.contextMaxSize;
+      _visionSupported = cached.visionSupported;
+      _isInitialized = true;
+      _contextInvalidated = false;
+      return;
+    }
+
+    // v0.44.0: 将当前引擎存入缓存（如果有效且与目标不同）
+    if (_llamaEngine != null && _currentModelPath != null && _currentModelPath != modelPath) {
+      _saveCurrentEngineToCache();
+      // 清除引用（资源已在缓存中，不释放）
+      _llamaEngine = null;
+      _chatSession = null;
+      _currentModelPath = null;
+      _cachedParams = null;
+      _isInitialized = false;
+      _contextInvalidated = false;
+    } else {
+      // 相同模型或无引擎，直接卸载
+      await dispose();
+    }
 
     // ★★★ CPU 模式标志（安全模式 / Metal 崩溃回退共用）★★★
     bool forceCpuMode = false;
@@ -1111,6 +1175,210 @@ class LocalFFIEngine {
     }
   }
 
+  /// v0.44.0: 流式生成（支持 Function Calling，返回 ChatStreamChunk）
+  ///
+  /// 与 [generateStream] 共享上下文失效检测和异常保护逻辑，但：
+  /// - 在 System Prompt 中追加可用工具描述
+  /// - 按 [ChatOptions.fcFormat] 选择 FC 模板（qwen/llama31/hermes/mistral/auto）
+  /// - 解析输出识别工具调用后 yield ChatStreamChunk(toolCall: parsed)
+  /// - 保留 [generateStream] 不变，向后兼容
+  Stream<ChatStreamChunk> generateStreamWithTools(
+    List<ChatMessage> messages, {
+    ChatOptions? options,
+  }) async* {
+    _ensureInitialized();
+
+    // 上下文失效自动重载
+    if (_contextInvalidated && _currentModelPath != null) {
+      debugPrint('[LocalFFIEngine] generateStreamWithTools: 上下文失效，自动重载...');
+      try {
+        await _autoReloadContext();
+      } catch (e) {
+        _contextInvalidated = true;
+        rethrow;
+      }
+    }
+
+    // 解析 FC 格式
+    final tools = options?.tools;
+    final fcFormatStr = options?.fcFormat ?? 'auto';
+    FcFormat fcFormat;
+    switch (fcFormatStr) {
+      case 'qwen':
+        fcFormat = FcFormat.qwen;
+        break;
+      case 'llama31':
+        fcFormat = FcFormat.llama31;
+        break;
+      case 'hermes':
+        fcFormat = FcFormat.hermes;
+        break;
+      case 'mistral':
+        fcFormat = FcFormat.mistral;
+        break;
+      default:
+        // auto 模式按 modelId 自动推断
+        fcFormat = FcPromptTemplates.inferFormat(_currentModelPath ?? '');
+    }
+
+    // 注入工具描述到 System Prompt
+    List<ChatMessage> processedMessages = messages;
+    if (tools != null && tools.isNotEmpty) {
+      processedMessages = _injectToolPrompt(messages, tools, fcFormat);
+    }
+
+    // 应用思考模式 + 转换为 llamadart 消息
+    processedMessages = _applyThinkingMode(processedMessages, options);
+    final llamaMessages = _buildMessages(processedMessages);
+
+    final enableReasoning = options?.enableReasoning ?? true;
+    final engine = _llamaEngine;
+    if (engine == null) {
+      throw LocalFFIException('LocalFFIEngine._llamaEngine is null after _ensureInitialized().');
+    }
+
+    debugPrint('[LocalFFIEngine] generateStreamWithTools: fcFormat=$fcFormat, tools=${tools?.length ?? 0}');
+
+    final buffer = StringBuffer();
+    bool toolCallDetected = false;
+
+    try {
+      await for (final chunk in engine.create(llamaMessages)) {
+        if (chunk.choices.isEmpty) continue;
+        _contextInvalidated = false;
+
+        final content = chunk.choices.first.delta.content;
+        if (content != null) {
+          buffer.write(content);
+
+          // 尝试解析工具调用（buffer 足够长时）
+          if (buffer.length > 10 && !toolCallDetected) {
+            final toolCall = FcOutputParser.parseToolCall(buffer.toString(), fcFormat);
+            if (toolCall != null) {
+              toolCallDetected = true;
+              debugPrint('[LocalFFIEngine] 检测到工具调用: ${toolCall['name']}');
+              yield ChatStreamChunk(toolCall: toolCall, isToolCallEnd: true);
+              return;
+            }
+          }
+
+          // 未检测到工具调用，yield 文本
+          final finalContent = enableReasoning ? content : _cleanThinkTags(content);
+          if (finalContent.isNotEmpty) {
+            yield ChatStreamChunk(text: finalContent);
+          }
+        }
+      }
+
+      // 流式结束后最后检查工具调用
+      if (!toolCallDetected && buffer.isNotEmpty) {
+        final toolCall = FcOutputParser.parseToolCall(buffer.toString(), fcFormat);
+        if (toolCall != null) {
+          debugPrint('[LocalFFIEngine] 流式结束后检测到工具调用: ${toolCall['name']}');
+          yield ChatStreamChunk(toolCall: toolCall, isToolCallEnd: true);
+          return;
+        }
+      }
+
+      refreshContextUsage();
+    } catch (e) {
+      // 复用 generateStream 的异常处理
+      final errMsg = e.toString().toLowerCase();
+      final isContextError = errMsg.contains('no such instance') ||
+          errMsg.contains('context') && errMsg.contains('invalid') ||
+          errMsg.contains('failed to decode') ||
+          errMsg.contains('context overflow') ||
+          errMsg.contains('kv cache');
+      final isOOMError = errMsg.contains('out of memory') ||
+          errMsg.contains('oom') ||
+          errMsg.contains('cannot allocate');
+
+      if (isOOMError) {
+        debugPrint('[LocalFFIEngine] 内存不足: $e');
+        await _cleanupTempFiles();
+        throw LocalFFIException('内存不足，请关闭其他应用或选择更小的模型。');
+      }
+
+      if (isContextError && _currentModelPath != null) {
+        debugPrint('[LocalFFIEngine] 上下文失效: $e, 自动重载...');
+        _contextInvalidated = true;
+        try {
+          await _autoReloadContext();
+          final retryEngine = _llamaEngine;
+          if (retryEngine == null) {
+            throw LocalFFIException('模型上下文重载后 _llamaEngine 为 null。');
+          }
+          _contextInvalidated = false;
+          final retryMessages = _buildMessages(processedMessages);
+          await for (final chunk in retryEngine.create(retryMessages)) {
+            if (chunk.choices.isEmpty) continue;
+            final content = chunk.choices.first.delta.content;
+            if (content != null) {
+              buffer.write(content);
+              if (buffer.length > 10 && !toolCallDetected) {
+                final toolCall = FcOutputParser.parseToolCall(buffer.toString(), fcFormat);
+                if (toolCall != null) {
+                  toolCallDetected = true;
+                  yield ChatStreamChunk(toolCall: toolCall, isToolCallEnd: true);
+                  return;
+                }
+              }
+              final finalContent = enableReasoning ? content : _cleanThinkTags(content);
+              if (finalContent.isNotEmpty) {
+                yield ChatStreamChunk(text: finalContent);
+              }
+            }
+          }
+          if (!toolCallDetected && buffer.isNotEmpty) {
+            final toolCall = FcOutputParser.parseToolCall(buffer.toString(), fcFormat);
+            if (toolCall != null) {
+              yield ChatStreamChunk(toolCall: toolCall, isToolCallEnd: true);
+              return;
+            }
+          }
+          refreshContextUsage();
+          return;
+        } catch (retryError) {
+          _contextInvalidated = true;
+          throw LocalFFIException('模型上下文失效且自动重载失败: $retryError');
+        }
+      }
+
+      debugPrint('[LocalFFIEngine] generateStreamWithTools 异常: $e');
+      rethrow;
+    }
+  }
+
+  /// v0.44.0: 注入工具描述到 System Prompt
+  List<ChatMessage> _injectToolPrompt(
+    List<ChatMessage> messages,
+    List<Map<String, dynamic>> tools,
+    FcFormat fcFormat,
+  ) {
+    final toolDesc = tools.map((t) {
+      final fn = t['function'] as Map<String, dynamic>?;
+      if (fn == null) return '';
+      final name = fn['name'] ?? '';
+      final desc = fn['description'] ?? '';
+      final params = fn['parameters'] ?? {};
+      return '- $name: $desc\n  参数: $params';
+    }).where((s) => s.isNotEmpty).join('\n');
+
+    final template = FcPromptTemplates.getTemplate(fcFormat);
+    final toolPrompt = '$template\n\n可用工具:\n$toolDesc';
+
+    final modified = List<ChatMessage>.from(messages);
+    if (modified.isNotEmpty && modified.first.role == 'system') {
+      modified[0] = ChatMessage(
+        role: 'system',
+        content: '${modified[0].content}\n\n$toolPrompt',
+      );
+    } else {
+      modified.insert(0, ChatMessage(role: 'system', content: toolPrompt));
+    }
+    return modified;
+  }
+
   /// ★★★ 自动重载 llama 上下文 ★★★
   ///
   /// 当检测到上下文失效（no such instance / context error）时，
@@ -1772,9 +2040,50 @@ class LocalFFIEngine {
     }
   }
 
-  /// 释放所有资源
+  /// v0.44.0: 将当前引擎存入 LRU 缓存（不释放资源）
+  void _saveCurrentEngineToCache() {
+    if (_llamaEngine == null || _currentModelPath == null) return;
+
+    // 如果该模型已在缓存中，先释放旧的
+    final existing = _engineCache.remove(_currentModelPath!);
+    if (existing != null) {
+      existing.dispose();
+    }
+
+    _engineCache[_currentModelPath!] = _CachedEngine(
+      engine: _llamaEngine!,
+      chatSession: _chatSession,
+      modelPath: _currentModelPath!,
+      params: _cachedParams,
+      contextMaxSize: _contextMaxSize,
+      visionSupported: _visionSupported,
+      lastUsed: DateTime.now(),
+    );
+    debugPrint('[LocalFFIEngine] v0.44.0: 引擎已存入缓存: $_currentModelPath');
+
+    // LRU 淘汰：缓存满时释放最久未用的引擎
+    while (_engineCache.length > _maxCacheSize) {
+      final oldestKey = _engineCache.keys.first;
+      final oldest = _engineCache.remove(oldestKey);
+      oldest?.dispose();
+      debugPrint('[LocalFFIEngine] v0.44.0: LRU 淘汰引擎: $oldestKey');
+    }
+  }
+
+  /// v0.44.0: 清理所有缓存的引擎（用于低内存场景或完全释放）
+  Future<void> clearCache() async {
+    for (final cached in _engineCache.values) {
+      await cached.dispose();
+    }
+    _engineCache.clear();
+    debugPrint('[LocalFFIEngine] v0.44.0: 缓存已清空');
+  }
+
+  /// 释放所有资源（当前引擎 + LRU 缓存）
   Future<void> dispose() async {
     await unloadModel();
+    // v0.44.0: 同时清理 LRU 缓存，避免内存泄漏
+    await clearCache();
   }
 
   // ════════════════════════════════════════════════════════════════════════

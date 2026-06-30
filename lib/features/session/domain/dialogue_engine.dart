@@ -25,6 +25,7 @@ import '../../../core/interfaces/dialogue_interface.dart';
 import '../../../core/services/performance_monitor.dart';
 import '../../../core/engines/model_inference_engine.dart';
 import '../../../core/services/mcp_service_manager.dart';
+import '../../../core/protocols/mcp_server_manager.dart';
 import '../../../core/services/context_compressor_service.dart';
 import '../../../core/services/memory_palace_service.dart';
 import '../../../core/services/tts_prompt_template.dart';
@@ -265,32 +266,69 @@ class DialogueEngine implements IDialogueEngine {
     int charCount = 0;
     final Stopwatch stopwatch = Stopwatch()..start();
 
+    // v0.44.0: 获取会话启用的 MCP 工具，构建 FC tools
+    List<Map<String, dynamic>>? fcTools;
+    if (session.enabledMcpServerIds?.isNotEmpty ?? false) {
+      try {
+        final availableMcpTools = await mcpServiceManager.getAvailableTools(sessionId);
+        if (availableMcpTools.isNotEmpty) {
+          fcTools = [];
+          for (final entry in availableMcpTools.entries) {
+            final serverId = entry.key;
+            for (final tool in entry.value) {
+              fcTools.add({
+                'type': 'function',
+                'function': {
+                  'name': '${serverId}_${tool.name}',
+                  'description': tool.description ?? '',
+                  'parameters': tool.inputSchema ?? {},
+                },
+              });
+            }
+          }
+          debugPrint('[DialogueEngine] v0.44.0: 注入 ${fcTools.length} 个 MCP 工具到 LLM');
+        }
+      } catch (e) {
+        debugPrint('[DialogueEngine] v0.44.0: 获取 MCP 工具失败: $e');
+      }
+    }
+
+    final chatOptions = ChatOptions(
+      tools: fcTools,
+      toolChoice: fcTools != null ? 'auto' : null,
+    );
+
+    Map<String, dynamic>? detectedToolCall;
     try {
       debugPrint('[DialogueEngine] ✅ 步骤4: 开始流式推理, modelId=${session.modelId}');
-      await for (final token in _modelEngine.generateChatStream(session.modelId, messages)) {
-        responseBuffer.write(token);
-        charCount += token.length; // 统计实际字符数
-        
-        // 计算实时速度（字符数 / 比率 = 估算的 token 数）
-        final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
-        double? currentTPS;
-        if (elapsedSeconds > 0) {
-          currentTPS = (charCount / charToTokenRatio) / elapsedSeconds;
+      await for (final chunk in _modelEngine.generateChatStreamWithTools(
+        session.modelId, messages, options: chatOptions,
+      )) {
+        if (chunk.text != null) {
+          responseBuffer.write(chunk.text!);
+          charCount += chunk.text!.length;
+
+          final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
+          double? currentTPS;
+          if (elapsedSeconds > 0) {
+            currentTPS = (charCount / charToTokenRatio) / elapsedSeconds;
+          }
+
+          yield DialogueResponse(
+            content: chunk.text!,
+            isComplete: false,
+            tokenCount: (charCount / charToTokenRatio).round(),
+            tokensPerSecond: currentTPS,
+            webSearchData: webSearchData,
+          );
         }
-        
-        yield DialogueResponse(
-          content: token, 
-          isComplete: false,
-          tokenCount: (charCount / charToTokenRatio).round(),
-          tokensPerSecond: currentTPS,
-          webSearchData: webSearchData,
-        );
+        if (chunk.toolCall != null) {
+          detectedToolCall = chunk.toolCall;
+        }
       }
       stopwatch.stop();
-      
-      // 计算估算的 token 数用于性能监控
+
       final estimatedTokens = (charCount / charToTokenRatio).round();
-      // 记录到性能监控
       _modelEngine.recordGenerationTime(session.modelId, stopwatch.elapsedMilliseconds, estimatedTokens);
     } catch (e) {
       // ★★★ 错误恢复：检测 "prompt too long" 并自动截断重试 ★★★
@@ -319,23 +357,30 @@ class DialogueEngine implements IDialogueEngine {
           
           debugPrint('[DialogueEngine] 🔄 激进截断后: ${messages.length} 条消息, 重新推理...');
           
-          await for (final token in _modelEngine.generateChatStream(session.modelId, messages)) {
-            responseBuffer.write(token);
-            charCount += token.length;
-            
-            final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
-            double? currentTPS;
-            if (elapsedSeconds > 0) {
-              currentTPS = (charCount / charToTokenRatio) / elapsedSeconds;
+          await for (final chunk in _modelEngine.generateChatStreamWithTools(
+            session.modelId, messages, options: chatOptions,
+          )) {
+            if (chunk.text != null) {
+              responseBuffer.write(chunk.text!);
+              charCount += chunk.text!.length;
+
+              final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
+              double? currentTPS;
+              if (elapsedSeconds > 0) {
+                currentTPS = (charCount / charToTokenRatio) / elapsedSeconds;
+              }
+
+              yield DialogueResponse(
+                content: chunk.text!,
+                isComplete: false,
+                tokenCount: (charCount / charToTokenRatio).round(),
+                tokensPerSecond: currentTPS,
+                webSearchData: webSearchData,
+              );
             }
-            
-            yield DialogueResponse(
-              content: token, 
-              isComplete: false,
-              tokenCount: (charCount / charToTokenRatio).round(),
-              tokensPerSecond: currentTPS,
-              webSearchData: webSearchData,
-            );
+            if (chunk.toolCall != null) {
+              detectedToolCall = chunk.toolCall;
+            }
           }
           stopwatch.stop();
           debugPrint('[DialogueEngine] ✅ 激进截断重试成功');
@@ -394,8 +439,15 @@ class DialogueEngine implements IDialogueEngine {
       webSearchData: webSearchData,
     );
 
-    // ✅ 第七步：后台检查并执行 MCP 工具调用（不影响主流程）
-    if (session.enabledMcpServerIds?.isNotEmpty ?? false) {
+    // v0.44.0: 处理真实 FC 工具调用（优先于伪 FC）
+    if (detectedToolCall != null) {
+      await _executeRealToolCall(
+        sessionId: sessionId,
+        toolCall: detectedToolCall,
+        session: session,
+      );
+    } else if (session.enabledMcpServerIds?.isNotEmpty ?? false) {
+      // ✅ 第七步：伪 FC 兜底（仅当本轮无真实 toolCall 时）
       _checkAndExecuteMcpTools(
         sessionId: sessionId,
         text: responseBuffer.toString(),
@@ -1441,6 +1493,91 @@ class DialogueEngine implements IDialogueEngine {
       }
     } catch (e) {
       debugPrint('[DialogueEngine] MCP 工具调用失败: $e');
+    }
+  }
+
+  /// v0.44.0: 执行真实 FC 工具调用
+  ///
+  /// 当 LLM 原生返回 toolCall 时，解析并执行工具调用，
+  /// 然后回填结果到消息历史。
+  Future<void> _executeRealToolCall({
+    required String sessionId,
+    required Map<String, dynamic> toolCall,
+    required dynamic session,
+  }) async {
+    try {
+      final name = toolCall['name'] as String?;
+      if (name == null) {
+        debugPrint('[DialogueEngine] v0.44.0: toolCall 缺少 name 字段');
+        return;
+      }
+
+      // 解析 serverId_toolName 格式
+      final parts = name.split('_');
+      if (parts.length < 2) {
+        debugPrint('[DialogueEngine] v0.44.0: 工具名称格式无效: $name');
+        return;
+      }
+      final serverId = parts[0];
+      final toolName = parts.sublist(1).join('_');
+
+      // 获取 arguments
+      final arguments = toolCall['arguments'] ?? {};
+      Map<String, dynamic> argsMap = {};
+      if (arguments is Map) {
+        argsMap = Map<String, dynamic>.from(arguments);
+      } else if (arguments is String) {
+        try {
+          argsMap = Map<String, dynamic>.from(jsonDecode(arguments));
+        } catch (_) {}
+      }
+
+      debugPrint('[DialogueEngine] v0.44.0: 执行真实 FC: serverId=$serverId, toolName=$toolName');
+
+      // 获取服务器名称
+      String serverName = serverId;
+      try {
+        final serverManager = McpServerManager();
+        final allConfigs = await serverManager.getAllConfigs();
+        for (final config in allConfigs) {
+          if (config.serverId == serverId) {
+            serverName = config.name;
+            break;
+          }
+        }
+      } catch (_) {}
+
+      // 调用工具
+      final result = await mcpServiceManager.callTool(
+        sessionId: sessionId,
+        serverId: serverId,
+        serverName: serverName,
+        toolName: toolName,
+        arguments: argsMap,
+      );
+
+      // 通知 UI
+      _mcpNotifier.notify(result);
+
+      // 回填工具结果到数据库
+      if (result.result != null) {
+        final resultText = result.result!.content
+            .map((c) => c.text ?? c.data ?? '')
+            .join('\n');
+
+        await _messageRepository.createMessage(
+          sessionId: sessionId,
+          role: 'tool',
+          content: '[$toolName] 结果: $resultText',
+          toolCallInfo: '$serverId:$toolName',
+        );
+
+        await _sessionManager.refreshCurrentSession();
+      }
+
+      debugPrint('[DialogueEngine] v0.44.0: 真实 FC 执行完成');
+    } catch (e) {
+      debugPrint('[DialogueEngine] v0.44.0: 真实 FC 执行失败: $e');
     }
   }
 

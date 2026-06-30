@@ -271,6 +271,11 @@ extension AppDatabaseDAO on AppDatabase {
   Future<int> deleteSessionMessages(String sessionId) =>
       (delete(messages)..where((t) => t.sessionId.equals(sessionId))).go();
 
+  /// v0.43.0: 更新消息内容（用于 A2A 流式回复回填）
+  Future<int> updateMessageContent(String messageId, String content) =>
+      (update(messages)..where((t) => t.id.equals(messageId)))
+          .write(MessagesCompanion(content: Value(content)));
+
   // Model DAO methods
   Future<int> insertModel(ModelsCompanion model) =>
       into(models).insert(model);

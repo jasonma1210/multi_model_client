@@ -182,18 +182,105 @@ void main() {
 
   group('A2AStreamSubscription', () {
     test('cancel 关闭 controller', () async {
-      final controller = StreamController<A2AStreamEvent>.broadcast();
+      final businessController = StreamController<A2AStreamEvent>.broadcast();
+      final reconnectController = StreamController<A2AReconnectEvent>.broadcast();
       var cancelled = false;
       final sub = A2AStreamSubscription.test(
-        controller: controller,
+        controller: businessController,
+        reconnectController: reconnectController,
         cancel: () async {
           cancelled = true;
-          if (!controller.isClosed) await controller.close();
+          if (!businessController.isClosed) await businessController.close();
+          if (!reconnectController.isClosed) await reconnectController.close();
         },
       );
       await sub.cancel();
       expect(cancelled, true);
-      expect(controller.isClosed, true);
+      expect(businessController.isClosed, true);
+      expect(reconnectController.isClosed, true);
+    });
+
+    test('暴露 events stream', () async {
+      final businessController = StreamController<A2AStreamEvent>.broadcast();
+      final reconnectController = StreamController<A2AReconnectEvent>.broadcast();
+      final sub = A2AStreamSubscription.test(
+        controller: businessController,
+        reconnectController: reconnectController,
+        cancel: () async {},
+      );
+      expect(sub.events, isA<Stream<A2AReconnectEvent>>());
+      expect(sub.stream, isA<Stream<A2AStreamEvent>>());
+      // 主动关闭以避免测试框架警告
+      await businessController.close();
+      await reconnectController.close();
+    });
+
+    test('pause/resume 是可调用的 no-op 默认实现', () async {
+      final businessController = StreamController<A2AStreamEvent>.broadcast();
+      final reconnectController = StreamController<A2AReconnectEvent>.broadcast();
+      final sub = A2AStreamSubscription.test(
+        controller: businessController,
+        reconnectController: reconnectController,
+        cancel: () async {},
+      );
+      // 验证 pause/resume 可调用
+      sub.pause();
+      sub.resume();
+      // 关闭
+      await businessController.close();
+      await reconnectController.close();
+    });
+  });
+
+  group('A2AReconnectConfig', () {
+    test('默认配置含 jitter 和 idleTimeout', () {
+      const config = A2AReconnectConfig();
+      expect(config.initialBackoff.inSeconds, 3);
+      expect(config.maxBackoff.inSeconds, 30);
+      expect(config.maxRetries, 0);
+      expect(config.heartbeatTimeout.inSeconds, 45);
+      expect(config.jitterRatio, 0.3);
+      expect(config.idleTimeout.inSeconds, 120);
+    });
+
+    test('可自定义 jitter 与 idle timeout', () {
+      const config = A2AReconnectConfig(
+        initialBackoff: Duration(seconds: 1),
+        maxBackoff: Duration(seconds: 5),
+        maxRetries: 5,
+        jitterRatio: 0.5,
+        idleTimeout: Duration(seconds: 60),
+      );
+      expect(config.jitterRatio, 0.5);
+      expect(config.idleTimeout.inSeconds, 60);
+      expect(config.maxRetries, 5);
+    });
+  });
+
+  group('A2AReconnectEvent', () {
+    test('构造 + toString 包含关键字段', () {
+      const event = A2AReconnectEvent(
+        state: A2AReconnectState.reconnecting,
+        attempt: 3,
+        nextBackoff: Duration(seconds: 6),
+        reason: 'heartbeat-timeout',
+      );
+      expect(event.state, A2AReconnectState.reconnecting);
+      expect(event.attempt, 3);
+      expect(event.nextBackoff, const Duration(seconds: 6));
+      expect(event.reason, 'heartbeat-timeout');
+      expect(event.toString(), contains('reconnecting'));
+      expect(event.toString(), contains('attempt=3'));
+    });
+
+    test('四种状态值', () {
+      expect(A2AReconnectState.values.length, 4);
+      expect(A2AReconnectState.values, containsAll([
+        A2AReconnectState.connecting,
+        A2AReconnectState.connected,
+        A2AReconnectState.reconnecting,
+        A2AReconnectState.closed,
+      ]));
     });
   });
 

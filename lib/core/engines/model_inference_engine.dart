@@ -188,6 +188,10 @@ class ChatOptions {
   final int? numCtx; // Ollama 专用：上下文窗口大小
   final int? numPredict; // Ollama 专用：最大预测 token 数
   final bool? enableReasoning; // 思考模式：启用 Chain-of-Thought
+  // v0.44.0: Function Calling 支持
+  final List<Map<String, dynamic>>? tools; // OpenAI tools / Anthropic tools 格式
+  final String? toolChoice; // 'auto' | 'none' | 'required'
+  final String? fcFormat; // 本地 FFI 专用：'qwen' | 'llama31' | 'hermes' | 'mistral' | 'auto'
 
   const ChatOptions({
     this.temperature,
@@ -199,6 +203,9 @@ class ChatOptions {
     this.numCtx,
     this.numPredict,
     this.enableReasoning,
+    this.tools,
+    this.toolChoice,
+    this.fcFormat,
   });
 
   /// 从 LocalModelParams 创建
@@ -227,12 +234,39 @@ class ChatOptions {
   }
 }
 
+/// v0.44.0: 流式聊天分块（含 Function Calling 支持）
+///
+/// - [text] 文本增量（可能为空，例如纯工具调用帧）
+/// - [toolCall] 工具调用（解析后的统一格式：{id, name, arguments}）
+/// - [isToolCallEnd] 工具调用参数流式累积结束标志
+class ChatStreamChunk {
+  final String? text;
+  final Map<String, dynamic>? toolCall;
+  final bool isToolCallEnd;
+
+  const ChatStreamChunk({
+    this.text,
+    this.toolCall,
+    this.isToolCallEnd = false,
+  });
+
+  @override
+  String toString() {
+    if (toolCall != null) {
+      return 'ChatStreamChunk(toolCall: $toolCall, end: $isToolCallEnd)';
+    }
+    return 'ChatStreamChunk(text: ${text?.length ?? 0} chars)';
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 //  ModelInferenceEngine
 // ════════════════════════════════════════════════════════════════════════════
 
 class ModelInferenceEngine implements IModelManager {
   final Map<String, StreamSubscription> _activeStreams = {};
+  // v0.44.0: 可控流的 StreamController（用于主动关闭）
+  final Map<String, StreamController<String>> _activeControllers = {};
 
   // 远程模型 HTTP 客户端（按 modelId 缓存）
   final Map<String, Dio> _remoteDioClients = {};
@@ -950,6 +984,178 @@ class ModelInferenceEngine implements IModelManager {
   void cancelGeneration(String modelId) {
     final subscription = _activeStreams.remove(modelId);
     subscription?.cancel();
+    // v0.44.0: 同时关闭 StreamController（可控流模式）
+    final controller = _activeControllers.remove(modelId);
+    if (controller != null && !controller.isClosed) {
+      controller.close();
+    }
+  }
+
+  /// v0.44.0: 可控流式推理 - 用 StreamController 包装，支持主动取消和错误重试
+  /// 与 [generateChatStream] 共享推理逻辑，但提供：
+  /// - 主动取消：调用 [cancelGeneration] 会立即关闭 StreamController
+  /// - 错误重试：网络错误自动重试 3 次（指数退避 1s/2s/4s）
+  Stream<String> generateChatStreamControlled(
+    String modelId,
+    List<ChatMessage> messages, {
+    ChatOptions? options,
+  }) {
+    late StreamController<String> controller;
+    StreamSubscription<String>? subscription;
+
+    controller = StreamController<String>(
+      onCancel: () {
+        subscription?.cancel();
+        _activeStreams.remove(modelId);
+        _activeControllers.remove(modelId);
+      },
+    );
+
+    _activeControllers[modelId] = controller;
+
+    () async {
+      try {
+        final stream = _retryableGenerate(modelId, messages, options: options);
+        subscription = stream.listen(
+          (chunk) {
+            if (!controller.isClosed) controller.add(chunk);
+          },
+          onError: (e) {
+            if (!controller.isClosed) controller.addError(e);
+          },
+          onDone: () async {
+            if (!controller.isClosed) await controller.close();
+            _activeStreams.remove(modelId);
+            _activeControllers.remove(modelId);
+          },
+          cancelOnError: true,
+        );
+        _activeStreams[modelId] = subscription!;
+      } catch (e) {
+        if (!controller.isClosed) {
+          controller.addError(e);
+          await controller.close();
+        }
+        _activeStreams.remove(modelId);
+        _activeControllers.remove(modelId);
+      }
+    }();
+
+    return controller.stream;
+  }
+
+  /// v0.44.0: 带重试的流式生成（网络错误自动重试 3 次，指数退避）
+  Stream<String> _retryableGenerate(
+    String modelId,
+    List<ChatMessage> messages, {
+    ChatOptions? options,
+  }) async* {
+    const maxRetries = 3;
+    const retryDelays = [Duration(seconds: 1), Duration(seconds: 2), Duration(seconds: 4)];
+
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await for (final chunk in generateChatStream(modelId, messages, options: options)) {
+          yield chunk;
+        }
+        return; // 成功，退出重试循环
+      } catch (e) {
+        // 上下文超长错误不可重试
+        if (_isContextTooLongError(e)) rethrow;
+        // 非网络错误不可重试
+        if (!_isNetworkError(e) || attempt >= maxRetries) rethrow;
+
+        debugPrint('[ModelInferenceEngine] v0.44.0: 网络错误，${retryDelays[attempt]}后重试 (${attempt + 1}/$maxRetries): $e');
+        await Future.delayed(retryDelays[attempt]);
+      }
+    }
+  }
+
+  /// v0.44.0: 检测是否为网络错误（可重试）
+  bool _isNetworkError(dynamic e) {
+    if (e is DioException) {
+      final type = e.type;
+      return type == DioExceptionType.connectionTimeout ||
+          type == DioExceptionType.receiveTimeout ||
+          type == DioExceptionType.connectionError;
+    }
+    return false;
+  }
+
+  /// v0.44.0: 检测是否为上下文超长错误（不可重试）
+  bool _isContextTooLongError(dynamic e) {
+    final errStr = e.toString().toLowerCase();
+    return errStr.contains('tokenization failed') ||
+        errStr.contains('prompt too long') ||
+        errStr.contains('too long') ||
+        (errStr.contains('token') && errStr.contains('limit'));
+  }
+
+  /// v0.44.0: 流式推理（支持 Function Calling，返回 ChatStreamChunk）
+  ///
+  /// 与 [generateChatStream] 共享模型解析与流分发逻辑，但：
+  /// - 远程 OpenAI / Anthropic 协议：注入 tools 字段，解析 tool_calls / tool_use
+  /// - 本地 FFI：通过 prompt 注入 + 多模板解析（委托 LocalFFIEngine.generateStreamWithTools）
+  /// - 旧路径不支持 FC 的（如 Ollama Remote API）：仅 yield text
+  Stream<ChatStreamChunk> generateChatStreamWithTools(
+    String modelId,
+    List<ChatMessage> messages, {
+    ChatOptions? options,
+  }) async* {
+    final modelEntry = await _getModelEntry(modelId);
+    if (modelEntry == null) {
+      throw StateError('模型 $modelId 不存在，请先在模型管理中添加模型');
+    }
+
+    final effectiveOptions = options ??
+        (modelEntry.localParams != null
+            ? ChatOptions.fromLocalParams(modelEntry.localParams!)
+            : ChatOptions(enableReasoning: modelEntry.effectiveEnableReasoning));
+
+    if (modelEntry.isLocal) {
+      // 优先使用本地 FFI 引擎（含真 FC 支持）
+      if (_localFFIReadyModels.contains(modelId)) {
+        yield* _streamLocalFFIWithTools(messages, options: effectiveOptions);
+        return;
+      }
+      final ffiEngine = LocalFFIEngine.instance;
+      if (ffiEngine.isInitialized) {
+        _localFFIReadyModels.add(modelId);
+        yield* _streamLocalFFIWithTools(messages, options: effectiveOptions);
+        return;
+      }
+      // 备用 Ollama API（不支持 tools）
+      if (!_ollamaReadyModels.contains(modelId)) {
+        throw StateError(
+            '本地模型 ${modelEntry.displayName} 未加载，请先在模型页面点击「加载并开始对话」');
+      }
+      yield* _streamOllamaChatWithTools(modelId, messages, options: effectiveOptions);
+    } else {
+      final config = modelEntry.remoteConfig;
+      if (config == null) {
+        throw StateError('远程模型 ${modelEntry.displayName} 缺少 API 配置');
+      }
+      if (config.apiKey.isEmpty) {
+        String hint;
+        switch (config.protocol) {
+          case RemoteProtocol.openai:
+            hint = '请在模型设置中为 "${modelEntry.displayName}" 添加 OpenAI API Key';
+          case RemoteProtocol.anthropic:
+            hint = '请在模型设置中为 "${modelEntry.displayName}" 添加 Anthropic API Key';
+          case RemoteProtocol.ollama:
+            hint = '请确保 Ollama 服务正在运行';
+        }
+        throw StateError(hint);
+      }
+
+      if (config.protocol == RemoteProtocol.openai) {
+        yield* _streamOpenAIWithTools(modelId, config, messages, effectiveOptions);
+      } else if (config.protocol == RemoteProtocol.anthropic) {
+        yield* _streamAnthropicWithTools(modelId, config, messages, effectiveOptions);
+      } else {
+        yield* _streamOllamaRemoteAPIWithTools(modelId, config, messages, effectiveOptions);
+      }
+    }
   }
 
   // ────────────────────────── 辅助方法 ──────────────────────────
@@ -1190,6 +1396,40 @@ class ModelInferenceEngine implements IModelManager {
     yield* ffiEngine.generateStream(messages, options: options);
   }
 
+  /// v0.44.0: 本地 FFI 流式 + Function Calling
+  ///
+  /// 委托 [LocalFFIEngine.generateStreamWithTools]，由该引擎处理 prompt 注入与多模板解析
+  Stream<ChatStreamChunk> _streamLocalFFIWithTools(
+    List<ChatMessage> messages, {
+    ChatOptions? options,
+  }) async* {
+    final ffiEngine = LocalFFIEngine.instance;
+    yield* ffiEngine.generateStreamWithTools(messages, options: options);
+  }
+
+  /// v0.44.0: Ollama Chat 流式包装（不支持原生 FC，仅 yield text）
+  Stream<ChatStreamChunk> _streamOllamaChatWithTools(
+    String modelId,
+    List<ChatMessage> messages, {
+    ChatOptions? options,
+  }) async* {
+    await for (final text in _streamOllamaChat(modelId, messages, options: options)) {
+      yield ChatStreamChunk(text: text);
+    }
+  }
+
+  /// v0.44.0: Ollama Remote API 流式包装（不支持原生 FC，仅 yield text）
+  Stream<ChatStreamChunk> _streamOllamaRemoteAPIWithTools(
+    String modelId,
+    RemoteModelConfig config,
+    List<ChatMessage> messages,
+    ChatOptions options,
+  ) async* {
+    await for (final text in _streamOllamaRemoteAPI(modelId, config, messages, options)) {
+      yield ChatStreamChunk(text: text);
+    }
+  }
+
   // ────────────────────────── OpenAI API ──────────────────────────
 
   Future<String> _callOpenAI(
@@ -1302,8 +1542,141 @@ class ModelInferenceEngine implements IModelManager {
       debugPrint('  - response status: ${e.response?.statusCode}');
       debugPrint('  - response data: ${e.response?.data}');
       debugPrint('  - request headers: ${e.requestOptions.headers}');
-      
+
       // 重新抛出，让上层处理
+      rethrow;
+    }
+  }
+
+  /// v0.44.0: OpenAI 流式 + Function Calling
+  Stream<ChatStreamChunk> _streamOpenAIWithTools(
+    String modelId,
+    RemoteModelConfig config,
+    List<ChatMessage> messages,
+    ChatOptions options,
+  ) async* {
+    final dio = _getOrCreateDio(modelId, config);
+    final processedMessages = _applyThinkingMode(messages, options);
+
+    final data = <String, dynamic>{
+      'model': config.modelId,
+      'messages': processedMessages.map((m) => m.toJson()).toList(),
+      'stream': true,
+    };
+
+    if (options.temperature != null) data['temperature'] = options.temperature;
+    if (options.topP != null) data['top_p'] = options.topP;
+    if (options.maxTokens != null) data['max_tokens'] = options.maxTokens;
+    if (options.stop != null) data['stop'] = [options.stop];
+    // v0.44.0: 注入 tools 字段
+    if (options.tools != null && options.tools!.isNotEmpty) {
+      data['tools'] = options.tools;
+      data['tool_choice'] = options.toolChoice ?? 'auto';
+    }
+
+    // tool_calls 累积器：按 index 聚合 {id, name, arguments}
+    final Map<int, Map<String, dynamic>> toolCallAccumulator = {};
+
+    try {
+      final response = await dio.post(
+        '/chat/completions',
+        data: data,
+        options: Options(responseType: ResponseType.stream),
+      );
+
+      final responseData = response.data;
+      if (responseData == null) {
+        throw StateError('OpenAI 流式响应为空');
+      }
+      final stream = responseData.stream;
+      String buffer = '';
+
+      await for (final chunk in stream) {
+        buffer += utf8.decode(chunk, allowMalformed: true);
+        final lines = buffer.split('\n');
+        buffer = lines.last;
+
+        for (int i = 0; i < lines.length - 1; i++) {
+          var line = lines[i].trim();
+          if (!line.startsWith('data: ')) continue;
+          line = line.substring(6);
+          if (line == '[DONE]') {
+            // 流结束前输出累积的 tool_calls
+            if (toolCallAccumulator.isNotEmpty) {
+              for (final tc in toolCallAccumulator.values) {
+                yield ChatStreamChunk(
+                  toolCall: {
+                    'id': tc['id'] ?? '',
+                    'name': tc['name'] ?? '',
+                    'arguments': tc['arguments'] ?? '',
+                  },
+                  isToolCallEnd: true,
+                );
+              }
+              toolCallAccumulator.clear();
+            }
+            return;
+          }
+
+          try {
+            final jsonData = jsonDecode(line) as Map<String, dynamic>;
+            final choices = jsonData['choices'] as List?;
+            if (choices == null || choices.isEmpty) continue;
+            final choice0 = choices[0] as Map<String, dynamic>;
+            final delta = choice0['delta'] as Map<String, dynamic>?;
+            if (delta == null) continue;
+
+            // 文本增量
+            if (delta['content'] != null) {
+              final content = delta['content'] as String;
+              yield ChatStreamChunk(
+                text: options.enableReasoning != false ? content : _cleanThinkTags(content),
+              );
+            }
+
+            // tool_calls 增量累积
+            final toolCalls = delta['tool_calls'] as List?;
+            if (toolCalls != null) {
+              for (final rawTc in toolCalls) {
+                final tc = rawTc as Map<String, dynamic>;
+                final index = (tc['index'] as num?)?.toInt() ?? 0;
+                final fn = tc['function'] as Map<String, dynamic>?;
+                final id = tc['id'] as String?;
+                final name = fn?['name'] as String?;
+                final argsDelta = fn?['arguments'] as String? ?? '';
+
+                final existing = toolCallAccumulator.putIfAbsent(
+                  index,
+                  () => <String, dynamic>{'arguments': ''},
+                );
+                if (id != null) existing['id'] = id;
+                if (name != null) existing['name'] = name;
+                existing['arguments'] = (existing['arguments'] as String) + argsDelta;
+              }
+            }
+
+            // finish_reason 标志结束
+            final finishReason = choice0['finish_reason'] as String?;
+            if (finishReason == 'tool_calls' && toolCallAccumulator.isNotEmpty) {
+              for (final tc in toolCallAccumulator.values) {
+                yield ChatStreamChunk(
+                  toolCall: {
+                    'id': tc['id'] ?? '',
+                    'name': tc['name'] ?? '',
+                    'arguments': tc['arguments'] ?? '',
+                  },
+                  isToolCallEnd: true,
+                );
+              }
+              toolCallAccumulator.clear();
+            }
+          } catch (_) {
+            // ignore: non-critical parse error
+          }
+        }
+      }
+    } on DioException catch (e) {
+      debugPrint('[ModelInferenceEngine] _streamOpenAIWithTools DioException: ${e.type} / ${e.message}');
       rethrow;
     }
   }
@@ -1427,6 +1800,131 @@ class ModelInferenceEngine implements IModelManager {
         messages.where((m) => m.role == 'system').toList();
     if (systemMessages.isEmpty) return null;
     return systemMessages.map((m) => m.content).join('\n\n');
+  }
+
+  /// v0.44.0: Anthropic 流式 + Function Calling（tool_use）
+  Stream<ChatStreamChunk> _streamAnthropicWithTools(
+    String modelId,
+    RemoteModelConfig config,
+    List<ChatMessage> messages,
+    ChatOptions options,
+  ) async* {
+    final dio = _getOrCreateDio(modelId, config);
+    final processedMessages = _applyThinkingMode(messages, options);
+    final systemPrompt = _extractSystemPrompt(processedMessages);
+    final nonSystemMessages =
+        processedMessages.where((m) => m.role != 'system').toList();
+
+    final data = <String, dynamic>{
+      'model': config.modelId,
+      'max_tokens': options.maxTokens ?? 4096,
+      'messages': nonSystemMessages.map((m) => m.toAnthropicJson()).toList(),
+      'stream': true,
+    };
+
+    if (systemPrompt != null) data['system'] = systemPrompt;
+    if (options.temperature != null) data['temperature'] = options.temperature;
+    if (options.topP != null) data['top_p'] = options.topP;
+    if (options.topK != null) data['top_k'] = options.topK;
+    if (options.stop != null) data['stop_sequences'] = [options.stop];
+    // v0.44.0: 注入 tools 字段（转为 Anthropic 格式）
+    if (options.tools != null && options.tools!.isNotEmpty) {
+      data['tools'] = _toAnthropicTools(options.tools!);
+      data['tool_choice'] = {'type': options.toolChoice ?? 'auto'};
+    }
+
+    // tool_use 累积器：按 content_block index 聚合 {id, name, input}
+    final Map<int, Map<String, dynamic>> toolUseAccumulator = {};
+
+    final response = await dio.post(
+      '/v1/messages',
+      data: data,
+      options: Options(responseType: ResponseType.stream),
+    );
+
+    final respData = response.data;
+    if (respData == null) throw StateError('Anthropic 流式响应为空');
+    final stream = respData.stream;
+    String buffer = '';
+
+    await for (final chunk in stream) {
+      buffer += utf8.decode(chunk, allowMalformed: true);
+      final lines = buffer.split('\n');
+      buffer = lines.last;
+
+      for (int i = 0; i < lines.length - 1; i++) {
+        var line = lines[i].trim();
+        if (!line.startsWith('data: ')) continue;
+        line = line.substring(6);
+
+        try {
+          final jsonData = jsonDecode(line) as Map<String, dynamic>;
+          final type = jsonData['type'] as String?;
+
+          if (type == 'content_block_start') {
+            final block = jsonData['content_block'] as Map<String, dynamic>?;
+            if (block != null && block['type'] == 'tool_use') {
+              final index = (jsonData['index'] as num?)?.toInt() ?? 0;
+              toolUseAccumulator[index] = {
+                'id': block['id'] ?? '',
+                'name': block['name'] ?? '',
+                'input': '',
+              };
+            }
+          } else if (type == 'content_block_delta') {
+            final delta = jsonData['delta'] as Map<String, dynamic>?;
+            if (delta != null) {
+              final deltaType = delta['type'] as String?;
+              if (deltaType == 'text_delta' && delta['text'] != null) {
+                final content = delta['text'] as String;
+                yield ChatStreamChunk(
+                  text: options.enableReasoning != false ? content : _cleanThinkTags(content),
+                );
+              } else if (deltaType == 'input_json_delta') {
+                final index = (jsonData['index'] as num?)?.toInt() ?? 0;
+                final existing = toolUseAccumulator[index];
+                if (existing != null) {
+                  final partialJson = delta['partial_json'] as String? ?? '';
+                  existing['input'] = (existing['input'] as String) + partialJson;
+                }
+              }
+            }
+          } else if (type == 'content_block_stop') {
+            final index = (jsonData['index'] as num?)?.toInt() ?? 0;
+            final existing = toolUseAccumulator.remove(index);
+            if (existing != null) {
+              yield ChatStreamChunk(
+                toolCall: {
+                  'id': existing['id'] ?? '',
+                  'name': existing['name'] ?? '',
+                  'arguments': existing['input'] ?? '',
+                },
+                isToolCallEnd: true,
+              );
+            }
+          } else if (type == 'message_stop') {
+            return;
+          }
+        } catch (_) {
+          // ignore: non-critical parse error
+        }
+      }
+    }
+  }
+
+  /// v0.44.0: 将 OpenAI 格式的 tools 转为 Anthropic 格式
+  ///
+  /// OpenAI: `{type: 'function', function: {name, description, parameters}}`
+  /// Anthropic: `{name, description, input_schema}`
+  List<Map<String, dynamic>> _toAnthropicTools(List<Map<String, dynamic>> openaiTools) {
+    return openaiTools.map((t) {
+      final fn = t['function'] as Map<String, dynamic>? ?? t;
+      return {
+        'name': fn['name'] ?? '',
+        'description': fn['description'] ?? '',
+        'input_schema': fn['parameters'] ?? {'type': 'object', 'properties': {}},
+      };
+    }).toList();
   }
 
   // ────────────────────────── Ollama Remote API ──────────────────────────
