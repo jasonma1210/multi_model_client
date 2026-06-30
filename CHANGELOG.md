@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.0] - 2026-06-30
+
+### ✨ Added - 新增功能
+
+#### MCP 工具调用历史持久化 — P0
+- ✨ **McpToolCallHistories 表** — 新增 Drift 表（schemaVersion 12→13），含 id/sessionId/messageId/serverId/serverName/toolName/arguments/result/error/status/startedAt/completedAt
+- ✨ **双写迁移策略** — database.dart onUpgrade + database_connection.dart setup 同步修改，ALTER TABLE 补 endpoint/authToken + CREATE TABLE mcp_tool_call_histories
+- ✨ **McpToolCallHistoryRepository** — fire-and-forget 持久化（失败仅 print，不阻塞 UI），支持 insert/updateStatus/getRecent/getCount/cleanupOlderThan
+- ✨ **DAO 方法** — insertMcpToolCallHistory / updateMcpToolCallHistoryStatus / getRecentMcpToolCallHistories / getMcpToolCallHistoryCount / cleanupOldMcpToolCallHistories
+
+#### MCP 工具浏览器 DB 分页加载 — P0
+- ✨ **分页查询** — limit 20 + offset，按 startedAt DESC 排序
+- ✨ **状态筛选** — statusFilter 支持 running/success/failed/canceled
+- ✨ **工具名模糊搜索** — toolNameSearch 使用 LIKE 匹配，300ms debounce
+- ✨ **加载更多按钮** — 分页加载下一页
+- ✨ **清空历史** — 一键清空 DB 所有记录
+
+#### 写工具二次确认 — P0
+- ✨ **关键字匹配** — toolName 含 write/delete/move/create/remove/update 时弹出确认对话框
+- ✨ **AlertDialog 确认** — 显示工具名 + 参数，用户确认后才执行
+
+#### McpToolCallCard 快捷菜单扩展 — P0
+- ✨ **复制 JSON** — 一键复制工具调用参数（美化格式）
+- ✨ **重新执行** — 通过 onRerun 回调重新触发工具调用
+
+#### Streamable HTTP MCP 集成 — P0
+- ✨ **McpStreamableHttpTransport** — connect/send/sendStreaming/close + SSE 解析（v0.43.0 已实现）
+- ✨ **McpServerManager type 分支** — startServer 中 `if (config.type == 'streamable_http')` 分支，stdio 逻辑完全保留
+- ✨ **transport→MCPClient 适配器** — 把 `transport.send(MCPRequest)` 包装成 `Future<String> Function(String)` 注入 MCPClient，复用现有 callTool 链路
+- ✨ **配置 UI** — McpConfigPage 新增"添加 Streamable HTTP MCP 服务"按钮，含 name/endpoint/authToken 输入 + 立即测试连接
+
+### 🐛 Fixed - 修复
+
+- 🐛 **copyWith 透传 sessionId/messageId** — 修复 McpToolCallRecord.copyWith() 未透传 sessionId/messageId，导致 complete/fail/cancel 后内存状态丢失关联的问题（DB 持久化不受影响）
+- 🐛 **cleanupOldMcpToolCallHistories 返回类型** — 修复 customStatement 返回 Future<void> 但方法签名声明 Future<int> 的类型不匹配 error
+
+### 🔄 Changed - 变更
+
+- 🔄 **McpServerManager.addOrUpdateServer** — 新增可选参数 endpoint/authToken（向后兼容）
+- 🔄 **database_connection.updateMcpServerConfigByServerId** — 新增可选参数 endpoint/authToken
+- 🔄 **McpToolCallNotifier** — 构造函数新增可选参数 historyRepo（向后兼容，用于测试注入）
+- 🔄 **McpToolCallHistoryRepository** — 构造函数新增可选参数 db（向后兼容，用于测试注入）
+- 🔄 **McpToolCallNotifier.start** — 新增可选参数 sessionId/messageId（向后兼容）
+- 🔄 **McpToolCallRecord.copyWith** — 新增可选参数 sessionId/messageId（向后兼容）
+
+### ✅ 验证
+
+- **flutter analyze**: v0.45.0 修改文件 0 errors（预先存在的 new_expert_skills.dart / llama_plugin_service.dart 错误非本次引入）
+- **单元测试**: mcp_tool_call_provider_test 扩展 7 case（共 16 case）+ mcp_tool_call_history_repository_test 新建 10 case，全部通过
+- **三端编译**: iOS ✅ (43.3s, 208.6MB) / Android ✅ (77.9s, 138.2MB) / macOS ✅ (281.3MB)
+- **IPA**: release/v0.45.0/MJ_Nexus_v0.45.0.ipa (54MB)
+
+### 📝 技术债
+
+- new_expert_skills.dart 中约 14 个预先存在的 error（IconData/SkillResult 类型不匹配），非 v0.45.0 引入
+- llama_plugin_service.dart:179 类型不匹配（Map<dynamic, dynamic> vs Map<String, dynamic>），非 v0.45.0 引入
+- 5 个预先存在的测试失败（thinking 解析/A2A 重连相关），非 v0.45.0 引入
+- open-source / master 分支同步策略待独立决策
+
 ## [0.44.0] - 2026-06-30
 
 ### ✨ Added - 新增功能

@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/protocols/mcp_protocol.dart';
 import '../../../../core/protocols/mcp_server_manager.dart';
 import '../../../session/domain/session_mcp_tool_manager.dart';
+import '../../data/repositories/mcp_tool_call_history_repository.dart';
 import '../../providers/mcp_tool_call_provider.dart';
 
 class McpToolExplorerPage extends ConsumerStatefulWidget {
@@ -41,12 +42,64 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
   String? _expandedServerId;
   // v0.44.0: 调用历史筛选状态
   McpToolCallStatus? _statusFilter;
+  // v0.45.0: DB 分页历史状态
+  int _historyOffset = 0;
+  int _historyTotal = 0;
+  bool _historyLoading = false;
+  String? _toolNameSearch;
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  final McpToolCallHistoryRepository _historyRepo =
+      McpToolCallHistoryRepository();
 
   @override
   void initState() {
     super.initState();
     _toolManager = SessionMcpToolManager(McpServerManager());
     _loadTools();
+    _loadHistory();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  /// v0.45.0: 从 DB 加载调用历史（分页 + 筛选 + 搜索）
+  Future<void> _loadHistory({bool reset = true}) async {
+    if (_historyLoading) return;
+    setState(() => _historyLoading = true);
+    try {
+      final offset = reset ? 0 : _historyOffset;
+      final notifier = ref.read(mcpToolCallProvider.notifier);
+      await notifier.loadHistory(
+        sessionId: widget.sessionId,
+        limit: 20,
+        offset: offset,
+        statusFilter: _statusFilter?.name,
+        toolNameSearch: _toolNameSearch,
+      );
+      final total = await _historyRepo.getCount(
+        statusFilter: _statusFilter?.name,
+        toolNameSearch: _toolNameSearch,
+      );
+      _historyOffset = offset + 20;
+      _historyTotal = total;
+    } catch (e) {
+      debugPrint('[McpExplorer] loadHistory failed: $e');
+    } finally {
+      if (mounted) setState(() => _historyLoading = false);
+    }
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _toolNameSearch = value.trim().isEmpty ? null : value.trim();
+      _loadHistory(reset: true);
+    });
   }
 
   Future<void> _loadTools() async {
@@ -163,12 +216,11 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
     );
   }
 
-  /// v0.44.0: 调用历史筛选区（内存筛选 + 清空）
+  /// v0.45.0: 调用历史区（DB 分页 + 搜索 + 筛选）
   Widget _buildHistorySection(ThemeData theme) {
     final state = ref.watch(mcpToolCallProvider);
-    final records = _statusFilter == null
-        ? state.records
-        : state.records.where((r) => r.status == _statusFilter).toList();
+    final records = state.records;
+    final hasMore = _historyOffset < _historyTotal;
 
     return Container(
       decoration: BoxDecoration(
@@ -189,19 +241,23 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(fontWeight: FontWeight.w600)),
                 const SizedBox(width: 8),
-                if (records.isNotEmpty)
-                  Text('${records.length}',
+                if (_historyTotal > 0)
+                  Text('$_historyTotal',
                       style: TextStyle(
                         fontSize: 11,
                         color: theme.colorScheme.outline,
                       )),
                 const Spacer(),
-                if (records.isNotEmpty)
+                if (records.isNotEmpty || _historyTotal > 0)
                   TextButton.icon(
                     icon: const Icon(Icons.delete_outline, size: 14),
                     label: const Text('清空', style: TextStyle(fontSize: 12)),
-                    onPressed: () {
+                    onPressed: () async {
+                      await _historyRepo.cleanupOlderThan(0);
                       ref.read(mcpToolCallProvider.notifier).clear();
+                      _historyOffset = 0;
+                      _historyTotal = 0;
+                      if (mounted) setState(() {});
                     },
                     style: TextButton.styleFrom(
                       minimumSize: const Size(0, 28),
@@ -209,6 +265,28 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
                     ),
                   ),
               ],
+            ),
+          ),
+          // v0.45.0: 搜索框
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+            child: TextField(
+              controller: _searchController,
+              style: const TextStyle(fontSize: 12),
+              decoration: InputDecoration(
+                hintText: '搜索工具名...',
+                hintStyle: const TextStyle(fontSize: 12),
+                prefixIcon: const Icon(Icons.search, size: 16),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide:
+                      BorderSide(color: theme.colorScheme.outlineVariant),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              onChanged: _onSearchChanged,
             ),
           ),
           // 状态筛选 Chip 行
@@ -228,7 +306,7 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
               ],
             ),
           ),
-          if (records.isEmpty)
+          if (records.isEmpty && !_historyLoading)
             Padding(
               padding: const EdgeInsets.all(16),
               child: Center(
@@ -241,17 +319,41 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
                 ),
               ),
             )
-          else
+          else ...[
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final r in records.take(10))
+                  for (final r in records.take(20))
                     _HistoryItem(record: r, theme: theme),
                 ],
               ),
             ),
+            if (hasMore)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                child: OutlinedButton.icon(
+                  onPressed: _historyLoading
+                      ? null
+                      : () => _loadHistory(reset: false),
+                  icon: _historyLoading
+                      ? const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.expand_more, size: 16),
+                  label: Text(
+                    _historyLoading ? '加载中...' : '加载更多',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 28),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -266,6 +368,7 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
         setState(() {
           _statusFilter = selected ? null : status;
         });
+        _loadHistory(reset: true); // v0.45.0: DB 端筛选
       },
       visualDensity: VisualDensity.compact,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -372,12 +475,19 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
     String toolName,
     Map<String, dynamic> arguments,
   ) async {
+    // v0.45.0: 写工具二次确认（防止误操作）
+    if (_isWriteTool(toolName)) {
+      final confirmed = await _showWriteConfirmDialog(context, toolName);
+      if (!confirmed) return;
+    }
+
     final notifier = ref.read(mcpToolCallProvider.notifier);
     final callId = notifier.start(
       serverId: serverId,
       serverName: serverName,
       toolName: toolName,
       arguments: jsonEncode(arguments),
+      sessionId: widget.sessionId, // v0.45.0: 关联会话
     );
 
     try {
@@ -407,6 +517,40 @@ class _McpToolExplorerPageState extends ConsumerState<McpToolExplorerPage> {
       if (!mounted) return;
       notifier.fail(callId, error: e.toString());
     }
+  }
+
+  /// v0.45.0: 判断是否为写工具（需要二次确认）
+  bool _isWriteTool(String name) {
+    final lower = name.toLowerCase();
+    return lower.contains('write') ||
+        lower.contains('delete') ||
+        lower.contains('move') ||
+        lower.contains('create') ||
+        lower.contains('remove') ||
+        lower.contains('update');
+  }
+
+  /// v0.45.0: 写工具二次确认对话框
+  Future<bool> _showWriteConfirmDialog(
+      BuildContext ctx, String toolName) async {
+    final result = await showDialog<bool>(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        title: const Text('确认执行写操作'),
+        content: Text('工具「$toolName」可能修改数据。确认要执行吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('确认执行'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 }
 

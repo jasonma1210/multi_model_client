@@ -301,6 +301,8 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage>
             env: envMap,
             isEnabled: true,
             isAutoStart: true,
+            endpoint: serverConfig['endpoint'] as String?, // v0.45.0
+            authToken: serverConfig['authToken'] as String?, // v0.45.0
           );
           debugPrint('[McpConfig] ✅ DB 同步完成: $serverId');
         } catch (e) {
@@ -376,6 +378,21 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage>
 
     return Column(
       children: [
+        // v0.45.0: 添加自定义 HTTP MCP 服务按钮
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _showAddHttpServerDialog(theme),
+              icon: const Icon(Icons.add_link),
+              label: const Text('添加 Streamable HTTP MCP 服务'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ),
         // 搜索框
         Padding(
           padding: const EdgeInsets.all(16),
@@ -754,6 +771,132 @@ class _McpConfigPageState extends ConsumerState<McpConfigPage>
       }
     } catch (e) {
       debugPrint('[McpConfig] mcp.so 搜索失败: $e');
+    }
+  }
+
+  /// v0.45.0: 添加自定义 Streamable HTTP MCP 服务对话框
+  Future<void> _showAddHttpServerDialog(ThemeData theme) async {
+    final nameController = TextEditingController();
+    final endpointController = TextEditingController();
+    final tokenController = TextEditingController();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('添加 HTTP MCP 服务'),
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: '服务名称',
+                      hintText: '例如：远程文件系统',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: endpointController,
+                    decoration: const InputDecoration(
+                      labelText: 'Endpoint URL',
+                      hintText: 'https://api.example.com/mcp',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: tokenController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Auth Token（可选）',
+                      hintText: 'Bearer Token',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('保存并测试'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    // 在 dispose 之前读取值
+    final name = nameController.text.trim().isEmpty
+        ? 'http-mcp-${DateTime.now().millisecondsSinceEpoch}'
+        : nameController.text.trim();
+    final endpoint = endpointController.text.trim();
+    final token = tokenController.text.trim().isEmpty
+        ? null
+        : tokenController.text.trim();
+
+    nameController.dispose();
+    endpointController.dispose();
+    tokenController.dispose();
+
+    if (!confirmed) return;
+
+    if (endpoint.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Endpoint URL 不能为空')),
+      );
+      return;
+    }
+
+    final serverId = 'http-${DateTime.now().millisecondsSinceEpoch}';
+    final serverManager = McpServerManager();
+
+    try {
+      await serverManager.addOrUpdateServer(
+        serverId: serverId,
+        name: name,
+        type: 'streamable_http',
+        command: '', // HTTP 类型不需要 command
+        args: const [],
+        env: const {},
+        isEnabled: true,
+        isAutoStart: false,
+        endpoint: endpoint,
+        authToken: token,
+      );
+
+      // 立即测试连接
+      final client = await serverManager.startServer(serverId);
+      if (!mounted) return;
+      if (client != null) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('✅ $name 连接成功'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        await _loadConfiguredServers();
+      } else {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('❌ $name 连接失败，请检查 Endpoint 和 Token'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('添加失败: $e')),
+      );
     }
   }
 }

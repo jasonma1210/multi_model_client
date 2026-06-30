@@ -22,9 +22,13 @@ class McpToolCallCard extends ConsumerStatefulWidget {
   /// 是否默认展开
   final bool initiallyExpanded;
 
+  /// v0.45.0: 重新执行回调（null 时不显示「重新执行」菜单项）
+  final void Function(McpToolCallRecord record)? onRerun;
+
   const McpToolCallCard({
     super.key,
     this.initiallyExpanded = false,
+    this.onRerun,
   });
 
   @override
@@ -133,7 +137,13 @@ class _McpToolCallCardState extends ConsumerState<McpToolCallCard> {
           const Divider(height: 1),
           const SizedBox(height: 8),
           for (final record in records.take(5)) ...[
-            _McpCallItem(record: record, theme: theme),
+            _McpCallItem(
+              record: record,
+              theme: theme,
+              onRerun: widget.onRerun == null
+                  ? null
+                  : () => widget.onRerun!(record),
+            ),
             const SizedBox(height: 6),
           ],
         ],
@@ -146,8 +156,13 @@ class _McpToolCallCardState extends ConsumerState<McpToolCallCard> {
 class _McpCallItem extends StatefulWidget {
   final McpToolCallRecord record;
   final ThemeData theme;
+  final VoidCallback? onRerun; // v0.45.0: 重新执行回调
 
-  const _McpCallItem({required this.record, required this.theme});
+  const _McpCallItem({
+    required this.record,
+    required this.theme,
+    this.onRerun,
+  });
 
   @override
   State<_McpCallItem> createState() => _McpCallItemState();
@@ -206,7 +221,7 @@ class _McpCallItemState extends State<_McpCallItem> {
                 ),
               ),
               _StatusBadge(status: r.status),
-              _CopyMenu(record: r),
+              _CopyMenu(record: r, onRerun: widget.onRerun),
             ],
           ),
           const SizedBox(height: 4),
@@ -545,10 +560,11 @@ class _ErrorBlock extends StatelessWidget {
   }
 }
 
-/// v0.44.0: 复制菜单（调用信息 / 结果 / Markdown）
+/// v0.45.0: 复制菜单（调用信息 / JSON / 结果 / Markdown / 重新执行）
 class _CopyMenu extends StatelessWidget {
   final McpToolCallRecord record;
-  const _CopyMenu({required this.record});
+  final VoidCallback? onRerun; // v0.45.0: 重新执行回调
+  const _CopyMenu({required this.record, this.onRerun});
 
   @override
   Widget build(BuildContext context) {
@@ -560,19 +576,30 @@ class _CopyMenu extends StatelessWidget {
       onSelected: (value) => _onSelected(context, value),
       itemBuilder: (_) => [
         const PopupMenuItem(value: 'call', child: Text('复制调用信息')),
+        const PopupMenuItem(value: 'json', child: Text('复制 JSON')), // v0.45.0
         if (record.result != null)
           const PopupMenuItem(value: 'result', child: Text('复制结果')),
         const PopupMenuItem(value: 'markdown', child: Text('复制为 Markdown')),
+        if (onRerun != null)
+          const PopupMenuItem(value: 'rerun', child: Text('重新执行')), // v0.45.0
       ],
     );
   }
 
   void _onSelected(BuildContext context, String action) {
+    // v0.45.0: 重新执行不走剪贴板
+    if (action == 'rerun') {
+      onRerun?.call();
+      return;
+    }
     final messenger = ScaffoldMessenger.of(context);
     String data;
     switch (action) {
       case 'call':
         data = '${record.serverName} › ${record.toolName}\n${record.arguments}';
+        break;
+      case 'json': // v0.45.0: 复制美化后的入参 JSON
+        data = _pretty(record.arguments);
         break;
       case 'result':
         data = record.result ?? '';

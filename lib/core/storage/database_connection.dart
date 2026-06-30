@@ -199,6 +199,55 @@ LazyDatabase openConnection() {
         } catch (e) {
           // 表已存在，忽略
         }
+
+        // v0.45.0: 修复 v0.43.0 遗留的 McpServerConfigs endpoint/authToken 迁移缺失
+        // 双写策略：与 database.dart onUpgrade 保持同步
+        try {
+          db.execute('ALTER TABLE mcp_server_configs ADD COLUMN endpoint TEXT');
+        } catch (e) {
+          // 忽略：列已存在
+        }
+        try {
+          db.execute('ALTER TABLE mcp_server_configs ADD COLUMN auth_token TEXT');
+        } catch (e) {
+          // 忽略：列已存在
+        }
+
+        // v0.45.0: 新建 MCP 工具调用历史表（双写策略）
+        try {
+          db.execute('''
+            CREATE TABLE IF NOT EXISTS mcp_tool_call_histories (
+              id TEXT PRIMARY KEY,
+              session_id TEXT,
+              message_id TEXT,
+              server_id TEXT NOT NULL,
+              server_name TEXT NOT NULL,
+              tool_name TEXT NOT NULL,
+              arguments TEXT,
+              result TEXT,
+              error TEXT,
+              status TEXT NOT NULL,
+              started_at INTEGER NOT NULL,
+              completed_at INTEGER
+            )
+          ''');
+        } catch (e) {
+          // 表已存在，忽略
+        }
+
+        // v0.45.0: 启动时清理 MCP 调用历史，保留最近 1000 条
+        try {
+          db.execute('''
+            DELETE FROM mcp_tool_call_histories
+            WHERE id NOT IN (
+              SELECT id FROM mcp_tool_call_histories
+              ORDER BY started_at DESC
+              LIMIT 1000
+            )
+          ''');
+        } catch (e) {
+          // 忽略：表可能不存在
+        }
       },
     );
   });
@@ -476,6 +525,23 @@ extension AppDatabaseDAO on AppDatabase {
   Future<int> deleteDownloadTask(String id) =>
       (delete(downloadTasks)..where((t) => t.id.equals(id))).go();
 
+  // v0.45.0: MCP Server Config DAO methods — 补充 endpoint/authToken 字段更新
+  /// 通过 serverId 更新服务器配置（含 v0.45.0 新增的 endpoint/authToken）
+  Future<int> updateMcpServerConfigEndpoint({
+    required String serverId,
+    String? endpoint,
+    String? authToken,
+  }) async {
+    final existing = await getMcpServerConfigByServerId(serverId);
+    if (existing == null) return 0;
+    final companion = McpServerConfigsCompanion(
+      endpoint: endpoint != null ? Value(endpoint) : const Value.absent(),
+      authToken: authToken != null ? Value(authToken) : const Value.absent(),
+    );
+    return (update(mcpServerConfigs)..where((t) => t.id.equals(existing.id)))
+        .write(companion);
+  }
+
   // MCP Server Config DAO methods
   Future<int> insertMcpServerConfig(McpServerConfigsCompanion config) =>
       into(mcpServerConfigs).insert(config);
@@ -505,10 +571,12 @@ extension AppDatabaseDAO on AppDatabase {
     String? env,
     bool? isEnabled,
     bool? isAutoStart,
+    String? endpoint, // v0.45.0: Streamable HTTP 端点
+    String? authToken, // v0.45.0: Bearer Token
   }) async {
     final existing = await getMcpServerConfigByServerId(serverId);
     if (existing == null) return 0;
-    
+
     final companion = McpServerConfigsCompanion(
       id: Value(existing.id),
       serverId: Value(serverId),
@@ -518,7 +586,10 @@ extension AppDatabaseDAO on AppDatabase {
       args: args != null ? Value(args) : const Value.absent(),
       env: env != null ? Value(env) : const Value.absent(),
       isEnabled: isEnabled != null ? Value(isEnabled) : const Value.absent(),
-      isAutoStart: isAutoStart != null ? Value(isAutoStart) : const Value.absent(),
+      isAutoStart:
+          isAutoStart != null ? Value(isAutoStart) : const Value.absent(),
+      endpoint: endpoint != null ? Value(endpoint) : const Value.absent(),
+      authToken: authToken != null ? Value(authToken) : const Value.absent(),
     );
     
     return (update(mcpServerConfigs)..where((t) => t.id.equals(existing.id)))
@@ -578,6 +649,82 @@ extension AppDatabaseDAO on AppDatabase {
               (t) => OrderingTerm.desc(t.updatedAt),
             ]))
           .get();
+
+  // ════════════════════════════════════════════════════════════════════════
+  // v0.45.0: MCP Tool Call History DAO methods
+  // ════════════════════════════════════════════════════════════════════════
+
+  /// 插入一条 MCP 工具调用历史记录
+  Future<int> insertMcpToolCallHistory(McpToolCallHistoriesCompanion record) =>
+      into(mcpToolCallHistories).insert(record);
+
+  /// 通过 id 更新调用状态（status/result/error/completedAt）
+  Future<int> updateMcpToolCallHistoryStatus({
+    required String id,
+    String? status,
+    String? result,
+    String? error,
+    int? completedAt,
+  }) {
+    final companion = McpToolCallHistoriesCompanion(
+      status: status != null ? Value(status) : const Value.absent(),
+      result: result != null ? Value(result) : const Value.absent(),
+      error: error != null ? Value(error) : const Value.absent(),
+      completedAt: completedAt != null ? Value(completedAt) : const Value.absent(),
+    );
+    return (update(mcpToolCallHistories)..where((t) => t.id.equals(id)))
+        .write(companion);
+  }
+
+  /// 分页查询调用历史（按 startedAt DESC）
+  /// [statusFilter] 可选状态筛选（running/success/failed/canceled）
+  /// [toolNameSearch] 可选 toolName LIKE 模糊匹配
+  Future<List<McpToolCallHistory>> getRecentMcpToolCallHistories({
+    int limit = 20,
+    int offset = 0,
+    String? statusFilter,
+    String? toolNameSearch,
+  }) {
+    final query = select(mcpToolCallHistories);
+    if (statusFilter != null) {
+      query.where((t) => t.status.equals(statusFilter));
+    }
+    if (toolNameSearch != null && toolNameSearch.isNotEmpty) {
+      query.where((t) => t.toolName.like('%$toolNameSearch%'));
+    }
+    query
+      ..orderBy([(t) => OrderingTerm.desc(t.startedAt)])
+      ..limit(limit, offset: offset);
+    return query.get();
+  }
+
+  /// 获取调用历史总数（可选筛选）
+  Future<int> getMcpToolCallHistoryCount({
+    String? statusFilter,
+    String? toolNameSearch,
+  }) async {
+    final countExpr = mcpToolCallHistories.id.count();
+    final query = selectOnly(mcpToolCallHistories)..addColumns([countExpr]);
+    if (statusFilter != null) {
+      query.where(mcpToolCallHistories.status.equals(statusFilter));
+    }
+    if (toolNameSearch != null && toolNameSearch.isNotEmpty) {
+      query.where(mcpToolCallHistories.toolName.like('%$toolNameSearch%'));
+    }
+    final result = await query.getSingle();
+    return result.read(countExpr) ?? 0;
+  }
+
+  /// 清理旧记录，保留最近 [keepLatestN] 条
+  Future<void> cleanupOldMcpToolCallHistories(int keepLatestN) async {
+    final db = this;
+    // 用原生 SQL 执行子查询删除
+    await db.customStatement(
+      'DELETE FROM mcp_tool_call_histories WHERE id NOT IN '
+      '(SELECT id FROM mcp_tool_call_histories ORDER BY started_at DESC LIMIT ?)',
+      [keepLatestN],
+    );
+  }
 }
 
 // Global database singleton — one connection for the entire app lifetime.

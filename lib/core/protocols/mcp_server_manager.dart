@@ -9,6 +9,7 @@ import '../storage/database.dart';
 import '../storage/database_connection.dart';
 import 'mcp_protocol.dart';
 import 'mcp_server.dart';
+import 'mcp_transports/mcp_streamable_http_transport.dart';
 
 /// MCP服务器状态
 enum McpServerStatus {
@@ -28,6 +29,7 @@ class McpServerManager {
   final Map<String, McpServerStatus> _serverStatuses = {};
   final Map<String, StreamSubscription> _stdoutSubscriptions = {};
   final Map<String, StreamSubscription> _stderrSubscriptions = {};
+  final Map<String, McpStreamableHttpTransport> _httpTransports = {}; // v0.45.0
 
   final _statusController = StreamController<McpServerStatusEvent>.broadcast();
   final _logController = StreamController<McpServerLogEvent>.broadcast();
@@ -152,6 +154,8 @@ class McpServerManager {
     required Map<String, String> env,
     required bool isEnabled,
     required bool isAutoStart,
+    String? endpoint, // v0.45.0: Streamable HTTP 端点
+    String? authToken, // v0.45.0: Bearer Token
   }) async {
     final exists = await _db.getMcpServerConfigByServerId(serverId);
     if (exists != null) {
@@ -165,6 +169,8 @@ class McpServerManager {
         env: jsonEncode(env),
         isEnabled: isEnabled,
         isAutoStart: isAutoStart,
+        endpoint: endpoint, // v0.45.0
+        authToken: authToken, // v0.45.0
       );
       debugPrint('[McpServerManager] 更新服务器配置: $serverId');
     } else {
@@ -179,6 +185,8 @@ class McpServerManager {
         env: Value(jsonEncode(env)),
         isEnabled: Value(isEnabled),
         isAutoStart: Value(isAutoStart),
+        endpoint: Value(endpoint), // v0.45.0
+        authToken: Value(authToken), // v0.45.0
         createdAt: Value(DateTime.now()),
       ));
       debugPrint('[McpServerManager] 添加服务器配置: $serverId');
@@ -203,6 +211,11 @@ class McpServerManager {
     if (config == null) {
       debugPrint('MCP服务器配置不存在: $serverId');
       return null;
+    }
+
+    // v0.45.0: Streamable HTTP 类型走 HTTP transport（移动端也可用）
+    if (config.type == 'streamable_http') {
+      return await _startStreamableHttpServer(serverId, config);
     }
 
     // ★★★ 移动端命令兼容性检查 ★★★
@@ -343,12 +356,102 @@ class McpServerManager {
     }
   }
 
+  /// v0.45.0: 启动 Streamable HTTP MCP 服务器
+  ///
+  /// 使用 McpStreamableHttpTransport 发送 JSON-RPC 请求到远程 HTTP endpoint，
+  /// 适配为 MCPClient 的 sendRequest 回调，复用现有 callTool 链路。
+  Future<MCPClient?> _startStreamableHttpServer(
+    String serverId,
+    McpServerConfig config,
+  ) async {
+    if (config.endpoint == null || config.endpoint!.isEmpty) {
+      _updateStatus(serverId, McpServerStatus.error);
+      _addLog(serverId, 'error', 'Streamable HTTP endpoint 未配置');
+      return null;
+    }
+
+    // 如果已经在运行，先停止
+    if (_serverStatuses[serverId] == McpServerStatus.running) {
+      await stopServer(serverId);
+    }
+
+    try {
+      _updateStatus(serverId, McpServerStatus.starting);
+      _addLog(serverId, 'info', '正在连接 HTTP MCP 服务器...');
+
+      final transport = McpStreamableHttpTransport(
+        endpoint: config.endpoint!,
+        headers: {
+          if (config.authToken != null && config.authToken!.isNotEmpty)
+            'Authorization': 'Bearer ${config.authToken}',
+        },
+      );
+      _httpTransports[serverId] = transport;
+
+      // 1. 发送 initialize 请求
+      final initReq = MCPRequest(
+        jsonrpc: '2.0',
+        id: '1',
+        method: 'initialize',
+        params: {
+          'protocolVersion': '2025-03-26',
+          'clientInfo': {'name': 'mj_nexus', 'version': '0.45.0'},
+        },
+      );
+      await transport.connect(initReq);
+
+      // 2. 构造 transport→MCPClient 适配器
+      final client = MCPClient(
+        clientInfo: MCPClientInfo(name: 'mj_nexus', version: '0.45.0'),
+        sendRequest: (String reqJson) async {
+          final req = MCPRequest.fromJson(
+              jsonDecode(reqJson) as Map<String, dynamic>);
+          final resp = await transport.send(req);
+          return jsonEncode(resp.toJson());
+        },
+      );
+      await client.initialize();
+      _connectedClients[serverId] = client;
+
+      _updateStatus(serverId, McpServerStatus.running);
+      _addLog(serverId, 'info', 'HTTP MCP 服务器连接成功');
+
+      // 更新数据库状态
+      await _db.updateMcpServerConfig(McpServerConfigsCompanion(
+        id: Value(config.id),
+        lastConnectedTime: Value(DateTime.now()),
+        lastError: const Value(null),
+      ));
+
+      return client;
+    } catch (e, stackTrace) {
+      _updateStatus(serverId, McpServerStatus.error);
+      _addLog(serverId, 'error', 'HTTP MCP 连接失败: $e');
+      debugPrint('启动 HTTP MCP 服务器失败: $e\n$stackTrace');
+
+      await _httpTransports[serverId]?.close();
+      _httpTransports.remove(serverId);
+      _connectedClients.remove(serverId);
+
+      await _db.updateMcpServerConfig(McpServerConfigsCompanion(
+        id: Value(config.id),
+        lastError: Value(e.toString()),
+      ));
+
+      return null;
+    }
+  }
+
   /// 停止服务器
   Future<void> stopServer(String serverId) async {
     _addLog(serverId, 'info', '正在停止服务器...');
 
     // 断开客户端
     _connectedClients.remove(serverId);
+
+    // v0.45.0: 关闭 HTTP transport（如有）
+    await _httpTransports[serverId]?.close();
+    _httpTransports.remove(serverId);
 
     // 取消监听
     _stdoutSubscriptions[serverId]?.cancel();

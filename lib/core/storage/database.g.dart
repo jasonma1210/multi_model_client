@@ -17815,6 +17815,719 @@ class PromptScenariosCompanion extends UpdateCompanion<PromptScenario> {
   }
 }
 
+class $McpToolCallHistoriesTable extends McpToolCallHistories
+    with TableInfo<$McpToolCallHistoriesTable, McpToolCallHistory> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $McpToolCallHistoriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<String> sessionId = GeneratedColumn<String>(
+    'session_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+    'message_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _serverIdMeta = const VerificationMeta(
+    'serverId',
+  );
+  @override
+  late final GeneratedColumn<String> serverId = GeneratedColumn<String>(
+    'server_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _serverNameMeta = const VerificationMeta(
+    'serverName',
+  );
+  @override
+  late final GeneratedColumn<String> serverName = GeneratedColumn<String>(
+    'server_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _toolNameMeta = const VerificationMeta(
+    'toolName',
+  );
+  @override
+  late final GeneratedColumn<String> toolName = GeneratedColumn<String>(
+    'tool_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _argumentsMeta = const VerificationMeta(
+    'arguments',
+  );
+  @override
+  late final GeneratedColumn<String> arguments = GeneratedColumn<String>(
+    'arguments',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _resultMeta = const VerificationMeta('result');
+  @override
+  late final GeneratedColumn<String> result = GeneratedColumn<String>(
+    'result',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _errorMeta = const VerificationMeta('error');
+  @override
+  late final GeneratedColumn<String> error = GeneratedColumn<String>(
+    'error',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _startedAtMeta = const VerificationMeta(
+    'startedAt',
+  );
+  @override
+  late final GeneratedColumn<int> startedAt = GeneratedColumn<int>(
+    'started_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _completedAtMeta = const VerificationMeta(
+    'completedAt',
+  );
+  @override
+  late final GeneratedColumn<int> completedAt = GeneratedColumn<int>(
+    'completed_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    sessionId,
+    messageId,
+    serverId,
+    serverName,
+    toolName,
+    arguments,
+    result,
+    error,
+    status,
+    startedAt,
+    completedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'mcp_tool_call_histories';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<McpToolCallHistory> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    }
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    }
+    if (data.containsKey('server_id')) {
+      context.handle(
+        _serverIdMeta,
+        serverId.isAcceptableOrUnknown(data['server_id']!, _serverIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_serverIdMeta);
+    }
+    if (data.containsKey('server_name')) {
+      context.handle(
+        _serverNameMeta,
+        serverName.isAcceptableOrUnknown(data['server_name']!, _serverNameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_serverNameMeta);
+    }
+    if (data.containsKey('tool_name')) {
+      context.handle(
+        _toolNameMeta,
+        toolName.isAcceptableOrUnknown(data['tool_name']!, _toolNameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_toolNameMeta);
+    }
+    if (data.containsKey('arguments')) {
+      context.handle(
+        _argumentsMeta,
+        arguments.isAcceptableOrUnknown(data['arguments']!, _argumentsMeta),
+      );
+    }
+    if (data.containsKey('result')) {
+      context.handle(
+        _resultMeta,
+        result.isAcceptableOrUnknown(data['result']!, _resultMeta),
+      );
+    }
+    if (data.containsKey('error')) {
+      context.handle(
+        _errorMeta,
+        error.isAcceptableOrUnknown(data['error']!, _errorMeta),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
+    }
+    if (data.containsKey('started_at')) {
+      context.handle(
+        _startedAtMeta,
+        startedAt.isAcceptableOrUnknown(data['started_at']!, _startedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_startedAtMeta);
+    }
+    if (data.containsKey('completed_at')) {
+      context.handle(
+        _completedAtMeta,
+        completedAt.isAcceptableOrUnknown(
+          data['completed_at']!,
+          _completedAtMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  McpToolCallHistory map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return McpToolCallHistory(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}session_id'],
+      ),
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_id'],
+      ),
+      serverId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}server_id'],
+      )!,
+      serverName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}server_name'],
+      )!,
+      toolName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tool_name'],
+      )!,
+      arguments: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}arguments'],
+      ),
+      result: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}result'],
+      ),
+      error: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}error'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      startedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}started_at'],
+      )!,
+      completedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}completed_at'],
+      ),
+    );
+  }
+
+  @override
+  $McpToolCallHistoriesTable createAlias(String alias) {
+    return $McpToolCallHistoriesTable(attachedDatabase, alias);
+  }
+}
+
+class McpToolCallHistory extends DataClass
+    implements Insertable<McpToolCallHistory> {
+  final String id;
+  final String? sessionId;
+  final String? messageId;
+  final String serverId;
+  final String serverName;
+  final String toolName;
+  final String? arguments;
+  final String? result;
+  final String? error;
+  final String status;
+  final int startedAt;
+  final int? completedAt;
+  const McpToolCallHistory({
+    required this.id,
+    this.sessionId,
+    this.messageId,
+    required this.serverId,
+    required this.serverName,
+    required this.toolName,
+    this.arguments,
+    this.result,
+    this.error,
+    required this.status,
+    required this.startedAt,
+    this.completedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    if (!nullToAbsent || sessionId != null) {
+      map['session_id'] = Variable<String>(sessionId);
+    }
+    if (!nullToAbsent || messageId != null) {
+      map['message_id'] = Variable<String>(messageId);
+    }
+    map['server_id'] = Variable<String>(serverId);
+    map['server_name'] = Variable<String>(serverName);
+    map['tool_name'] = Variable<String>(toolName);
+    if (!nullToAbsent || arguments != null) {
+      map['arguments'] = Variable<String>(arguments);
+    }
+    if (!nullToAbsent || result != null) {
+      map['result'] = Variable<String>(result);
+    }
+    if (!nullToAbsent || error != null) {
+      map['error'] = Variable<String>(error);
+    }
+    map['status'] = Variable<String>(status);
+    map['started_at'] = Variable<int>(startedAt);
+    if (!nullToAbsent || completedAt != null) {
+      map['completed_at'] = Variable<int>(completedAt);
+    }
+    return map;
+  }
+
+  McpToolCallHistoriesCompanion toCompanion(bool nullToAbsent) {
+    return McpToolCallHistoriesCompanion(
+      id: Value(id),
+      sessionId: sessionId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sessionId),
+      messageId: messageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(messageId),
+      serverId: Value(serverId),
+      serverName: Value(serverName),
+      toolName: Value(toolName),
+      arguments: arguments == null && nullToAbsent
+          ? const Value.absent()
+          : Value(arguments),
+      result: result == null && nullToAbsent
+          ? const Value.absent()
+          : Value(result),
+      error: error == null && nullToAbsent
+          ? const Value.absent()
+          : Value(error),
+      status: Value(status),
+      startedAt: Value(startedAt),
+      completedAt: completedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(completedAt),
+    );
+  }
+
+  factory McpToolCallHistory.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return McpToolCallHistory(
+      id: serializer.fromJson<String>(json['id']),
+      sessionId: serializer.fromJson<String?>(json['sessionId']),
+      messageId: serializer.fromJson<String?>(json['messageId']),
+      serverId: serializer.fromJson<String>(json['serverId']),
+      serverName: serializer.fromJson<String>(json['serverName']),
+      toolName: serializer.fromJson<String>(json['toolName']),
+      arguments: serializer.fromJson<String?>(json['arguments']),
+      result: serializer.fromJson<String?>(json['result']),
+      error: serializer.fromJson<String?>(json['error']),
+      status: serializer.fromJson<String>(json['status']),
+      startedAt: serializer.fromJson<int>(json['startedAt']),
+      completedAt: serializer.fromJson<int?>(json['completedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'sessionId': serializer.toJson<String?>(sessionId),
+      'messageId': serializer.toJson<String?>(messageId),
+      'serverId': serializer.toJson<String>(serverId),
+      'serverName': serializer.toJson<String>(serverName),
+      'toolName': serializer.toJson<String>(toolName),
+      'arguments': serializer.toJson<String?>(arguments),
+      'result': serializer.toJson<String?>(result),
+      'error': serializer.toJson<String?>(error),
+      'status': serializer.toJson<String>(status),
+      'startedAt': serializer.toJson<int>(startedAt),
+      'completedAt': serializer.toJson<int?>(completedAt),
+    };
+  }
+
+  McpToolCallHistory copyWith({
+    String? id,
+    Value<String?> sessionId = const Value.absent(),
+    Value<String?> messageId = const Value.absent(),
+    String? serverId,
+    String? serverName,
+    String? toolName,
+    Value<String?> arguments = const Value.absent(),
+    Value<String?> result = const Value.absent(),
+    Value<String?> error = const Value.absent(),
+    String? status,
+    int? startedAt,
+    Value<int?> completedAt = const Value.absent(),
+  }) => McpToolCallHistory(
+    id: id ?? this.id,
+    sessionId: sessionId.present ? sessionId.value : this.sessionId,
+    messageId: messageId.present ? messageId.value : this.messageId,
+    serverId: serverId ?? this.serverId,
+    serverName: serverName ?? this.serverName,
+    toolName: toolName ?? this.toolName,
+    arguments: arguments.present ? arguments.value : this.arguments,
+    result: result.present ? result.value : this.result,
+    error: error.present ? error.value : this.error,
+    status: status ?? this.status,
+    startedAt: startedAt ?? this.startedAt,
+    completedAt: completedAt.present ? completedAt.value : this.completedAt,
+  );
+  McpToolCallHistory copyWithCompanion(McpToolCallHistoriesCompanion data) {
+    return McpToolCallHistory(
+      id: data.id.present ? data.id.value : this.id,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      serverId: data.serverId.present ? data.serverId.value : this.serverId,
+      serverName: data.serverName.present
+          ? data.serverName.value
+          : this.serverName,
+      toolName: data.toolName.present ? data.toolName.value : this.toolName,
+      arguments: data.arguments.present ? data.arguments.value : this.arguments,
+      result: data.result.present ? data.result.value : this.result,
+      error: data.error.present ? data.error.value : this.error,
+      status: data.status.present ? data.status.value : this.status,
+      startedAt: data.startedAt.present ? data.startedAt.value : this.startedAt,
+      completedAt: data.completedAt.present
+          ? data.completedAt.value
+          : this.completedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('McpToolCallHistory(')
+          ..write('id: $id, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('messageId: $messageId, ')
+          ..write('serverId: $serverId, ')
+          ..write('serverName: $serverName, ')
+          ..write('toolName: $toolName, ')
+          ..write('arguments: $arguments, ')
+          ..write('result: $result, ')
+          ..write('error: $error, ')
+          ..write('status: $status, ')
+          ..write('startedAt: $startedAt, ')
+          ..write('completedAt: $completedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    sessionId,
+    messageId,
+    serverId,
+    serverName,
+    toolName,
+    arguments,
+    result,
+    error,
+    status,
+    startedAt,
+    completedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is McpToolCallHistory &&
+          other.id == this.id &&
+          other.sessionId == this.sessionId &&
+          other.messageId == this.messageId &&
+          other.serverId == this.serverId &&
+          other.serverName == this.serverName &&
+          other.toolName == this.toolName &&
+          other.arguments == this.arguments &&
+          other.result == this.result &&
+          other.error == this.error &&
+          other.status == this.status &&
+          other.startedAt == this.startedAt &&
+          other.completedAt == this.completedAt);
+}
+
+class McpToolCallHistoriesCompanion
+    extends UpdateCompanion<McpToolCallHistory> {
+  final Value<String> id;
+  final Value<String?> sessionId;
+  final Value<String?> messageId;
+  final Value<String> serverId;
+  final Value<String> serverName;
+  final Value<String> toolName;
+  final Value<String?> arguments;
+  final Value<String?> result;
+  final Value<String?> error;
+  final Value<String> status;
+  final Value<int> startedAt;
+  final Value<int?> completedAt;
+  final Value<int> rowid;
+  const McpToolCallHistoriesCompanion({
+    this.id = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.messageId = const Value.absent(),
+    this.serverId = const Value.absent(),
+    this.serverName = const Value.absent(),
+    this.toolName = const Value.absent(),
+    this.arguments = const Value.absent(),
+    this.result = const Value.absent(),
+    this.error = const Value.absent(),
+    this.status = const Value.absent(),
+    this.startedAt = const Value.absent(),
+    this.completedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  McpToolCallHistoriesCompanion.insert({
+    required String id,
+    this.sessionId = const Value.absent(),
+    this.messageId = const Value.absent(),
+    required String serverId,
+    required String serverName,
+    required String toolName,
+    this.arguments = const Value.absent(),
+    this.result = const Value.absent(),
+    this.error = const Value.absent(),
+    required String status,
+    required int startedAt,
+    this.completedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       serverId = Value(serverId),
+       serverName = Value(serverName),
+       toolName = Value(toolName),
+       status = Value(status),
+       startedAt = Value(startedAt);
+  static Insertable<McpToolCallHistory> custom({
+    Expression<String>? id,
+    Expression<String>? sessionId,
+    Expression<String>? messageId,
+    Expression<String>? serverId,
+    Expression<String>? serverName,
+    Expression<String>? toolName,
+    Expression<String>? arguments,
+    Expression<String>? result,
+    Expression<String>? error,
+    Expression<String>? status,
+    Expression<int>? startedAt,
+    Expression<int>? completedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (sessionId != null) 'session_id': sessionId,
+      if (messageId != null) 'message_id': messageId,
+      if (serverId != null) 'server_id': serverId,
+      if (serverName != null) 'server_name': serverName,
+      if (toolName != null) 'tool_name': toolName,
+      if (arguments != null) 'arguments': arguments,
+      if (result != null) 'result': result,
+      if (error != null) 'error': error,
+      if (status != null) 'status': status,
+      if (startedAt != null) 'started_at': startedAt,
+      if (completedAt != null) 'completed_at': completedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  McpToolCallHistoriesCompanion copyWith({
+    Value<String>? id,
+    Value<String?>? sessionId,
+    Value<String?>? messageId,
+    Value<String>? serverId,
+    Value<String>? serverName,
+    Value<String>? toolName,
+    Value<String?>? arguments,
+    Value<String?>? result,
+    Value<String?>? error,
+    Value<String>? status,
+    Value<int>? startedAt,
+    Value<int?>? completedAt,
+    Value<int>? rowid,
+  }) {
+    return McpToolCallHistoriesCompanion(
+      id: id ?? this.id,
+      sessionId: sessionId ?? this.sessionId,
+      messageId: messageId ?? this.messageId,
+      serverId: serverId ?? this.serverId,
+      serverName: serverName ?? this.serverName,
+      toolName: toolName ?? this.toolName,
+      arguments: arguments ?? this.arguments,
+      result: result ?? this.result,
+      error: error ?? this.error,
+      status: status ?? this.status,
+      startedAt: startedAt ?? this.startedAt,
+      completedAt: completedAt ?? this.completedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<String>(sessionId.value);
+    }
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (serverId.present) {
+      map['server_id'] = Variable<String>(serverId.value);
+    }
+    if (serverName.present) {
+      map['server_name'] = Variable<String>(serverName.value);
+    }
+    if (toolName.present) {
+      map['tool_name'] = Variable<String>(toolName.value);
+    }
+    if (arguments.present) {
+      map['arguments'] = Variable<String>(arguments.value);
+    }
+    if (result.present) {
+      map['result'] = Variable<String>(result.value);
+    }
+    if (error.present) {
+      map['error'] = Variable<String>(error.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (startedAt.present) {
+      map['started_at'] = Variable<int>(startedAt.value);
+    }
+    if (completedAt.present) {
+      map['completed_at'] = Variable<int>(completedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('McpToolCallHistoriesCompanion(')
+          ..write('id: $id, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('messageId: $messageId, ')
+          ..write('serverId: $serverId, ')
+          ..write('serverName: $serverName, ')
+          ..write('toolName: $toolName, ')
+          ..write('arguments: $arguments, ')
+          ..write('result: $result, ')
+          ..write('error: $error, ')
+          ..write('status: $status, ')
+          ..write('startedAt: $startedAt, ')
+          ..write('completedAt: $completedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -17863,6 +18576,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $PromptScenariosTable promptScenarios = $PromptScenariosTable(
     this,
   );
+  late final $McpToolCallHistoriesTable mcpToolCallHistories =
+      $McpToolCallHistoriesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -17894,6 +18609,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     researchSections,
     thinkingTraces,
     promptScenarios,
+    mcpToolCallHistories,
   ];
 }
 
@@ -26426,6 +27142,359 @@ typedef $$PromptScenariosTableProcessedTableManager =
       PromptScenario,
       PrefetchHooks Function()
     >;
+typedef $$McpToolCallHistoriesTableCreateCompanionBuilder =
+    McpToolCallHistoriesCompanion Function({
+      required String id,
+      Value<String?> sessionId,
+      Value<String?> messageId,
+      required String serverId,
+      required String serverName,
+      required String toolName,
+      Value<String?> arguments,
+      Value<String?> result,
+      Value<String?> error,
+      required String status,
+      required int startedAt,
+      Value<int?> completedAt,
+      Value<int> rowid,
+    });
+typedef $$McpToolCallHistoriesTableUpdateCompanionBuilder =
+    McpToolCallHistoriesCompanion Function({
+      Value<String> id,
+      Value<String?> sessionId,
+      Value<String?> messageId,
+      Value<String> serverId,
+      Value<String> serverName,
+      Value<String> toolName,
+      Value<String?> arguments,
+      Value<String?> result,
+      Value<String?> error,
+      Value<String> status,
+      Value<int> startedAt,
+      Value<int?> completedAt,
+      Value<int> rowid,
+    });
+
+class $$McpToolCallHistoriesTableFilterComposer
+    extends Composer<_$AppDatabase, $McpToolCallHistoriesTable> {
+  $$McpToolCallHistoriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get serverId => $composableBuilder(
+    column: $table.serverId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get serverName => $composableBuilder(
+    column: $table.serverName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get toolName => $composableBuilder(
+    column: $table.toolName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get arguments => $composableBuilder(
+    column: $table.arguments,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get result => $composableBuilder(
+    column: $table.result,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get error => $composableBuilder(
+    column: $table.error,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get startedAt => $composableBuilder(
+    column: $table.startedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$McpToolCallHistoriesTableOrderingComposer
+    extends Composer<_$AppDatabase, $McpToolCallHistoriesTable> {
+  $$McpToolCallHistoriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get serverId => $composableBuilder(
+    column: $table.serverId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get serverName => $composableBuilder(
+    column: $table.serverName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get toolName => $composableBuilder(
+    column: $table.toolName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get arguments => $composableBuilder(
+    column: $table.arguments,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get result => $composableBuilder(
+    column: $table.result,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get error => $composableBuilder(
+    column: $table.error,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get startedAt => $composableBuilder(
+    column: $table.startedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$McpToolCallHistoriesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $McpToolCallHistoriesTable> {
+  $$McpToolCallHistoriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get sessionId =>
+      $composableBuilder(column: $table.sessionId, builder: (column) => column);
+
+  GeneratedColumn<String> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get serverId =>
+      $composableBuilder(column: $table.serverId, builder: (column) => column);
+
+  GeneratedColumn<String> get serverName => $composableBuilder(
+    column: $table.serverName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get toolName =>
+      $composableBuilder(column: $table.toolName, builder: (column) => column);
+
+  GeneratedColumn<String> get arguments =>
+      $composableBuilder(column: $table.arguments, builder: (column) => column);
+
+  GeneratedColumn<String> get result =>
+      $composableBuilder(column: $table.result, builder: (column) => column);
+
+  GeneratedColumn<String> get error =>
+      $composableBuilder(column: $table.error, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<int> get startedAt =>
+      $composableBuilder(column: $table.startedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => column,
+  );
+}
+
+class $$McpToolCallHistoriesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $McpToolCallHistoriesTable,
+          McpToolCallHistory,
+          $$McpToolCallHistoriesTableFilterComposer,
+          $$McpToolCallHistoriesTableOrderingComposer,
+          $$McpToolCallHistoriesTableAnnotationComposer,
+          $$McpToolCallHistoriesTableCreateCompanionBuilder,
+          $$McpToolCallHistoriesTableUpdateCompanionBuilder,
+          (
+            McpToolCallHistory,
+            BaseReferences<
+              _$AppDatabase,
+              $McpToolCallHistoriesTable,
+              McpToolCallHistory
+            >,
+          ),
+          McpToolCallHistory,
+          PrefetchHooks Function()
+        > {
+  $$McpToolCallHistoriesTableTableManager(
+    _$AppDatabase db,
+    $McpToolCallHistoriesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$McpToolCallHistoriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$McpToolCallHistoriesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$McpToolCallHistoriesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String?> sessionId = const Value.absent(),
+                Value<String?> messageId = const Value.absent(),
+                Value<String> serverId = const Value.absent(),
+                Value<String> serverName = const Value.absent(),
+                Value<String> toolName = const Value.absent(),
+                Value<String?> arguments = const Value.absent(),
+                Value<String?> result = const Value.absent(),
+                Value<String?> error = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> startedAt = const Value.absent(),
+                Value<int?> completedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => McpToolCallHistoriesCompanion(
+                id: id,
+                sessionId: sessionId,
+                messageId: messageId,
+                serverId: serverId,
+                serverName: serverName,
+                toolName: toolName,
+                arguments: arguments,
+                result: result,
+                error: error,
+                status: status,
+                startedAt: startedAt,
+                completedAt: completedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String?> sessionId = const Value.absent(),
+                Value<String?> messageId = const Value.absent(),
+                required String serverId,
+                required String serverName,
+                required String toolName,
+                Value<String?> arguments = const Value.absent(),
+                Value<String?> result = const Value.absent(),
+                Value<String?> error = const Value.absent(),
+                required String status,
+                required int startedAt,
+                Value<int?> completedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => McpToolCallHistoriesCompanion.insert(
+                id: id,
+                sessionId: sessionId,
+                messageId: messageId,
+                serverId: serverId,
+                serverName: serverName,
+                toolName: toolName,
+                arguments: arguments,
+                result: result,
+                error: error,
+                status: status,
+                startedAt: startedAt,
+                completedAt: completedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$McpToolCallHistoriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $McpToolCallHistoriesTable,
+      McpToolCallHistory,
+      $$McpToolCallHistoriesTableFilterComposer,
+      $$McpToolCallHistoriesTableOrderingComposer,
+      $$McpToolCallHistoriesTableAnnotationComposer,
+      $$McpToolCallHistoriesTableCreateCompanionBuilder,
+      $$McpToolCallHistoriesTableUpdateCompanionBuilder,
+      (
+        McpToolCallHistory,
+        BaseReferences<
+          _$AppDatabase,
+          $McpToolCallHistoriesTable,
+          McpToolCallHistory
+        >,
+      ),
+      McpToolCallHistory,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -26482,4 +27551,6 @@ class $AppDatabaseManager {
       $$ThinkingTracesTableTableManager(_db, _db.thinkingTraces);
   $$PromptScenariosTableTableManager get promptScenarios =>
       $$PromptScenariosTableTableManager(_db, _db.promptScenarios);
+  $$McpToolCallHistoriesTableTableManager get mcpToolCallHistories =>
+      $$McpToolCallHistoriesTableTableManager(_db, _db.mcpToolCallHistories);
 }

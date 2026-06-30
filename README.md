@@ -1201,10 +1201,98 @@ v0.43.0 发布后留下 4 项待决策事项（见 Session #39 末尾）。用�
 
 ### 待用户决策（v0.45.0）
 
-1. McpToolCallCard 是否需要"复制为 Markdown"等快捷操作（本次先打通 FC 主链路）
-2. McpToolExplorerPage 是否需要"调用历史"分页（本次先打通 FC 主链路）
-3. open-source 分支与 master 分支的同步策略（独立决策）
-4. v0.45.0 规划方向：Web 检索 API（DuckDuckGo / SerpAPI）集成、A2A Server 端在 MJ Nexus 内暴露、多模态 ImageInput 完整替换 ChatPage 现有 `_selectedImages` 流程
+1. ✅ McpToolCallCard 快捷操作（v0.45.0 已实现「复制 JSON」+「重新执行」）
+2. ✅ McpToolExplorerPage 调用历史分页（v0.45.0 已实现 DB 分页 + 搜索）
+3. ⏸ open-source 分支与 master 分支的同步策略（独立决策）
+4. 📋 v0.46.0 规划方向：Web 检索 API（DuckDuckGo / SerpAPI）集成、A2A Server 端在 MJ Nexus 内暴露、多模态 ImageInput 完整替换 ChatPage 现有 `_selectedImages` 流程
+
+---
+
+## Session #41 — v0.45.0 MCP 工具调用历史持久化 + 浏览器分页 + 写工具确认 + 快捷菜单 + Streamable HTTP MCP（2026-06-30）
+
+### 会话背景
+
+承接 v0.44.0 Function Calling 主链路打通后的待决策项，v0.45.0 聚焦 MCP 工具调用生命周期的完整闭环：从内存状态到 DB 持久化、从单页列表到分页搜索、从无保护执行到写工具二次确认、从基础展示到快捷操作、从 stdio 单一传输到 Streamable HTTP 多协议支持。
+
+### 主要目的
+
+1. MCP 工具调用历史持久化（DB schema 升级 + Repository + fire-and-forget 写入）
+2. MCP 工具浏览器 DB 分页加载（limit/offset + 状态筛选 + 工具名模糊搜索）
+3. 写工具二次确认（write/delete/move/create/remove/update 关键字匹配 + AlertDialog 确认）
+4. McpToolCallCard 快捷菜单扩展（复制 JSON + 重新执行）
+5. Streamable HTTP MCP 集成（transport 接入 McpServerManager + 配置 UI + 连通性测试）
+
+### 完成的主要任务
+
+1. **修复 copyWith Bug** — McpToolCallRecord.copyWith() 透传 sessionId/messageId（修复 complete/fail/cancel 后内存状态丢失关联）
+2. **修复 cleanupOldMcpToolCallHistories 返回类型** — customStatement 返回 Future<void> 但方法签名声明 Future<int> 的类型不匹配
+3. **扩展 mcp_tool_call_provider_test.dart** — 新增 7 case（toMap/fromMap 往返、copyWith 保留/覆盖、start 透传、complete 保留、loadHistory 合并/过滤）
+4. **新建 mcp_tool_call_history_repository_test.dart** — 10 case（insert/getRecent/updateStatus/分页/过滤/搜索/计数/清理/字段持久化/容错）
+5. **三端编译验证** — iOS 43.3s/208.6MB ✅ / Android 77.9s/138.2MB ✅ / macOS 281.3MB ✅
+6. **IPA 打包** — release/v0.45.0/MJ_Nexus_v0.45.0.ipa (54MB)
+7. **文档更新** — CHANGELOG.md / README.md / README_zh.md
+
+### 技术栈
+
+- Flutter / Dart / Drift ORM / Riverpod / MCP Protocol / SQLite
+- 测试：flutter_test + NativeDatabase.memory() 内存数据库隔离测试
+
+### 关键决策与解决方案
+
+1. **fire-and-forget 持久化** — `_historyRepo.insert/updateStatus` 不 await，失败仅 print 日志，不阻塞 UI
+2. **transport→MCPClient 适配器** — 把 `transport.send(MCPRequest)` 包装成 `Future<String> Function(String)` 注入 MCPClient，复用现有 callTool 链路
+3. **DB 分页 + 模糊搜索** — limit 20 + offset，statusFilter 精确匹配 + toolNameSearch LIKE 模糊匹配，300ms debounce
+4. **写工具二次确认** — 基于 toolName 关键字匹配（write/delete/move/create/remove/update），AlertDialog 确认后执行
+5. **type 分支策略** — 在 startServer 方法中，在移动端检查之前插入 `if (config.type == 'streamable_http')` 分支，stdio 逻辑完全保留
+6. **测试注入** — Repository/Notifier 构造函数新增可选参数（db/historyRepo），向后兼容，生产环境使用全局 singleton，测试环境注入内存数据库
+
+### 修改的文件
+
+#### 源代码修改（8 modified + 1 new）
+
+1. **lib/features/mcp/providers/mcp_tool_call_provider.dart** — McpToolCallRecord 扩展（sessionId/messageId/toMap/fromMap/copyWith 修复）+ Notifier 持久化（insert/updateStatus/loadHistory）+ 构造函数可选注入
+2. **lib/features/mcp/presentation/pages/mcp_tool_explorer_page.dart** — DB 分页加载 + 搜索 + 写工具二次确认
+3. **lib/features/mcp/presentation/mcp_tool_call_card.dart** — _CopyMenu 扩展（复制 JSON + 重新执行）
+4. **lib/core/protocols/mcp_server_manager.dart** — type 分支 + _startStreamableHttpServer + addOrUpdateServer endpoint/authToken + stopServer HTTP transport 关闭
+5. **lib/core/storage/database.dart** — McpToolCallHistories 表定义 + schemaVersion=13 + onUpgrade 迁移
+6. **lib/core/storage/database_connection.dart** — updateMcpServerConfigByServerId 支持 endpoint/authToken + 5 个 DAO 方法 + cleanupOldMcpToolCallHistories 返回类型修复
+7. **lib/core/storage/database.g.dart** — Drift 代码生成（McpToolCallHistoriesCompanion / McpToolCallHistory 类）
+8. **lib/features/mcp/presentation/pages/mcp_config_page.dart** — HTTP MCP 配置 UI + 测试连接
+9. **lib/features/mcp/data/repositories/mcp_tool_call_history_repository.dart**（新建）— fire-and-forget 持久化 Repository + 构造函数可选注入
+
+#### 测试文件（1 modified + 1 new）
+
+10. **test/mcp_tool_call_provider_test.dart** — 扩展 7 case（共 16 case）
+11. **test/mcp_tool_call_history_repository_test.dart**（新建）— 10 case
+
+#### 文档（3 modified）
+
+12. **CHANGELOG.md** — v0.45.0 章节
+13. **README.md** — Session #41 总结
+14. **README_zh.md** — Session #49 总结
+
+### 验证结果
+
+- **flutter analyze**: v0.45.0 修改文件 0 errors
+- **单元测试**: v0.45.0 新增 17 case 全部通过（provider 7 + repository 10）
+- **三端编译**: iOS ✅ / Android ✅ / macOS ✅
+- **IPA**: release/v0.45.0/MJ_Nexus_v0.45.0.ipa (54MB)
+
+### 发布物
+
+- **GitHub Tag**: v0.45.0
+- **GitHub Release**: https://github.com/jasonma1210/multi_model_client/releases/tag/v0.45.0
+- **IPA**: ~54 MB（`release/v0.45.0/MJ_Nexus_v0.45.0.ipa`）
+- **iOS 构建时间**: 43.3s
+- **Android 构建时间**: 77.9s
+- **macOS 构建产物**: 281.3MB
+
+### 待用户决策（v0.46.0）
+
+1. ⏸ open-source / master 分支同步策略（独立决策）
+2. 📋 v0.46.0 规划方向：Web 检索 API（DuckDuckGo / SerpAPI）集成、A2A Server 端在 MJ Nexus 内暴露、多模态 ImageInput 完整替换 ChatPage 现有 `_selectedImages` 流程
+3. 📋 new_expert_skills.dart 中约 14 个预先存在的 error 是否在 v0.46.0 修复
+4. 📋 5 个预先存在的测试失败（thinking 解析/A2A 重连相关）是否在 v0.46.0 修复
 
 
 

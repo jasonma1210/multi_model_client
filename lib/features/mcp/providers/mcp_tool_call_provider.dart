@@ -23,6 +23,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/repositories/mcp_tool_call_history_repository.dart';
+
 /// MCP 工具调用状态
 enum McpToolCallStatus {
   pending, // 已入队，尚未发送
@@ -65,6 +67,12 @@ class McpToolCallRecord {
   /// 完成时间（成功 / 失败 / 取消时）
   final DateTime? completedAt;
 
+  /// v0.45.0: 关联会话 ID（用于跨会话查询历史）
+  final String? sessionId;
+
+  /// v0.45.0: 关联消息 ID（用于追溯触发源）
+  final String? messageId;
+
   const McpToolCallRecord({
     required this.id,
     required this.serverId,
@@ -76,6 +84,8 @@ class McpToolCallRecord {
     this.result,
     this.error,
     this.completedAt,
+    this.sessionId,
+    this.messageId,
   });
 
   /// 耗时（未完成返回 null）
@@ -89,6 +99,8 @@ class McpToolCallRecord {
     String? error,
     McpToolCallStatus? status,
     DateTime? completedAt,
+    String? sessionId,
+    String? messageId,
   }) {
     return McpToolCallRecord(
       id: id,
@@ -101,8 +113,49 @@ class McpToolCallRecord {
       status: status ?? this.status,
       startedAt: startedAt,
       completedAt: completedAt ?? this.completedAt,
+      sessionId: sessionId ?? this.sessionId,
+      messageId: messageId ?? this.messageId,
     );
   }
+
+  /// v0.45.0: 序列化为 Map（用于持久化 + UI 传输）
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'sessionId': sessionId,
+        'messageId': messageId,
+        'serverId': serverId,
+        'serverName': serverName,
+        'toolName': toolName,
+        'arguments': arguments,
+        'result': result,
+        'error': error,
+        'status': status.name,
+        'startedAt': startedAt.millisecondsSinceEpoch,
+        'completedAt': completedAt?.millisecondsSinceEpoch,
+      };
+
+  /// v0.45.0: 从 Map 反序列化
+  factory McpToolCallRecord.fromMap(Map<String, dynamic> m) =>
+      McpToolCallRecord(
+        id: m['id'] as String,
+        sessionId: m['sessionId'] as String?,
+        messageId: m['messageId'] as String?,
+        serverId: m['serverId'] as String,
+        serverName: m['serverName'] as String,
+        toolName: m['toolName'] as String,
+        arguments: m['arguments'] as String? ?? '',
+        result: m['result'] as String?,
+        error: m['error'] as String?,
+        status: McpToolCallStatus.values.firstWhere(
+          (s) => s.name == m['status'],
+          orElse: () => McpToolCallStatus.failed,
+        ),
+        startedAt:
+            DateTime.fromMillisecondsSinceEpoch(m['startedAt'] as int),
+        completedAt: m['completedAt'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(m['completedAt'] as int),
+      );
 }
 
 /// MCP 工具调用状态容器
@@ -132,7 +185,12 @@ class McpToolCallState {
 
 /// MCP 工具调用 Notifier
 class McpToolCallNotifier extends StateNotifier<McpToolCallState> {
-  McpToolCallNotifier() : super(const McpToolCallState());
+  McpToolCallNotifier({McpToolCallHistoryRepository? historyRepo})
+      : _historyRepo = historyRepo ?? McpToolCallHistoryRepository(),
+        super(const McpToolCallState());
+
+  /// v0.45.0: 持久化 Repository（fire-and-forget，不阻塞 UI）
+  final McpToolCallHistoryRepository _historyRepo;
 
   /// 记录一次工具调用开始
   ///
@@ -142,6 +200,8 @@ class McpToolCallNotifier extends StateNotifier<McpToolCallState> {
     required String serverName,
     required String toolName,
     required String arguments,
+    String? sessionId, // v0.45.0: 关联会话
+    String? messageId, // v0.45.0: 关联消息
   }) {
     final id = _generateId();
     final record = McpToolCallRecord(
@@ -152,8 +212,11 @@ class McpToolCallNotifier extends StateNotifier<McpToolCallState> {
       arguments: arguments,
       status: McpToolCallStatus.running,
       startedAt: DateTime.now(),
+      sessionId: sessionId,
+      messageId: messageId,
     );
     state = state.copyWith(records: [record, ...state.records].take(McpToolCallState.maxRecords).toList());
+    _historyRepo.insert(record); // v0.45.0: 持久化（fire-and-forget）
     return id;
   }
 
@@ -164,6 +227,10 @@ class McpToolCallNotifier extends StateNotifier<McpToolCallState> {
           result: result,
           completedAt: DateTime.now(),
         ));
+    _historyRepo.updateStatus(callId,
+        status: McpToolCallStatus.success.name,
+        result: result,
+        completedAt: DateTime.now()); // v0.45.0: 持久化
   }
 
   /// 标记工具调用失败
@@ -173,6 +240,10 @@ class McpToolCallNotifier extends StateNotifier<McpToolCallState> {
           error: error,
           completedAt: DateTime.now(),
         ));
+    _historyRepo.updateStatus(callId,
+        status: McpToolCallStatus.failed.name,
+        error: error,
+        completedAt: DateTime.now()); // v0.45.0: 持久化
   }
 
   /// 标记工具调用被取消
@@ -181,11 +252,43 @@ class McpToolCallNotifier extends StateNotifier<McpToolCallState> {
           status: McpToolCallStatus.canceled,
           completedAt: DateTime.now(),
         ));
+    _historyRepo.updateStatus(callId,
+        status: McpToolCallStatus.canceled.name,
+        completedAt: DateTime.now()); // v0.45.0: 持久化
   }
 
   /// 清除所有记录
   void clear() {
     state = const McpToolCallState();
+  }
+
+  /// v0.45.0: 从 DB 加载历史记录到内存状态
+  ///
+  /// 合并 DB 历史与当前内存活跃记录（避免覆盖正在执行的调用）。
+  /// 供 McpToolExplorerPage 首屏加载和分页使用。
+  Future<void> loadHistory({
+    String? sessionId,
+    int limit = 20,
+    int offset = 0,
+    String? statusFilter,
+    String? toolNameSearch,
+  }) async {
+    final dbRecords = await _historyRepo.getRecent(
+      limit: limit,
+      offset: offset,
+      statusFilter: statusFilter,
+      toolNameSearch: toolNameSearch,
+    );
+    // 合并：DB 历史 + 内存活跃记录（去重 by id）
+    final activeIds = state.activeCalls.map((r) => r.id).toSet();
+    final merged = <McpToolCallRecord>[];
+    for (final r in dbRecords) {
+      if (!activeIds.contains(r.id)) merged.add(r);
+    }
+    merged.addAll(state.activeCalls);
+    merged.sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    state = state.copyWith(
+        records: merged.take(McpToolCallState.maxRecords).toList());
   }
 
   void _updateRecord(String callId, McpToolCallRecord Function(McpToolCallRecord) updater) {

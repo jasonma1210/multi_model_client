@@ -514,6 +514,28 @@ class WorkflowLogs extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// v0.45.0: MCP 工具调用历史表 — 持久化所有 MCP 工具调用记录
+/// 字段对齐内存版 `McpToolCallRecord`（mcp_tool_call_provider.dart）
+/// 用于跨会话回看、分页查询、按 serverId/toolName 筛选
+@DataClassName('McpToolCallHistory')
+class McpToolCallHistories extends Table {
+  TextColumn get id => text()(); // 调用 ID（与内存 record.id 一致）
+  TextColumn get sessionId => text().nullable()(); // 可空（手动调用为 null）
+  TextColumn get messageId => text().nullable()(); // 可空（关联消息）
+  TextColumn get serverId => text()();
+  TextColumn get serverName => text()(); // 快照，避免 Server 改名后 UI 错乱
+  TextColumn get toolName => text()();
+  TextColumn get arguments => text().nullable()(); // JSON 字符串
+  TextColumn get result => text().nullable()();
+  TextColumn get error => text().nullable()();
+  TextColumn get status => text()(); // running/success/failed/canceled
+  IntColumn get startedAt => integer()(); // Unix ms
+  IntColumn get completedAt => integer().nullable()(); // Unix ms
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 @DriftDatabase(tables: [
   Sessions,
   Messages,
@@ -542,12 +564,14 @@ class WorkflowLogs extends Table {
   ResearchSections,
   ThinkingTraces,
   PromptScenarios,
+  // v0.45.0 新增
+  McpToolCallHistories,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration {
@@ -811,6 +835,24 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(messages, messages.showThinking);
         } catch (_) {
           // 忽略：列已存在
+        }
+        // v0.45.0: 修复 v0.43.0 遗留的 McpServerConfigs endpoint/authToken 迁移缺失
+        // 老库升级到 v0.43.0 后查 endpoint 会报 "no such column"，此处补 addColumn
+        try {
+          await m.addColumn(mcpServerConfigs, mcpServerConfigs.endpoint);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        try {
+          await m.addColumn(mcpServerConfigs, mcpServerConfigs.authToken);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        // v0.45.0: 新建 MCP 工具调用历史表
+        try {
+          await m.createTable(mcpToolCallHistories);
+        } catch (_) {
+          // 忽略：表已存在
         }
       },
     );
