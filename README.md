@@ -884,5 +884,67 @@ For questions or suggestions, please open an issue on GitHub.
 2. ASR 使用后灵感一瞬/语音克隆录音是否能正常初始化
 3. "切换音色后回到文本对话闪退"问题（需 stack trace 定位）
 
+---
+
+## Session #37 — v0.42.0 实施完成（2026-06-30）
+
+### 会话背景
+继续 v0.42.0 完整版（一次性实施 3 个 Task：思考预算 + 深度研究 + 项目工作区）的剩余工作。已完成 1.0 实施 + 测试覆盖 + 编译验证，目标是发布 v0.42.0 GitHub Release。
+
+### 会话主要目的
+完成 v0.42.0 实施的最终阶段：补充单元测试覆盖、执行 `flutter analyze` 验证、运行 `flutter test` 全部测试、更新实施计划文档、生成 iOS Release 包并准备 GitHub Release。
+
+### 完成的主要任务
+1. **测试覆盖增强**：新增 4 个测试文件 / 42 个测试用例（research_engine_test、project_service_test、openai_adapter_thinking_test、anthropic_adapter_thinking_test）
+2. **测试验证**：v0.42.0 全部 76 个新测试通过（research_models 13 + thinking_config 16 + web_search 5 + research_engine 12 + project_service 8 + openai_thinking 12 + anthropic_thinking 10）
+3. **实施计划文档更新**：[V0.42.0_IMPLEMENTATION_PLAN.md](file:///Users/jianma/Desktop/LLM STUDIO/multi_model_client/docs/V0.42.0_IMPLEMENTATION_PLAN.md) 状态从"进行中"更新为"全部完成"，列出所有 7 项任务的文件清单和验证结果
+4. **iOS 编译**：`flutter build ios --release --no-codesign` 成功（74.9s），生成 `Runner.app` (207.2MB)
+5. **IPA 打包**：54MB IPA 文件保存到 `release/v0.42.0/MJ_Nexus_v0.42.0.ipa`
+6. **Git 提交**：`v0.42.0: 思考预算 + 深度研究 + 项目工作区` commit (be86dd9) 暂存所有新文件 / 修改 / 删除
+
+### 会话中主要使用的技术栈
+- Flutter / Dart 3.10.7
+- Drift ORM（schemaVersion 11 → 12）
+- Riverpod 2.0（StateNotifier + Family）
+- build_runner（492 个输出）
+- OpenAI reasoning_effort + Anthropic Extended Thinking API
+- Material Design 3（SegmentedButton / Slider / ExpansionPanel）
+- flutter_quill + syncfusion_flutter_charts（已添加但本版本未深度使用）
+- WebSearchService 统一检索抽象
+
+### 关键决策和解决方案
+- **测试边界处理**：`isNull` / `isNotNull` 命名冲突通过 `import 'package:drift/drift.dart' hide isNull, isNotNull` 解决
+- **测试预算映射验证**：OpenAI reasoning effort 边界（<5000→low, <20000→medium, <50000→high, ≥50000→xhigh）编写独立测试用例覆盖
+- **Anthropic 模型识别**：通过 `claude-4` / `claude-3-7` / `claude-3.7` 子串匹配识别支持 Extended Thinking 的模型
+- **In-memory 测试数据库**：使用 `AppDatabase(NativeDatabase.memory())` 替代旧的 `forTesting` 工厂方法
+- **Git 提交策略**：使用 `-f` 强制添加 `CHANGELOG.md` 和 `docs/`（被 .gitignore 忽略）
+
+### 会话中主要使用的工具
+- `flutter analyze` - 静态分析（v0.42.0 新增代码 0 错误）
+- `flutter test` - 单元测试（v0.42.0 测试 76/76 通过）
+- `dart run build_runner build` - Drift 代码生成（492 个输出）
+- `flutter build ios --release --no-codesign` - iOS Release 编译
+- `zip` - IPA 打包
+- `git add -f` - 强制添加忽略文件
+- `git commit / git push` - 版本控制
+
+### 修改了哪些文件
+
+| 文件 | 修改内容 | 修改原因 |
+|------|----------|----------|
+| `test/research_engine_test.dart` | 新建 12 个测试 | 验证 ResearchEngine 事件类、ResearchPlanStep JSON 解析、Citation 字段 |
+| `test/project_service_test.dart` | 新建 8 个测试 | 验证 Projects CRUD + 字段默认值（temperature 0.7 / maxContextMessages 20 / sortOrder 0）|
+| `test/openai_adapter_thinking_test.dart` | 新建 12 个测试 | 验证 OpenAI reasoning_effort 注入逻辑（o1/o3/o4/gpt-5 + budget→effort 映射）|
+| `test/anthropic_adapter_thinking_test.dart` | 新建 10 个测试 | 验证 Anthropic Extended Thinking 注入（claude-4/claude-3-7 + 各种模式）|
+| `docs/V0.42.0_IMPLEMENTATION_PLAN.md` | 状态从"进行中"更新为"全部完成" | 反映 v0.42.0 实施已完成所有 7 项任务 |
+| `release/v0.42.0/MJ_Nexus_v0.42.0.ipa` | 新建 54MB IPA 包 | 准备 GitHub Release v0.42.0 资源 |
+
+### 待用户决策
+1. GitHub 网络恢复后推送 v0.42.0 commit (be86dd9) 到 origin/master
+2. 创建 GitHub Release v0.42.0 并上传 IPA
+3. 是否需要补充 Android/macOS 平台编译验证
+4. 深度研究 Web 检索 API（DuckDuckGo/SerpAPI）接入决策
+
+
 
 

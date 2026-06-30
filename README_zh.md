@@ -420,3 +420,32 @@ flutter build ios --release
 | `lib/features/research/providers/research_provider.dart` | 新增 researchEngine/researchReport Provider | 深度研究状态管理 |
 | `lib/features/research/presentation/pages/research_input_page.dart` | 新增研究输入页面 | 深度研究入口 |
 | `lib/features/research/presentation/pages/research_result_page.dart` | 新增研究结果页面 | 实时显示进度、引用、报告 |
+
+---
+
+## Session #37 — v0.42.0 实施完成（2026-06-30）
+
+### 会话背景
+继续 v0.42.0 完整版（一次性实施 3 个 Task：思考预算 + 深度研究 + 项目工作区）的剩余工作。已完成实施 + 测试覆盖 + 编译验证。
+
+### 完成的主要任务
+1. **测试覆盖增强**：新增 4 个测试文件 / 42 个测试用例
+2. **测试验证**：v0.42.0 全部 76 个新测试通过
+3. **iOS 编译**：`flutter build ios --release --no-codesign` 成功（74.9s，207.2MB）
+4. **IPA 打包**：54MB IPA 文件保存到 `release/v0.42.0/MJ_Nexus_v0.42.0.ipa`
+5. **Git 提交**：`v0.42.0: 思考预算 + 深度研究 + 项目工作区` commit (be86dd9) 已创建
+
+### 修改文件
+| 文件 | 修改内容 | 修改原因 |
+|------|----------|----------|
+| `test/research_engine_test.dart` | 新建 12 个测试 | 验证 ResearchEngine 事件类、JSON 解析 |
+| `test/project_service_test.dart` | 新建 8 个测试 | 验证 Projects CRUD + 字段默认值 |
+| `test/openai_adapter_thinking_test.dart` | 新建 12 个测试 | 验证 OpenAI reasoning_effort 注入 |
+| `test/anthropic_adapter_thinking_test.dart` | 新建 10 个测试 | 验证 Anthropic Extended Thinking 注入 |
+| `docs/V0.42.0_IMPLEMENTATION_PLAN.md` | 状态更新为"全部完成" | 反映 v0.42.0 实施已完成 |
+| `release/v0.42.0/MJ_Nexus_v0.42.0.ipa` | 新建 54MB IPA 包 | 准备 GitHub Release v0.42.0 |
+
+### 待用户决策
+1. GitHub 网络恢复后推送 v0.42.0 commit 到 origin/master
+2. 创建 GitHub Release v0.42.0 并上传 IPA
+3. 是否补充 Android/macOS 平台编译验证
