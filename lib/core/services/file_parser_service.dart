@@ -18,11 +18,84 @@ import 'package:path/path.dart' as p;
 import 'package:archive/archive.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as spdf;
 import 'package:pdfx/pdfx.dart';
+import 'package:path_provider/path_provider.dart';
 import 'ocr_service.dart';
 import 'media_ingestion_pipeline.dart';
 
 /// 文件解析服务 - 从各种文档格式提取文本内容
 class FileParserService {
+  /// 默认实例（v0.42.0 用于支持实例方法调用）
+  static final FileParserService instance = FileParserService._();
+
+  FileParserService._();
+
+  /// 列出最近的文件（v0.42.0 新增，用于深度研究）
+  ///
+  /// 从文档目录扫描最近修改的文件，扩展名按支持的格式过滤。
+  /// [limit] 限制返回数量
+  /// [extensions] 文件扩展名白名单（默认常见文档格式）
+  Future<List<RecentFileInfo>> listRecentFiles({
+    int limit = 10,
+    List<String>? extensions,
+  }) async {
+    try {
+      final docsDir = await _getDocumentsDir();
+      if (!await docsDir.exists()) return const [];
+
+      final exts = extensions ??
+          const [
+            '.txt', '.md', '.markdown', '.json', '.csv', '.log',
+            '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
+            '.html', '.xml', '.rtf', '.epub', '.srt', '.vtt',
+          ];
+
+      final entities = await docsDir.list(recursive: true, followLinks: false).toList();
+      final files = <File>[];
+      for (final entity in entities) {
+        if (entity is File) {
+          final ext = p.extension(entity.path).toLowerCase();
+          if (exts.contains(ext)) {
+            files.add(entity);
+          }
+        }
+      }
+
+      // 按修改时间倒序
+      final fileStats = await Future.wait(
+        files.map((f) async {
+          try {
+            final stat = await f.stat();
+            return MapEntry(f, stat.modified);
+          } catch (_) {
+            return MapEntry(f, DateTime.fromMillisecondsSinceEpoch(0));
+          }
+        }),
+      );
+      fileStats.sort((a, b) => b.value.compareTo(a.value));
+
+      return fileStats
+          .take(limit)
+          .map((entry) => RecentFileInfo(
+                path: entry.key.path,
+                name: p.basename(entry.key.path),
+                modifiedAt: entry.value,
+              ))
+          .toList();
+    } catch (e) {
+      debugPrint('[FileParserService] listRecentFiles 失败: $e');
+      return const [];
+    }
+  }
+
+  /// 获取文档目录
+  Future<Directory> _getDocumentsDir() async {
+    try {
+      return await getApplicationDocumentsDirectory();
+    } catch (_) {
+      return Directory.current;
+    }
+  }
+
   /// 解析文件并返回文本内容
   static Future<String> parseFile(String filePath) async {
     final file = File(filePath);
@@ -1417,4 +1490,17 @@ class FileParserService {
 
     return false;
   }
+}
+
+/// 最近文件信息（v0.42.0 新增）
+class RecentFileInfo {
+  final String path;
+  final String name;
+  final DateTime modifiedAt;
+
+  const RecentFileInfo({
+    required this.path,
+    required this.name,
+    required this.modifiedAt,
+  });
 }

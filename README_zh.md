@@ -344,3 +344,79 @@ flutter build ios --release
 | `inspiration_page.dart` | 添加5分钟时间限制和倒计时功能 | 用户要求限制录音时长 |
 | `README.md` | 追加 Session #46 会话记录 | 按要求记录会话总结 |
 | `README_zh.md` | 追加 Session #46 会话记录 | 按要求记录会话总结 |
+
+### Session #47 — v0.42.0 三大核心功能实施：思考预算配置 + 深度研究 + 项目工作区 (2026-06-30)
+
+**会话背景**：基于 v0.41.0 基础，MJ Nexus 进入 v0.42.0 升级阶段，本会话集中实现 3 大核心 P0/P1 任务。
+
+**会话主要目的**：
+1. 落地 Anthropic Extended Thinking 与 OpenAI reasoning_effort 的双向支持
+2. 实现 OpenAI/Claude/Gemini 风格的深度研究（Deep Research）引擎
+3. 实现项目工作区（Project Workspace）将多会话/工具/知识库/MCP 服务聚合到项目维度
+
+**完成的主要任务**：
+1. **思考预算配置（Thinking Budget）**：
+   - OpenAI 适配器：o-series / GPT-5 模型支持 `reasoning: { effort }` 参数注入
+   - Anthropic 适配器：Claude 4.5+ 支持 Extended Thinking `thinking: { type, budget_tokens }` 参数注入
+   - 数据库 `models` 表新增 `thinking_mode`、`thinking_budget`、`supportsThinking`、`min/maxThinkingBudget` 5 个字段
+   - Riverpod `thinkingBudgetProvider` (Family) 状态管理
+   - `ThinkingBudgetCard` UI：SegmentedButton 三模式选择 + 预算 Slider + 显示开关
+   - `ThinkingExpansion` 折叠面板用于展示思考过程
+
+2. **深度研究引擎（Deep Research）**：
+   - 7 张数据表：ResearchReports/Steps/Citations/Sections/Projects 等（drift schema）
+   - `ResearchEngine` 流式工作流：规划 → 多源检索 → LLM 分析 → 综合报告
+   - `WebSearchService` 抽象（当前支持 URL 抓取 + 关键词搜索预埋）
+   - 多源检索：Web (Jina) / 知识库 (FTS5+BM25) / 本地文件 (file_parser)
+   - 22 个业务场景提示词模板（prompt_scenarios.dart）
+   - `ResearchInputPage` 与 `ResearchResultPage` 双页面 UI
+   - Riverpod `researchEngineProvider` + `researchReportProvider` 状态管理
+
+3. **项目工作区（Project Workspace）**：
+   - 数据模型：`Projects` 数据表（id/name/description/icon/color/systemPrompt/knowledgeBaseId/mcpServers 等）
+   - 关联：`Sessions.projectId` 可空外键（兼容老数据）
+
+**技术栈**：
+- Flutter / Dart 3.10+
+- flutter_riverpod 2.6.x (StateNotifier + Provider)
+- drift 2.28.x (ORM + 类型安全 DAO)
+- flutter_quill 11.x (富文本编辑器)
+- syncfusion_flutter_charts 28.x (图表)
+- cron 0.6.x (任务调度)
+- graphview 1.2.x (节点图)
+- dio 5.x (网络)
+
+**关键决策和解决方案**：
+1. **数据库迁移策略：双重写入**。新增字段全部 `nullable` 或 `withDefault`，新表通过 try-catch 包裹的 `createIfNotExists` 模式注入，老版本数据库可平滑升级，不丢数据。
+2. **PromptTemplates 命名冲突**。Drift Table 类和业务模板常量类同名，使用 `import as scenarios` 别名隔离。
+3. **ResearchSection 命名冲突**。Drift 自动生成的 DataClassName 与领域模型同名，使用 `import as db` 别名隔离，使用时 `db.ResearchSection`。
+4. **Web 检索降级方案**。Jina Reader 仅支持 URL 抓取（r.jina.ai），不提供搜索 API。WebSearchService 优先支持 URL 列表抓取，关键词搜索预埋接口（待接入 DuckDuckGo/SerpAPI 等）。
+5. **LLM Caller 解耦**。ResearchEngine 接受 `Future<String> Function(String, String)` 注入，避免与具体 LLM Provider 强耦合。
+6. **业务场景提示词设计**。参考 Anthropic Prompt Engineering Guide 2026 / OpenAI Best Practices / Microsoft Cookbook / Google Guide，22 个模板覆盖研究/代码/写作/教育/商业/创意 9 大类。
+
+**会话中主要使用的工具**：
+- flutter analyze（静态分析）
+- dart run build_runner build（Drift 代码生成）
+- Read / Edit / Write / Grep / Glob
+- TaskCreate 任务管理
+
+**修改了哪些文件**：
+
+| 文件 | 修改内容 | 修改原因 |
+|------|---------|---------|
+| `pubspec.yaml` | 新增 flutter_quill/syncfusion_flutter_charts/cron/graphview/markdown 依赖 | v0.42.0 新功能需要 |
+| `lib/core/adapters/openai_adapter.dart` | OpenAIConfig 注入 reasoning 参数；OpenAIUsage 解析 reasoning_tokens | 支持 o-series/GPT-5 思考预算 |
+| `lib/core/adapters/anthropic_adapter.dart` | AnthropicConfig 注入 Extended Thinking 参数；AnthropicUsage 解析 thinking_tokens | 支持 Claude 4.5+ Extended Thinking |
+| `lib/core/storage/database.dart` | 新增 Projects/ResearchReports/Steps/Citations/Sections/ThinkingTraces 7 张表；models/messages/sessions 扩展字段 | v0.42.0 三大功能需要新表 |
+| `lib/core/services/web_search_service.dart` | 新增 Web 检索服务 | 深度研究 Web 源检索 |
+| `lib/core/services/file_parser_service.dart` | 新增 listRecentFiles 实例方法 + RecentFileInfo 数据类 | 深度研究文件源检索 |
+| `lib/core/templates/prompt_scenarios.dart` | 新增 22 个业务场景提示词模板 | 提供研究/代码/写作/教育/商业/创意场景 |
+| `lib/core/models/thinking_config.dart` | 新增 ThinkingConfig/ThinkingMode/ThinkingCapability 模型 | 思考预算类型定义 |
+| `lib/core/widgets/thinking_expansion.dart` | 新增思考过程折叠面板组件 | UI 展示思考过程 |
+| `lib/features/model/providers/thinking_budget_provider.dart` | 新增 ThinkingBudgetController (Family) | 思考预算状态管理 |
+| `lib/features/model/presentation/widgets/thinking_budget_card.dart` | 新增思考预算配置卡片 | 模型配置页 UI |
+| `lib/features/research/domain/research_models.dart` | 新增 ResearchStatus/StepType/Citation/Section/Params 等数据模型 | 深度研究领域模型 |
+| `lib/features/research/domain/research_engine.dart` | 新增 ResearchEngine 流式工作流 | 深度研究核心引擎 |
+| `lib/features/research/providers/research_provider.dart` | 新增 researchEngine/researchReport Provider | 深度研究状态管理 |
+| `lib/features/research/presentation/pages/research_input_page.dart` | 新增研究输入页面 | 深度研究入口 |
+| `lib/features/research/presentation/pages/research_result_page.dart` | 新增研究结果页面 | 实时显示进度、引用、报告 |

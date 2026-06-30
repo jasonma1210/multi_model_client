@@ -256,6 +256,17 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -299,6 +310,7 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
     enableFileUpload,
     enabledKnowledgeBaseId,
     isSpirit,
+    projectId,
     createdAt,
     updatedAt,
   ];
@@ -467,6 +479,12 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
         isSpirit.isAcceptableOrUnknown(data['is_spirit']!, _isSpiritMeta),
       );
     }
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -568,6 +586,10 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
         DriftSqlType.bool,
         data['${effectivePrefix}is_spirit'],
       )!,
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -605,6 +627,7 @@ class Session extends DataClass implements Insertable<Session> {
   final bool enableFileUpload;
   final String? enabledKnowledgeBaseId;
   final bool isSpirit;
+  final String? projectId;
   final DateTime createdAt;
   final DateTime updatedAt;
   const Session({
@@ -627,6 +650,7 @@ class Session extends DataClass implements Insertable<Session> {
     required this.enableFileUpload,
     this.enabledKnowledgeBaseId,
     required this.isSpirit,
+    this.projectId,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -668,6 +692,9 @@ class Session extends DataClass implements Insertable<Session> {
       );
     }
     map['is_spirit'] = Variable<bool>(isSpirit);
+    if (!nullToAbsent || projectId != null) {
+      map['project_id'] = Variable<String>(projectId);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -706,6 +733,9 @@ class Session extends DataClass implements Insertable<Session> {
           ? const Value.absent()
           : Value(enabledKnowledgeBaseId),
       isSpirit: Value(isSpirit),
+      projectId: projectId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(projectId),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -742,6 +772,7 @@ class Session extends DataClass implements Insertable<Session> {
         json['enabledKnowledgeBaseId'],
       ),
       isSpirit: serializer.fromJson<bool>(json['isSpirit']),
+      projectId: serializer.fromJson<String?>(json['projectId']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -773,6 +804,7 @@ class Session extends DataClass implements Insertable<Session> {
         enabledKnowledgeBaseId,
       ),
       'isSpirit': serializer.toJson<bool>(isSpirit),
+      'projectId': serializer.toJson<String?>(projectId),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -798,6 +830,7 @@ class Session extends DataClass implements Insertable<Session> {
     bool? enableFileUpload,
     Value<String?> enabledKnowledgeBaseId = const Value.absent(),
     bool? isSpirit,
+    Value<String?> projectId = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => Session(
@@ -827,6 +860,7 @@ class Session extends DataClass implements Insertable<Session> {
         ? enabledKnowledgeBaseId.value
         : this.enabledKnowledgeBaseId,
     isSpirit: isSpirit ?? this.isSpirit,
+    projectId: projectId.present ? projectId.value : this.projectId,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -877,6 +911,7 @@ class Session extends DataClass implements Insertable<Session> {
           ? data.enabledKnowledgeBaseId.value
           : this.enabledKnowledgeBaseId,
       isSpirit: data.isSpirit.present ? data.isSpirit.value : this.isSpirit,
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -904,6 +939,7 @@ class Session extends DataClass implements Insertable<Session> {
           ..write('enableFileUpload: $enableFileUpload, ')
           ..write('enabledKnowledgeBaseId: $enabledKnowledgeBaseId, ')
           ..write('isSpirit: $isSpirit, ')
+          ..write('projectId: $projectId, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -931,6 +967,7 @@ class Session extends DataClass implements Insertable<Session> {
     enableFileUpload,
     enabledKnowledgeBaseId,
     isSpirit,
+    projectId,
     createdAt,
     updatedAt,
   ]);
@@ -957,6 +994,7 @@ class Session extends DataClass implements Insertable<Session> {
           other.enableFileUpload == this.enableFileUpload &&
           other.enabledKnowledgeBaseId == this.enabledKnowledgeBaseId &&
           other.isSpirit == this.isSpirit &&
+          other.projectId == this.projectId &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -981,6 +1019,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
   final Value<bool> enableFileUpload;
   final Value<String?> enabledKnowledgeBaseId;
   final Value<bool> isSpirit;
+  final Value<String?> projectId;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<int> rowid;
@@ -1004,6 +1043,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     this.enableFileUpload = const Value.absent(),
     this.enabledKnowledgeBaseId = const Value.absent(),
     this.isSpirit = const Value.absent(),
+    this.projectId = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -1028,6 +1068,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     this.enableFileUpload = const Value.absent(),
     this.enabledKnowledgeBaseId = const Value.absent(),
     this.isSpirit = const Value.absent(),
+    this.projectId = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
     this.rowid = const Value.absent(),
@@ -1056,6 +1097,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     Expression<bool>? enableFileUpload,
     Expression<String>? enabledKnowledgeBaseId,
     Expression<bool>? isSpirit,
+    Expression<String>? projectId,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
@@ -1084,6 +1126,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
       if (enabledKnowledgeBaseId != null)
         'enabled_knowledge_base_id': enabledKnowledgeBaseId,
       if (isSpirit != null) 'is_spirit': isSpirit,
+      if (projectId != null) 'project_id': projectId,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -1110,6 +1153,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     Value<bool>? enableFileUpload,
     Value<String?>? enabledKnowledgeBaseId,
     Value<bool>? isSpirit,
+    Value<String?>? projectId,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<int>? rowid,
@@ -1136,6 +1180,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
       enabledKnowledgeBaseId:
           enabledKnowledgeBaseId ?? this.enabledKnowledgeBaseId,
       isSpirit: isSpirit ?? this.isSpirit,
+      projectId: projectId ?? this.projectId,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -1208,6 +1253,9 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     if (isSpirit.present) {
       map['is_spirit'] = Variable<bool>(isSpirit.value);
     }
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1242,6 +1290,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
           ..write('enableFileUpload: $enableFileUpload, ')
           ..write('enabledKnowledgeBaseId: $enabledKnowledgeBaseId, ')
           ..write('isSpirit: $isSpirit, ')
+          ..write('projectId: $projectId, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -1342,6 +1391,44 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _thinkingMeta = const VerificationMeta(
+    'thinking',
+  );
+  @override
+  late final GeneratedColumn<String> thinking = GeneratedColumn<String>(
+    'thinking',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _thinkingTokensMeta = const VerificationMeta(
+    'thinkingTokens',
+  );
+  @override
+  late final GeneratedColumn<int> thinkingTokens = GeneratedColumn<int>(
+    'thinking_tokens',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _showThinkingMeta = const VerificationMeta(
+    'showThinking',
+  );
+  @override
+  late final GeneratedColumn<bool> showThinking = GeneratedColumn<bool>(
+    'show_thinking',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("show_thinking" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -1363,6 +1450,9 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     hasImages,
     tokenCount,
     toolCallInfo,
+    thinking,
+    thinkingTokens,
+    showThinking,
     createdAt,
   ];
   @override
@@ -1433,6 +1523,30 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         ),
       );
     }
+    if (data.containsKey('thinking')) {
+      context.handle(
+        _thinkingMeta,
+        thinking.isAcceptableOrUnknown(data['thinking']!, _thinkingMeta),
+      );
+    }
+    if (data.containsKey('thinking_tokens')) {
+      context.handle(
+        _thinkingTokensMeta,
+        thinkingTokens.isAcceptableOrUnknown(
+          data['thinking_tokens']!,
+          _thinkingTokensMeta,
+        ),
+      );
+    }
+    if (data.containsKey('show_thinking')) {
+      context.handle(
+        _showThinkingMeta,
+        showThinking.isAcceptableOrUnknown(
+          data['show_thinking']!,
+          _showThinkingMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -1482,6 +1596,18 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         DriftSqlType.string,
         data['${effectivePrefix}tool_call_info'],
       ),
+      thinking: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thinking'],
+      ),
+      thinkingTokens: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}thinking_tokens'],
+      )!,
+      showThinking: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}show_thinking'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -1504,6 +1630,9 @@ class Message extends DataClass implements Insertable<Message> {
   final bool hasImages;
   final int? tokenCount;
   final String? toolCallInfo;
+  final String? thinking;
+  final int thinkingTokens;
+  final bool showThinking;
   final DateTime createdAt;
   const Message({
     required this.id,
@@ -1514,6 +1643,9 @@ class Message extends DataClass implements Insertable<Message> {
     required this.hasImages,
     this.tokenCount,
     this.toolCallInfo,
+    this.thinking,
+    required this.thinkingTokens,
+    required this.showThinking,
     required this.createdAt,
   });
   @override
@@ -1531,6 +1663,11 @@ class Message extends DataClass implements Insertable<Message> {
     if (!nullToAbsent || toolCallInfo != null) {
       map['tool_call_info'] = Variable<String>(toolCallInfo);
     }
+    if (!nullToAbsent || thinking != null) {
+      map['thinking'] = Variable<String>(thinking);
+    }
+    map['thinking_tokens'] = Variable<int>(thinkingTokens);
+    map['show_thinking'] = Variable<bool>(showThinking);
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -1549,6 +1686,11 @@ class Message extends DataClass implements Insertable<Message> {
       toolCallInfo: toolCallInfo == null && nullToAbsent
           ? const Value.absent()
           : Value(toolCallInfo),
+      thinking: thinking == null && nullToAbsent
+          ? const Value.absent()
+          : Value(thinking),
+      thinkingTokens: Value(thinkingTokens),
+      showThinking: Value(showThinking),
       createdAt: Value(createdAt),
     );
   }
@@ -1567,6 +1709,9 @@ class Message extends DataClass implements Insertable<Message> {
       hasImages: serializer.fromJson<bool>(json['hasImages']),
       tokenCount: serializer.fromJson<int?>(json['tokenCount']),
       toolCallInfo: serializer.fromJson<String?>(json['toolCallInfo']),
+      thinking: serializer.fromJson<String?>(json['thinking']),
+      thinkingTokens: serializer.fromJson<int>(json['thinkingTokens']),
+      showThinking: serializer.fromJson<bool>(json['showThinking']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -1582,6 +1727,9 @@ class Message extends DataClass implements Insertable<Message> {
       'hasImages': serializer.toJson<bool>(hasImages),
       'tokenCount': serializer.toJson<int?>(tokenCount),
       'toolCallInfo': serializer.toJson<String?>(toolCallInfo),
+      'thinking': serializer.toJson<String?>(thinking),
+      'thinkingTokens': serializer.toJson<int>(thinkingTokens),
+      'showThinking': serializer.toJson<bool>(showThinking),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -1595,6 +1743,9 @@ class Message extends DataClass implements Insertable<Message> {
     bool? hasImages,
     Value<int?> tokenCount = const Value.absent(),
     Value<String?> toolCallInfo = const Value.absent(),
+    Value<String?> thinking = const Value.absent(),
+    int? thinkingTokens,
+    bool? showThinking,
     DateTime? createdAt,
   }) => Message(
     id: id ?? this.id,
@@ -1605,6 +1756,9 @@ class Message extends DataClass implements Insertable<Message> {
     hasImages: hasImages ?? this.hasImages,
     tokenCount: tokenCount.present ? tokenCount.value : this.tokenCount,
     toolCallInfo: toolCallInfo.present ? toolCallInfo.value : this.toolCallInfo,
+    thinking: thinking.present ? thinking.value : this.thinking,
+    thinkingTokens: thinkingTokens ?? this.thinkingTokens,
+    showThinking: showThinking ?? this.showThinking,
     createdAt: createdAt ?? this.createdAt,
   );
   Message copyWithCompanion(MessagesCompanion data) {
@@ -1621,6 +1775,13 @@ class Message extends DataClass implements Insertable<Message> {
       toolCallInfo: data.toolCallInfo.present
           ? data.toolCallInfo.value
           : this.toolCallInfo,
+      thinking: data.thinking.present ? data.thinking.value : this.thinking,
+      thinkingTokens: data.thinkingTokens.present
+          ? data.thinkingTokens.value
+          : this.thinkingTokens,
+      showThinking: data.showThinking.present
+          ? data.showThinking.value
+          : this.showThinking,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -1636,6 +1797,9 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('hasImages: $hasImages, ')
           ..write('tokenCount: $tokenCount, ')
           ..write('toolCallInfo: $toolCallInfo, ')
+          ..write('thinking: $thinking, ')
+          ..write('thinkingTokens: $thinkingTokens, ')
+          ..write('showThinking: $showThinking, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -1651,6 +1815,9 @@ class Message extends DataClass implements Insertable<Message> {
     hasImages,
     tokenCount,
     toolCallInfo,
+    thinking,
+    thinkingTokens,
+    showThinking,
     createdAt,
   );
   @override
@@ -1665,6 +1832,9 @@ class Message extends DataClass implements Insertable<Message> {
           other.hasImages == this.hasImages &&
           other.tokenCount == this.tokenCount &&
           other.toolCallInfo == this.toolCallInfo &&
+          other.thinking == this.thinking &&
+          other.thinkingTokens == this.thinkingTokens &&
+          other.showThinking == this.showThinking &&
           other.createdAt == this.createdAt);
 }
 
@@ -1677,6 +1847,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<bool> hasImages;
   final Value<int?> tokenCount;
   final Value<String?> toolCallInfo;
+  final Value<String?> thinking;
+  final Value<int> thinkingTokens;
+  final Value<bool> showThinking;
   final Value<DateTime> createdAt;
   final Value<int> rowid;
   const MessagesCompanion({
@@ -1688,6 +1861,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.hasImages = const Value.absent(),
     this.tokenCount = const Value.absent(),
     this.toolCallInfo = const Value.absent(),
+    this.thinking = const Value.absent(),
+    this.thinkingTokens = const Value.absent(),
+    this.showThinking = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -1700,6 +1876,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.hasImages = const Value.absent(),
     this.tokenCount = const Value.absent(),
     this.toolCallInfo = const Value.absent(),
+    this.thinking = const Value.absent(),
+    this.thinkingTokens = const Value.absent(),
+    this.showThinking = const Value.absent(),
     required DateTime createdAt,
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -1716,6 +1895,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<bool>? hasImages,
     Expression<int>? tokenCount,
     Expression<String>? toolCallInfo,
+    Expression<String>? thinking,
+    Expression<int>? thinkingTokens,
+    Expression<bool>? showThinking,
     Expression<DateTime>? createdAt,
     Expression<int>? rowid,
   }) {
@@ -1728,6 +1910,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (hasImages != null) 'has_images': hasImages,
       if (tokenCount != null) 'token_count': tokenCount,
       if (toolCallInfo != null) 'tool_call_info': toolCallInfo,
+      if (thinking != null) 'thinking': thinking,
+      if (thinkingTokens != null) 'thinking_tokens': thinkingTokens,
+      if (showThinking != null) 'show_thinking': showThinking,
       if (createdAt != null) 'created_at': createdAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -1742,6 +1927,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<bool>? hasImages,
     Value<int?>? tokenCount,
     Value<String?>? toolCallInfo,
+    Value<String?>? thinking,
+    Value<int>? thinkingTokens,
+    Value<bool>? showThinking,
     Value<DateTime>? createdAt,
     Value<int>? rowid,
   }) {
@@ -1754,6 +1942,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       hasImages: hasImages ?? this.hasImages,
       tokenCount: tokenCount ?? this.tokenCount,
       toolCallInfo: toolCallInfo ?? this.toolCallInfo,
+      thinking: thinking ?? this.thinking,
+      thinkingTokens: thinkingTokens ?? this.thinkingTokens,
+      showThinking: showThinking ?? this.showThinking,
       createdAt: createdAt ?? this.createdAt,
       rowid: rowid ?? this.rowid,
     );
@@ -1786,6 +1977,15 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (toolCallInfo.present) {
       map['tool_call_info'] = Variable<String>(toolCallInfo.value);
     }
+    if (thinking.present) {
+      map['thinking'] = Variable<String>(thinking.value);
+    }
+    if (thinkingTokens.present) {
+      map['thinking_tokens'] = Variable<int>(thinkingTokens.value);
+    }
+    if (showThinking.present) {
+      map['show_thinking'] = Variable<bool>(showThinking.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1806,6 +2006,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('hasImages: $hasImages, ')
           ..write('tokenCount: $tokenCount, ')
           ..write('toolCallInfo: $toolCallInfo, ')
+          ..write('thinking: $thinking, ')
+          ..write('thinkingTokens: $thinkingTokens, ')
+          ..write('showThinking: $showThinking, ')
           ..write('createdAt: $createdAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -1960,6 +2163,68 @@ class $ModelsTable extends Models with TableInfo<$ModelsTable, Model> {
     requiredDuringInsert: false,
     defaultValue: const Constant('pending'),
   );
+  static const VerificationMeta _thinkingModeMeta = const VerificationMeta(
+    'thinkingMode',
+  );
+  @override
+  late final GeneratedColumn<String> thinkingMode = GeneratedColumn<String>(
+    'thinking_mode',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('adaptive'),
+  );
+  static const VerificationMeta _thinkingBudgetMeta = const VerificationMeta(
+    'thinkingBudget',
+  );
+  @override
+  late final GeneratedColumn<int> thinkingBudget = GeneratedColumn<int>(
+    'thinking_budget',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _supportsThinkingMeta = const VerificationMeta(
+    'supportsThinking',
+  );
+  @override
+  late final GeneratedColumn<bool> supportsThinking = GeneratedColumn<bool>(
+    'supports_thinking',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("supports_thinking" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _minThinkingBudgetMeta = const VerificationMeta(
+    'minThinkingBudget',
+  );
+  @override
+  late final GeneratedColumn<int> minThinkingBudget = GeneratedColumn<int>(
+    'min_thinking_budget',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1024),
+  );
+  static const VerificationMeta _maxThinkingBudgetMeta = const VerificationMeta(
+    'maxThinkingBudget',
+  );
+  @override
+  late final GeneratedColumn<int> maxThinkingBudget = GeneratedColumn<int>(
+    'max_thinking_budget',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(100000),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -1986,6 +2251,11 @@ class $ModelsTable extends Models with TableInfo<$ModelsTable, Model> {
     mmprojFileName,
     isLoaded,
     downloadStatus,
+    thinkingMode,
+    thinkingBudget,
+    supportsThinking,
+    minThinkingBudget,
+    maxThinkingBudget,
     createdAt,
   ];
   @override
@@ -2098,6 +2368,51 @@ class $ModelsTable extends Models with TableInfo<$ModelsTable, Model> {
         ),
       );
     }
+    if (data.containsKey('thinking_mode')) {
+      context.handle(
+        _thinkingModeMeta,
+        thinkingMode.isAcceptableOrUnknown(
+          data['thinking_mode']!,
+          _thinkingModeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('thinking_budget')) {
+      context.handle(
+        _thinkingBudgetMeta,
+        thinkingBudget.isAcceptableOrUnknown(
+          data['thinking_budget']!,
+          _thinkingBudgetMeta,
+        ),
+      );
+    }
+    if (data.containsKey('supports_thinking')) {
+      context.handle(
+        _supportsThinkingMeta,
+        supportsThinking.isAcceptableOrUnknown(
+          data['supports_thinking']!,
+          _supportsThinkingMeta,
+        ),
+      );
+    }
+    if (data.containsKey('min_thinking_budget')) {
+      context.handle(
+        _minThinkingBudgetMeta,
+        minThinkingBudget.isAcceptableOrUnknown(
+          data['min_thinking_budget']!,
+          _minThinkingBudgetMeta,
+        ),
+      );
+    }
+    if (data.containsKey('max_thinking_budget')) {
+      context.handle(
+        _maxThinkingBudgetMeta,
+        maxThinkingBudget.isAcceptableOrUnknown(
+          data['max_thinking_budget']!,
+          _maxThinkingBudgetMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -2167,6 +2482,26 @@ class $ModelsTable extends Models with TableInfo<$ModelsTable, Model> {
         DriftSqlType.string,
         data['${effectivePrefix}download_status'],
       )!,
+      thinkingMode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thinking_mode'],
+      )!,
+      thinkingBudget: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}thinking_budget'],
+      ),
+      supportsThinking: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}supports_thinking'],
+      )!,
+      minThinkingBudget: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}min_thinking_budget'],
+      )!,
+      maxThinkingBudget: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}max_thinking_budget'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -2194,6 +2529,11 @@ class Model extends DataClass implements Insertable<Model> {
   final String? mmprojFileName;
   final bool isLoaded;
   final String downloadStatus;
+  final String thinkingMode;
+  final int? thinkingBudget;
+  final bool supportsThinking;
+  final int minThinkingBudget;
+  final int maxThinkingBudget;
   final DateTime createdAt;
   const Model({
     required this.id,
@@ -2209,6 +2549,11 @@ class Model extends DataClass implements Insertable<Model> {
     this.mmprojFileName,
     required this.isLoaded,
     required this.downloadStatus,
+    required this.thinkingMode,
+    this.thinkingBudget,
+    required this.supportsThinking,
+    required this.minThinkingBudget,
+    required this.maxThinkingBudget,
     required this.createdAt,
   });
   @override
@@ -2239,6 +2584,13 @@ class Model extends DataClass implements Insertable<Model> {
     }
     map['is_loaded'] = Variable<bool>(isLoaded);
     map['download_status'] = Variable<String>(downloadStatus);
+    map['thinking_mode'] = Variable<String>(thinkingMode);
+    if (!nullToAbsent || thinkingBudget != null) {
+      map['thinking_budget'] = Variable<int>(thinkingBudget);
+    }
+    map['supports_thinking'] = Variable<bool>(supportsThinking);
+    map['min_thinking_budget'] = Variable<int>(minThinkingBudget);
+    map['max_thinking_budget'] = Variable<int>(maxThinkingBudget);
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -2268,6 +2620,13 @@ class Model extends DataClass implements Insertable<Model> {
           : Value(mmprojFileName),
       isLoaded: Value(isLoaded),
       downloadStatus: Value(downloadStatus),
+      thinkingMode: Value(thinkingMode),
+      thinkingBudget: thinkingBudget == null && nullToAbsent
+          ? const Value.absent()
+          : Value(thinkingBudget),
+      supportsThinking: Value(supportsThinking),
+      minThinkingBudget: Value(minThinkingBudget),
+      maxThinkingBudget: Value(maxThinkingBudget),
       createdAt: Value(createdAt),
     );
   }
@@ -2291,6 +2650,11 @@ class Model extends DataClass implements Insertable<Model> {
       mmprojFileName: serializer.fromJson<String?>(json['mmprojFileName']),
       isLoaded: serializer.fromJson<bool>(json['isLoaded']),
       downloadStatus: serializer.fromJson<String>(json['downloadStatus']),
+      thinkingMode: serializer.fromJson<String>(json['thinkingMode']),
+      thinkingBudget: serializer.fromJson<int?>(json['thinkingBudget']),
+      supportsThinking: serializer.fromJson<bool>(json['supportsThinking']),
+      minThinkingBudget: serializer.fromJson<int>(json['minThinkingBudget']),
+      maxThinkingBudget: serializer.fromJson<int>(json['maxThinkingBudget']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -2311,6 +2675,11 @@ class Model extends DataClass implements Insertable<Model> {
       'mmprojFileName': serializer.toJson<String?>(mmprojFileName),
       'isLoaded': serializer.toJson<bool>(isLoaded),
       'downloadStatus': serializer.toJson<String>(downloadStatus),
+      'thinkingMode': serializer.toJson<String>(thinkingMode),
+      'thinkingBudget': serializer.toJson<int?>(thinkingBudget),
+      'supportsThinking': serializer.toJson<bool>(supportsThinking),
+      'minThinkingBudget': serializer.toJson<int>(minThinkingBudget),
+      'maxThinkingBudget': serializer.toJson<int>(maxThinkingBudget),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -2329,6 +2698,11 @@ class Model extends DataClass implements Insertable<Model> {
     Value<String?> mmprojFileName = const Value.absent(),
     bool? isLoaded,
     String? downloadStatus,
+    String? thinkingMode,
+    Value<int?> thinkingBudget = const Value.absent(),
+    bool? supportsThinking,
+    int? minThinkingBudget,
+    int? maxThinkingBudget,
     DateTime? createdAt,
   }) => Model(
     id: id ?? this.id,
@@ -2348,6 +2722,13 @@ class Model extends DataClass implements Insertable<Model> {
         : this.mmprojFileName,
     isLoaded: isLoaded ?? this.isLoaded,
     downloadStatus: downloadStatus ?? this.downloadStatus,
+    thinkingMode: thinkingMode ?? this.thinkingMode,
+    thinkingBudget: thinkingBudget.present
+        ? thinkingBudget.value
+        : this.thinkingBudget,
+    supportsThinking: supportsThinking ?? this.supportsThinking,
+    minThinkingBudget: minThinkingBudget ?? this.minThinkingBudget,
+    maxThinkingBudget: maxThinkingBudget ?? this.maxThinkingBudget,
     createdAt: createdAt ?? this.createdAt,
   );
   Model copyWithCompanion(ModelsCompanion data) {
@@ -2377,6 +2758,21 @@ class Model extends DataClass implements Insertable<Model> {
       downloadStatus: data.downloadStatus.present
           ? data.downloadStatus.value
           : this.downloadStatus,
+      thinkingMode: data.thinkingMode.present
+          ? data.thinkingMode.value
+          : this.thinkingMode,
+      thinkingBudget: data.thinkingBudget.present
+          ? data.thinkingBudget.value
+          : this.thinkingBudget,
+      supportsThinking: data.supportsThinking.present
+          ? data.supportsThinking.value
+          : this.supportsThinking,
+      minThinkingBudget: data.minThinkingBudget.present
+          ? data.minThinkingBudget.value
+          : this.minThinkingBudget,
+      maxThinkingBudget: data.maxThinkingBudget.present
+          ? data.maxThinkingBudget.value
+          : this.maxThinkingBudget,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -2397,6 +2793,11 @@ class Model extends DataClass implements Insertable<Model> {
           ..write('mmprojFileName: $mmprojFileName, ')
           ..write('isLoaded: $isLoaded, ')
           ..write('downloadStatus: $downloadStatus, ')
+          ..write('thinkingMode: $thinkingMode, ')
+          ..write('thinkingBudget: $thinkingBudget, ')
+          ..write('supportsThinking: $supportsThinking, ')
+          ..write('minThinkingBudget: $minThinkingBudget, ')
+          ..write('maxThinkingBudget: $maxThinkingBudget, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -2417,6 +2818,11 @@ class Model extends DataClass implements Insertable<Model> {
     mmprojFileName,
     isLoaded,
     downloadStatus,
+    thinkingMode,
+    thinkingBudget,
+    supportsThinking,
+    minThinkingBudget,
+    maxThinkingBudget,
     createdAt,
   );
   @override
@@ -2436,6 +2842,11 @@ class Model extends DataClass implements Insertable<Model> {
           other.mmprojFileName == this.mmprojFileName &&
           other.isLoaded == this.isLoaded &&
           other.downloadStatus == this.downloadStatus &&
+          other.thinkingMode == this.thinkingMode &&
+          other.thinkingBudget == this.thinkingBudget &&
+          other.supportsThinking == this.supportsThinking &&
+          other.minThinkingBudget == this.minThinkingBudget &&
+          other.maxThinkingBudget == this.maxThinkingBudget &&
           other.createdAt == this.createdAt);
 }
 
@@ -2453,6 +2864,11 @@ class ModelsCompanion extends UpdateCompanion<Model> {
   final Value<String?> mmprojFileName;
   final Value<bool> isLoaded;
   final Value<String> downloadStatus;
+  final Value<String> thinkingMode;
+  final Value<int?> thinkingBudget;
+  final Value<bool> supportsThinking;
+  final Value<int> minThinkingBudget;
+  final Value<int> maxThinkingBudget;
   final Value<DateTime> createdAt;
   final Value<int> rowid;
   const ModelsCompanion({
@@ -2469,6 +2885,11 @@ class ModelsCompanion extends UpdateCompanion<Model> {
     this.mmprojFileName = const Value.absent(),
     this.isLoaded = const Value.absent(),
     this.downloadStatus = const Value.absent(),
+    this.thinkingMode = const Value.absent(),
+    this.thinkingBudget = const Value.absent(),
+    this.supportsThinking = const Value.absent(),
+    this.minThinkingBudget = const Value.absent(),
+    this.maxThinkingBudget = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -2486,6 +2907,11 @@ class ModelsCompanion extends UpdateCompanion<Model> {
     this.mmprojFileName = const Value.absent(),
     this.isLoaded = const Value.absent(),
     this.downloadStatus = const Value.absent(),
+    this.thinkingMode = const Value.absent(),
+    this.thinkingBudget = const Value.absent(),
+    this.supportsThinking = const Value.absent(),
+    this.minThinkingBudget = const Value.absent(),
+    this.maxThinkingBudget = const Value.absent(),
     required DateTime createdAt,
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -2507,6 +2933,11 @@ class ModelsCompanion extends UpdateCompanion<Model> {
     Expression<String>? mmprojFileName,
     Expression<bool>? isLoaded,
     Expression<String>? downloadStatus,
+    Expression<String>? thinkingMode,
+    Expression<int>? thinkingBudget,
+    Expression<bool>? supportsThinking,
+    Expression<int>? minThinkingBudget,
+    Expression<int>? maxThinkingBudget,
     Expression<DateTime>? createdAt,
     Expression<int>? rowid,
   }) {
@@ -2524,6 +2955,11 @@ class ModelsCompanion extends UpdateCompanion<Model> {
       if (mmprojFileName != null) 'mmproj_file_name': mmprojFileName,
       if (isLoaded != null) 'is_loaded': isLoaded,
       if (downloadStatus != null) 'download_status': downloadStatus,
+      if (thinkingMode != null) 'thinking_mode': thinkingMode,
+      if (thinkingBudget != null) 'thinking_budget': thinkingBudget,
+      if (supportsThinking != null) 'supports_thinking': supportsThinking,
+      if (minThinkingBudget != null) 'min_thinking_budget': minThinkingBudget,
+      if (maxThinkingBudget != null) 'max_thinking_budget': maxThinkingBudget,
       if (createdAt != null) 'created_at': createdAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -2543,6 +2979,11 @@ class ModelsCompanion extends UpdateCompanion<Model> {
     Value<String?>? mmprojFileName,
     Value<bool>? isLoaded,
     Value<String>? downloadStatus,
+    Value<String>? thinkingMode,
+    Value<int?>? thinkingBudget,
+    Value<bool>? supportsThinking,
+    Value<int>? minThinkingBudget,
+    Value<int>? maxThinkingBudget,
     Value<DateTime>? createdAt,
     Value<int>? rowid,
   }) {
@@ -2560,6 +3001,11 @@ class ModelsCompanion extends UpdateCompanion<Model> {
       mmprojFileName: mmprojFileName ?? this.mmprojFileName,
       isLoaded: isLoaded ?? this.isLoaded,
       downloadStatus: downloadStatus ?? this.downloadStatus,
+      thinkingMode: thinkingMode ?? this.thinkingMode,
+      thinkingBudget: thinkingBudget ?? this.thinkingBudget,
+      supportsThinking: supportsThinking ?? this.supportsThinking,
+      minThinkingBudget: minThinkingBudget ?? this.minThinkingBudget,
+      maxThinkingBudget: maxThinkingBudget ?? this.maxThinkingBudget,
       createdAt: createdAt ?? this.createdAt,
       rowid: rowid ?? this.rowid,
     );
@@ -2607,6 +3053,21 @@ class ModelsCompanion extends UpdateCompanion<Model> {
     if (downloadStatus.present) {
       map['download_status'] = Variable<String>(downloadStatus.value);
     }
+    if (thinkingMode.present) {
+      map['thinking_mode'] = Variable<String>(thinkingMode.value);
+    }
+    if (thinkingBudget.present) {
+      map['thinking_budget'] = Variable<int>(thinkingBudget.value);
+    }
+    if (supportsThinking.present) {
+      map['supports_thinking'] = Variable<bool>(supportsThinking.value);
+    }
+    if (minThinkingBudget.present) {
+      map['min_thinking_budget'] = Variable<int>(minThinkingBudget.value);
+    }
+    if (maxThinkingBudget.present) {
+      map['max_thinking_budget'] = Variable<int>(maxThinkingBudget.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -2632,6 +3093,11 @@ class ModelsCompanion extends UpdateCompanion<Model> {
           ..write('mmprojFileName: $mmprojFileName, ')
           ..write('isLoaded: $isLoaded, ')
           ..write('downloadStatus: $downloadStatus, ')
+          ..write('thinkingMode: $thinkingMode, ')
+          ..write('thinkingBudget: $thinkingBudget, ')
+          ..write('supportsThinking: $supportsThinking, ')
+          ..write('minThinkingBudget: $minThinkingBudget, ')
+          ..write('maxThinkingBudget: $maxThinkingBudget, ')
           ..write('createdAt: $createdAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -12261,6 +12727,4996 @@ class WorkflowLogsCompanion extends UpdateCompanion<WorkflowLog> {
   }
 }
 
+class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ProjectsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    additionalChecks: GeneratedColumn.checkTextLength(
+      minTextLength: 1,
+      maxTextLength: 100,
+    ),
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _descriptionMeta = const VerificationMeta(
+    'description',
+  );
+  @override
+  late final GeneratedColumn<String> description = GeneratedColumn<String>(
+    'description',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _iconMeta = const VerificationMeta('icon');
+  @override
+  late final GeneratedColumn<String> icon = GeneratedColumn<String>(
+    'icon',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('📁'),
+  );
+  static const VerificationMeta _colorMeta = const VerificationMeta('color');
+  @override
+  late final GeneratedColumn<String> color = GeneratedColumn<String>(
+    'color',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('#6750A4'),
+  );
+  static const VerificationMeta _systemPromptMeta = const VerificationMeta(
+    'systemPrompt',
+  );
+  @override
+  late final GeneratedColumn<String> systemPrompt = GeneratedColumn<String>(
+    'system_prompt',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _knowledgeBaseIdMeta = const VerificationMeta(
+    'knowledgeBaseId',
+  );
+  @override
+  late final GeneratedColumn<String> knowledgeBaseId = GeneratedColumn<String>(
+    'knowledge_base_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mcpServersMeta = const VerificationMeta(
+    'mcpServers',
+  );
+  @override
+  late final GeneratedColumn<String> mcpServers = GeneratedColumn<String>(
+    'mcp_servers',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _defaultModelConfigIdMeta =
+      const VerificationMeta('defaultModelConfigId');
+  @override
+  late final GeneratedColumn<String> defaultModelConfigId =
+      GeneratedColumn<String>(
+        'default_model_config_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _temperatureMeta = const VerificationMeta(
+    'temperature',
+  );
+  @override
+  late final GeneratedColumn<double> temperature = GeneratedColumn<double>(
+    'temperature',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0.7),
+  );
+  static const VerificationMeta _maxContextMessagesMeta =
+      const VerificationMeta('maxContextMessages');
+  @override
+  late final GeneratedColumn<int> maxContextMessages = GeneratedColumn<int>(
+    'max_context_messages',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(20),
+  );
+  static const VerificationMeta _sortOrderMeta = const VerificationMeta(
+    'sortOrder',
+  );
+  @override
+  late final GeneratedColumn<int> sortOrder = GeneratedColumn<int>(
+    'sort_order',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _isArchivedMeta = const VerificationMeta(
+    'isArchived',
+  );
+  @override
+  late final GeneratedColumn<bool> isArchived = GeneratedColumn<bool>(
+    'is_archived',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_archived" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    description,
+    icon,
+    color,
+    systemPrompt,
+    knowledgeBaseId,
+    mcpServers,
+    defaultModelConfigId,
+    temperature,
+    maxContextMessages,
+    sortOrder,
+    isArchived,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'projects';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<Project> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('description')) {
+      context.handle(
+        _descriptionMeta,
+        description.isAcceptableOrUnknown(
+          data['description']!,
+          _descriptionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('icon')) {
+      context.handle(
+        _iconMeta,
+        icon.isAcceptableOrUnknown(data['icon']!, _iconMeta),
+      );
+    }
+    if (data.containsKey('color')) {
+      context.handle(
+        _colorMeta,
+        color.isAcceptableOrUnknown(data['color']!, _colorMeta),
+      );
+    }
+    if (data.containsKey('system_prompt')) {
+      context.handle(
+        _systemPromptMeta,
+        systemPrompt.isAcceptableOrUnknown(
+          data['system_prompt']!,
+          _systemPromptMeta,
+        ),
+      );
+    }
+    if (data.containsKey('knowledge_base_id')) {
+      context.handle(
+        _knowledgeBaseIdMeta,
+        knowledgeBaseId.isAcceptableOrUnknown(
+          data['knowledge_base_id']!,
+          _knowledgeBaseIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('mcp_servers')) {
+      context.handle(
+        _mcpServersMeta,
+        mcpServers.isAcceptableOrUnknown(data['mcp_servers']!, _mcpServersMeta),
+      );
+    }
+    if (data.containsKey('default_model_config_id')) {
+      context.handle(
+        _defaultModelConfigIdMeta,
+        defaultModelConfigId.isAcceptableOrUnknown(
+          data['default_model_config_id']!,
+          _defaultModelConfigIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('temperature')) {
+      context.handle(
+        _temperatureMeta,
+        temperature.isAcceptableOrUnknown(
+          data['temperature']!,
+          _temperatureMeta,
+        ),
+      );
+    }
+    if (data.containsKey('max_context_messages')) {
+      context.handle(
+        _maxContextMessagesMeta,
+        maxContextMessages.isAcceptableOrUnknown(
+          data['max_context_messages']!,
+          _maxContextMessagesMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sort_order')) {
+      context.handle(
+        _sortOrderMeta,
+        sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta),
+      );
+    }
+    if (data.containsKey('is_archived')) {
+      context.handle(
+        _isArchivedMeta,
+        isArchived.isAcceptableOrUnknown(data['is_archived']!, _isArchivedMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  Project map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Project(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      description: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}description'],
+      ),
+      icon: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}icon'],
+      )!,
+      color: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}color'],
+      )!,
+      systemPrompt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}system_prompt'],
+      ),
+      knowledgeBaseId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}knowledge_base_id'],
+      ),
+      mcpServers: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}mcp_servers'],
+      ),
+      defaultModelConfigId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}default_model_config_id'],
+      ),
+      temperature: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}temperature'],
+      )!,
+      maxContextMessages: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}max_context_messages'],
+      )!,
+      sortOrder: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort_order'],
+      )!,
+      isArchived: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_archived'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $ProjectsTable createAlias(String alias) {
+    return $ProjectsTable(attachedDatabase, alias);
+  }
+}
+
+class Project extends DataClass implements Insertable<Project> {
+  final String id;
+  final String name;
+  final String? description;
+  final String icon;
+  final String color;
+  final String? systemPrompt;
+  final String? knowledgeBaseId;
+  final String? mcpServers;
+  final String? defaultModelConfigId;
+  final double temperature;
+  final int maxContextMessages;
+  final int sortOrder;
+  final bool isArchived;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const Project({
+    required this.id,
+    required this.name,
+    this.description,
+    required this.icon,
+    required this.color,
+    this.systemPrompt,
+    this.knowledgeBaseId,
+    this.mcpServers,
+    this.defaultModelConfigId,
+    required this.temperature,
+    required this.maxContextMessages,
+    required this.sortOrder,
+    required this.isArchived,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    if (!nullToAbsent || description != null) {
+      map['description'] = Variable<String>(description);
+    }
+    map['icon'] = Variable<String>(icon);
+    map['color'] = Variable<String>(color);
+    if (!nullToAbsent || systemPrompt != null) {
+      map['system_prompt'] = Variable<String>(systemPrompt);
+    }
+    if (!nullToAbsent || knowledgeBaseId != null) {
+      map['knowledge_base_id'] = Variable<String>(knowledgeBaseId);
+    }
+    if (!nullToAbsent || mcpServers != null) {
+      map['mcp_servers'] = Variable<String>(mcpServers);
+    }
+    if (!nullToAbsent || defaultModelConfigId != null) {
+      map['default_model_config_id'] = Variable<String>(defaultModelConfigId);
+    }
+    map['temperature'] = Variable<double>(temperature);
+    map['max_context_messages'] = Variable<int>(maxContextMessages);
+    map['sort_order'] = Variable<int>(sortOrder);
+    map['is_archived'] = Variable<bool>(isArchived);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  ProjectsCompanion toCompanion(bool nullToAbsent) {
+    return ProjectsCompanion(
+      id: Value(id),
+      name: Value(name),
+      description: description == null && nullToAbsent
+          ? const Value.absent()
+          : Value(description),
+      icon: Value(icon),
+      color: Value(color),
+      systemPrompt: systemPrompt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(systemPrompt),
+      knowledgeBaseId: knowledgeBaseId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(knowledgeBaseId),
+      mcpServers: mcpServers == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mcpServers),
+      defaultModelConfigId: defaultModelConfigId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(defaultModelConfigId),
+      temperature: Value(temperature),
+      maxContextMessages: Value(maxContextMessages),
+      sortOrder: Value(sortOrder),
+      isArchived: Value(isArchived),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory Project.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Project(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      description: serializer.fromJson<String?>(json['description']),
+      icon: serializer.fromJson<String>(json['icon']),
+      color: serializer.fromJson<String>(json['color']),
+      systemPrompt: serializer.fromJson<String?>(json['systemPrompt']),
+      knowledgeBaseId: serializer.fromJson<String?>(json['knowledgeBaseId']),
+      mcpServers: serializer.fromJson<String?>(json['mcpServers']),
+      defaultModelConfigId: serializer.fromJson<String?>(
+        json['defaultModelConfigId'],
+      ),
+      temperature: serializer.fromJson<double>(json['temperature']),
+      maxContextMessages: serializer.fromJson<int>(json['maxContextMessages']),
+      sortOrder: serializer.fromJson<int>(json['sortOrder']),
+      isArchived: serializer.fromJson<bool>(json['isArchived']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'description': serializer.toJson<String?>(description),
+      'icon': serializer.toJson<String>(icon),
+      'color': serializer.toJson<String>(color),
+      'systemPrompt': serializer.toJson<String?>(systemPrompt),
+      'knowledgeBaseId': serializer.toJson<String?>(knowledgeBaseId),
+      'mcpServers': serializer.toJson<String?>(mcpServers),
+      'defaultModelConfigId': serializer.toJson<String?>(defaultModelConfigId),
+      'temperature': serializer.toJson<double>(temperature),
+      'maxContextMessages': serializer.toJson<int>(maxContextMessages),
+      'sortOrder': serializer.toJson<int>(sortOrder),
+      'isArchived': serializer.toJson<bool>(isArchived),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  Project copyWith({
+    String? id,
+    String? name,
+    Value<String?> description = const Value.absent(),
+    String? icon,
+    String? color,
+    Value<String?> systemPrompt = const Value.absent(),
+    Value<String?> knowledgeBaseId = const Value.absent(),
+    Value<String?> mcpServers = const Value.absent(),
+    Value<String?> defaultModelConfigId = const Value.absent(),
+    double? temperature,
+    int? maxContextMessages,
+    int? sortOrder,
+    bool? isArchived,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => Project(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    description: description.present ? description.value : this.description,
+    icon: icon ?? this.icon,
+    color: color ?? this.color,
+    systemPrompt: systemPrompt.present ? systemPrompt.value : this.systemPrompt,
+    knowledgeBaseId: knowledgeBaseId.present
+        ? knowledgeBaseId.value
+        : this.knowledgeBaseId,
+    mcpServers: mcpServers.present ? mcpServers.value : this.mcpServers,
+    defaultModelConfigId: defaultModelConfigId.present
+        ? defaultModelConfigId.value
+        : this.defaultModelConfigId,
+    temperature: temperature ?? this.temperature,
+    maxContextMessages: maxContextMessages ?? this.maxContextMessages,
+    sortOrder: sortOrder ?? this.sortOrder,
+    isArchived: isArchived ?? this.isArchived,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  Project copyWithCompanion(ProjectsCompanion data) {
+    return Project(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      description: data.description.present
+          ? data.description.value
+          : this.description,
+      icon: data.icon.present ? data.icon.value : this.icon,
+      color: data.color.present ? data.color.value : this.color,
+      systemPrompt: data.systemPrompt.present
+          ? data.systemPrompt.value
+          : this.systemPrompt,
+      knowledgeBaseId: data.knowledgeBaseId.present
+          ? data.knowledgeBaseId.value
+          : this.knowledgeBaseId,
+      mcpServers: data.mcpServers.present
+          ? data.mcpServers.value
+          : this.mcpServers,
+      defaultModelConfigId: data.defaultModelConfigId.present
+          ? data.defaultModelConfigId.value
+          : this.defaultModelConfigId,
+      temperature: data.temperature.present
+          ? data.temperature.value
+          : this.temperature,
+      maxContextMessages: data.maxContextMessages.present
+          ? data.maxContextMessages.value
+          : this.maxContextMessages,
+      sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
+      isArchived: data.isArchived.present
+          ? data.isArchived.value
+          : this.isArchived,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('Project(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('description: $description, ')
+          ..write('icon: $icon, ')
+          ..write('color: $color, ')
+          ..write('systemPrompt: $systemPrompt, ')
+          ..write('knowledgeBaseId: $knowledgeBaseId, ')
+          ..write('mcpServers: $mcpServers, ')
+          ..write('defaultModelConfigId: $defaultModelConfigId, ')
+          ..write('temperature: $temperature, ')
+          ..write('maxContextMessages: $maxContextMessages, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('isArchived: $isArchived, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    name,
+    description,
+    icon,
+    color,
+    systemPrompt,
+    knowledgeBaseId,
+    mcpServers,
+    defaultModelConfigId,
+    temperature,
+    maxContextMessages,
+    sortOrder,
+    isArchived,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Project &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.description == this.description &&
+          other.icon == this.icon &&
+          other.color == this.color &&
+          other.systemPrompt == this.systemPrompt &&
+          other.knowledgeBaseId == this.knowledgeBaseId &&
+          other.mcpServers == this.mcpServers &&
+          other.defaultModelConfigId == this.defaultModelConfigId &&
+          other.temperature == this.temperature &&
+          other.maxContextMessages == this.maxContextMessages &&
+          other.sortOrder == this.sortOrder &&
+          other.isArchived == this.isArchived &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class ProjectsCompanion extends UpdateCompanion<Project> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String?> description;
+  final Value<String> icon;
+  final Value<String> color;
+  final Value<String?> systemPrompt;
+  final Value<String?> knowledgeBaseId;
+  final Value<String?> mcpServers;
+  final Value<String?> defaultModelConfigId;
+  final Value<double> temperature;
+  final Value<int> maxContextMessages;
+  final Value<int> sortOrder;
+  final Value<bool> isArchived;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const ProjectsCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.description = const Value.absent(),
+    this.icon = const Value.absent(),
+    this.color = const Value.absent(),
+    this.systemPrompt = const Value.absent(),
+    this.knowledgeBaseId = const Value.absent(),
+    this.mcpServers = const Value.absent(),
+    this.defaultModelConfigId = const Value.absent(),
+    this.temperature = const Value.absent(),
+    this.maxContextMessages = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.isArchived = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ProjectsCompanion.insert({
+    required String id,
+    required String name,
+    this.description = const Value.absent(),
+    this.icon = const Value.absent(),
+    this.color = const Value.absent(),
+    this.systemPrompt = const Value.absent(),
+    this.knowledgeBaseId = const Value.absent(),
+    this.mcpServers = const Value.absent(),
+    this.defaultModelConfigId = const Value.absent(),
+    this.temperature = const Value.absent(),
+    this.maxContextMessages = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.isArchived = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<Project> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? description,
+    Expression<String>? icon,
+    Expression<String>? color,
+    Expression<String>? systemPrompt,
+    Expression<String>? knowledgeBaseId,
+    Expression<String>? mcpServers,
+    Expression<String>? defaultModelConfigId,
+    Expression<double>? temperature,
+    Expression<int>? maxContextMessages,
+    Expression<int>? sortOrder,
+    Expression<bool>? isArchived,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (description != null) 'description': description,
+      if (icon != null) 'icon': icon,
+      if (color != null) 'color': color,
+      if (systemPrompt != null) 'system_prompt': systemPrompt,
+      if (knowledgeBaseId != null) 'knowledge_base_id': knowledgeBaseId,
+      if (mcpServers != null) 'mcp_servers': mcpServers,
+      if (defaultModelConfigId != null)
+        'default_model_config_id': defaultModelConfigId,
+      if (temperature != null) 'temperature': temperature,
+      if (maxContextMessages != null)
+        'max_context_messages': maxContextMessages,
+      if (sortOrder != null) 'sort_order': sortOrder,
+      if (isArchived != null) 'is_archived': isArchived,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ProjectsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<String?>? description,
+    Value<String>? icon,
+    Value<String>? color,
+    Value<String?>? systemPrompt,
+    Value<String?>? knowledgeBaseId,
+    Value<String?>? mcpServers,
+    Value<String?>? defaultModelConfigId,
+    Value<double>? temperature,
+    Value<int>? maxContextMessages,
+    Value<int>? sortOrder,
+    Value<bool>? isArchived,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return ProjectsCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      description: description ?? this.description,
+      icon: icon ?? this.icon,
+      color: color ?? this.color,
+      systemPrompt: systemPrompt ?? this.systemPrompt,
+      knowledgeBaseId: knowledgeBaseId ?? this.knowledgeBaseId,
+      mcpServers: mcpServers ?? this.mcpServers,
+      defaultModelConfigId: defaultModelConfigId ?? this.defaultModelConfigId,
+      temperature: temperature ?? this.temperature,
+      maxContextMessages: maxContextMessages ?? this.maxContextMessages,
+      sortOrder: sortOrder ?? this.sortOrder,
+      isArchived: isArchived ?? this.isArchived,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (description.present) {
+      map['description'] = Variable<String>(description.value);
+    }
+    if (icon.present) {
+      map['icon'] = Variable<String>(icon.value);
+    }
+    if (color.present) {
+      map['color'] = Variable<String>(color.value);
+    }
+    if (systemPrompt.present) {
+      map['system_prompt'] = Variable<String>(systemPrompt.value);
+    }
+    if (knowledgeBaseId.present) {
+      map['knowledge_base_id'] = Variable<String>(knowledgeBaseId.value);
+    }
+    if (mcpServers.present) {
+      map['mcp_servers'] = Variable<String>(mcpServers.value);
+    }
+    if (defaultModelConfigId.present) {
+      map['default_model_config_id'] = Variable<String>(
+        defaultModelConfigId.value,
+      );
+    }
+    if (temperature.present) {
+      map['temperature'] = Variable<double>(temperature.value);
+    }
+    if (maxContextMessages.present) {
+      map['max_context_messages'] = Variable<int>(maxContextMessages.value);
+    }
+    if (sortOrder.present) {
+      map['sort_order'] = Variable<int>(sortOrder.value);
+    }
+    if (isArchived.present) {
+      map['is_archived'] = Variable<bool>(isArchived.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProjectsCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('description: $description, ')
+          ..write('icon: $icon, ')
+          ..write('color: $color, ')
+          ..write('systemPrompt: $systemPrompt, ')
+          ..write('knowledgeBaseId: $knowledgeBaseId, ')
+          ..write('mcpServers: $mcpServers, ')
+          ..write('defaultModelConfigId: $defaultModelConfigId, ')
+          ..write('temperature: $temperature, ')
+          ..write('maxContextMessages: $maxContextMessages, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('isArchived: $isArchived, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ResearchReportsTable extends ResearchReports
+    with TableInfo<$ResearchReportsTable, ResearchReport> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ResearchReportsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<String> sessionId = GeneratedColumn<String>(
+    'session_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _queryMeta = const VerificationMeta('query');
+  @override
+  late final GeneratedColumn<String> query = GeneratedColumn<String>(
+    'query',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _summaryMeta = const VerificationMeta(
+    'summary',
+  );
+  @override
+  late final GeneratedColumn<String> summary = GeneratedColumn<String>(
+    'summary',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _totalStepsMeta = const VerificationMeta(
+    'totalSteps',
+  );
+  @override
+  late final GeneratedColumn<int> totalSteps = GeneratedColumn<int>(
+    'total_steps',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _completedStepsMeta = const VerificationMeta(
+    'completedSteps',
+  );
+  @override
+  late final GeneratedColumn<int> completedSteps = GeneratedColumn<int>(
+    'completed_steps',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _totalTokensMeta = const VerificationMeta(
+    'totalTokens',
+  );
+  @override
+  late final GeneratedColumn<int> totalTokens = GeneratedColumn<int>(
+    'total_tokens',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _inputTokensMeta = const VerificationMeta(
+    'inputTokens',
+  );
+  @override
+  late final GeneratedColumn<int> inputTokens = GeneratedColumn<int>(
+    'input_tokens',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _outputTokensMeta = const VerificationMeta(
+    'outputTokens',
+  );
+  @override
+  late final GeneratedColumn<int> outputTokens = GeneratedColumn<int>(
+    'output_tokens',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _thinkingTokensMeta = const VerificationMeta(
+    'thinkingTokens',
+  );
+  @override
+  late final GeneratedColumn<int> thinkingTokens = GeneratedColumn<int>(
+    'thinking_tokens',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _modelConfigIdMeta = const VerificationMeta(
+    'modelConfigId',
+  );
+  @override
+  late final GeneratedColumn<String> modelConfigId = GeneratedColumn<String>(
+    'model_config_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _enabledSourcesMeta = const VerificationMeta(
+    'enabledSources',
+  );
+  @override
+  late final GeneratedColumn<String> enabledSources = GeneratedColumn<String>(
+    'enabled_sources',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _completedAtMeta = const VerificationMeta(
+    'completedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> completedAt = GeneratedColumn<DateTime>(
+    'completed_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    sessionId,
+    query,
+    title,
+    summary,
+    status,
+    totalSteps,
+    completedSteps,
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    thinkingTokens,
+    modelConfigId,
+    enabledSources,
+    createdAt,
+    completedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'research_reports';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ResearchReport> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    }
+    if (data.containsKey('query')) {
+      context.handle(
+        _queryMeta,
+        query.isAcceptableOrUnknown(data['query']!, _queryMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_queryMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('summary')) {
+      context.handle(
+        _summaryMeta,
+        summary.isAcceptableOrUnknown(data['summary']!, _summaryMeta),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('total_steps')) {
+      context.handle(
+        _totalStepsMeta,
+        totalSteps.isAcceptableOrUnknown(data['total_steps']!, _totalStepsMeta),
+      );
+    }
+    if (data.containsKey('completed_steps')) {
+      context.handle(
+        _completedStepsMeta,
+        completedSteps.isAcceptableOrUnknown(
+          data['completed_steps']!,
+          _completedStepsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('total_tokens')) {
+      context.handle(
+        _totalTokensMeta,
+        totalTokens.isAcceptableOrUnknown(
+          data['total_tokens']!,
+          _totalTokensMeta,
+        ),
+      );
+    }
+    if (data.containsKey('input_tokens')) {
+      context.handle(
+        _inputTokensMeta,
+        inputTokens.isAcceptableOrUnknown(
+          data['input_tokens']!,
+          _inputTokensMeta,
+        ),
+      );
+    }
+    if (data.containsKey('output_tokens')) {
+      context.handle(
+        _outputTokensMeta,
+        outputTokens.isAcceptableOrUnknown(
+          data['output_tokens']!,
+          _outputTokensMeta,
+        ),
+      );
+    }
+    if (data.containsKey('thinking_tokens')) {
+      context.handle(
+        _thinkingTokensMeta,
+        thinkingTokens.isAcceptableOrUnknown(
+          data['thinking_tokens']!,
+          _thinkingTokensMeta,
+        ),
+      );
+    }
+    if (data.containsKey('model_config_id')) {
+      context.handle(
+        _modelConfigIdMeta,
+        modelConfigId.isAcceptableOrUnknown(
+          data['model_config_id']!,
+          _modelConfigIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('enabled_sources')) {
+      context.handle(
+        _enabledSourcesMeta,
+        enabledSources.isAcceptableOrUnknown(
+          data['enabled_sources']!,
+          _enabledSourcesMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('completed_at')) {
+      context.handle(
+        _completedAtMeta,
+        completedAt.isAcceptableOrUnknown(
+          data['completed_at']!,
+          _completedAtMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ResearchReport map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ResearchReport(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}session_id'],
+      ),
+      query: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}query'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      summary: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}summary'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      totalSteps: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}total_steps'],
+      )!,
+      completedSteps: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}completed_steps'],
+      )!,
+      totalTokens: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}total_tokens'],
+      )!,
+      inputTokens: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}input_tokens'],
+      )!,
+      outputTokens: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}output_tokens'],
+      )!,
+      thinkingTokens: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}thinking_tokens'],
+      )!,
+      modelConfigId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}model_config_id'],
+      ),
+      enabledSources: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}enabled_sources'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      completedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}completed_at'],
+      ),
+    );
+  }
+
+  @override
+  $ResearchReportsTable createAlias(String alias) {
+    return $ResearchReportsTable(attachedDatabase, alias);
+  }
+}
+
+class ResearchReport extends DataClass implements Insertable<ResearchReport> {
+  final String id;
+  final String? sessionId;
+  final String query;
+  final String title;
+  final String? summary;
+  final String status;
+  final int totalSteps;
+  final int completedSteps;
+  final int totalTokens;
+  final int inputTokens;
+  final int outputTokens;
+  final int thinkingTokens;
+  final String? modelConfigId;
+  final String? enabledSources;
+  final DateTime createdAt;
+  final DateTime? completedAt;
+  const ResearchReport({
+    required this.id,
+    this.sessionId,
+    required this.query,
+    required this.title,
+    this.summary,
+    required this.status,
+    required this.totalSteps,
+    required this.completedSteps,
+    required this.totalTokens,
+    required this.inputTokens,
+    required this.outputTokens,
+    required this.thinkingTokens,
+    this.modelConfigId,
+    this.enabledSources,
+    required this.createdAt,
+    this.completedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    if (!nullToAbsent || sessionId != null) {
+      map['session_id'] = Variable<String>(sessionId);
+    }
+    map['query'] = Variable<String>(query);
+    map['title'] = Variable<String>(title);
+    if (!nullToAbsent || summary != null) {
+      map['summary'] = Variable<String>(summary);
+    }
+    map['status'] = Variable<String>(status);
+    map['total_steps'] = Variable<int>(totalSteps);
+    map['completed_steps'] = Variable<int>(completedSteps);
+    map['total_tokens'] = Variable<int>(totalTokens);
+    map['input_tokens'] = Variable<int>(inputTokens);
+    map['output_tokens'] = Variable<int>(outputTokens);
+    map['thinking_tokens'] = Variable<int>(thinkingTokens);
+    if (!nullToAbsent || modelConfigId != null) {
+      map['model_config_id'] = Variable<String>(modelConfigId);
+    }
+    if (!nullToAbsent || enabledSources != null) {
+      map['enabled_sources'] = Variable<String>(enabledSources);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || completedAt != null) {
+      map['completed_at'] = Variable<DateTime>(completedAt);
+    }
+    return map;
+  }
+
+  ResearchReportsCompanion toCompanion(bool nullToAbsent) {
+    return ResearchReportsCompanion(
+      id: Value(id),
+      sessionId: sessionId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sessionId),
+      query: Value(query),
+      title: Value(title),
+      summary: summary == null && nullToAbsent
+          ? const Value.absent()
+          : Value(summary),
+      status: Value(status),
+      totalSteps: Value(totalSteps),
+      completedSteps: Value(completedSteps),
+      totalTokens: Value(totalTokens),
+      inputTokens: Value(inputTokens),
+      outputTokens: Value(outputTokens),
+      thinkingTokens: Value(thinkingTokens),
+      modelConfigId: modelConfigId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(modelConfigId),
+      enabledSources: enabledSources == null && nullToAbsent
+          ? const Value.absent()
+          : Value(enabledSources),
+      createdAt: Value(createdAt),
+      completedAt: completedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(completedAt),
+    );
+  }
+
+  factory ResearchReport.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ResearchReport(
+      id: serializer.fromJson<String>(json['id']),
+      sessionId: serializer.fromJson<String?>(json['sessionId']),
+      query: serializer.fromJson<String>(json['query']),
+      title: serializer.fromJson<String>(json['title']),
+      summary: serializer.fromJson<String?>(json['summary']),
+      status: serializer.fromJson<String>(json['status']),
+      totalSteps: serializer.fromJson<int>(json['totalSteps']),
+      completedSteps: serializer.fromJson<int>(json['completedSteps']),
+      totalTokens: serializer.fromJson<int>(json['totalTokens']),
+      inputTokens: serializer.fromJson<int>(json['inputTokens']),
+      outputTokens: serializer.fromJson<int>(json['outputTokens']),
+      thinkingTokens: serializer.fromJson<int>(json['thinkingTokens']),
+      modelConfigId: serializer.fromJson<String?>(json['modelConfigId']),
+      enabledSources: serializer.fromJson<String?>(json['enabledSources']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      completedAt: serializer.fromJson<DateTime?>(json['completedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'sessionId': serializer.toJson<String?>(sessionId),
+      'query': serializer.toJson<String>(query),
+      'title': serializer.toJson<String>(title),
+      'summary': serializer.toJson<String?>(summary),
+      'status': serializer.toJson<String>(status),
+      'totalSteps': serializer.toJson<int>(totalSteps),
+      'completedSteps': serializer.toJson<int>(completedSteps),
+      'totalTokens': serializer.toJson<int>(totalTokens),
+      'inputTokens': serializer.toJson<int>(inputTokens),
+      'outputTokens': serializer.toJson<int>(outputTokens),
+      'thinkingTokens': serializer.toJson<int>(thinkingTokens),
+      'modelConfigId': serializer.toJson<String?>(modelConfigId),
+      'enabledSources': serializer.toJson<String?>(enabledSources),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'completedAt': serializer.toJson<DateTime?>(completedAt),
+    };
+  }
+
+  ResearchReport copyWith({
+    String? id,
+    Value<String?> sessionId = const Value.absent(),
+    String? query,
+    String? title,
+    Value<String?> summary = const Value.absent(),
+    String? status,
+    int? totalSteps,
+    int? completedSteps,
+    int? totalTokens,
+    int? inputTokens,
+    int? outputTokens,
+    int? thinkingTokens,
+    Value<String?> modelConfigId = const Value.absent(),
+    Value<String?> enabledSources = const Value.absent(),
+    DateTime? createdAt,
+    Value<DateTime?> completedAt = const Value.absent(),
+  }) => ResearchReport(
+    id: id ?? this.id,
+    sessionId: sessionId.present ? sessionId.value : this.sessionId,
+    query: query ?? this.query,
+    title: title ?? this.title,
+    summary: summary.present ? summary.value : this.summary,
+    status: status ?? this.status,
+    totalSteps: totalSteps ?? this.totalSteps,
+    completedSteps: completedSteps ?? this.completedSteps,
+    totalTokens: totalTokens ?? this.totalTokens,
+    inputTokens: inputTokens ?? this.inputTokens,
+    outputTokens: outputTokens ?? this.outputTokens,
+    thinkingTokens: thinkingTokens ?? this.thinkingTokens,
+    modelConfigId: modelConfigId.present
+        ? modelConfigId.value
+        : this.modelConfigId,
+    enabledSources: enabledSources.present
+        ? enabledSources.value
+        : this.enabledSources,
+    createdAt: createdAt ?? this.createdAt,
+    completedAt: completedAt.present ? completedAt.value : this.completedAt,
+  );
+  ResearchReport copyWithCompanion(ResearchReportsCompanion data) {
+    return ResearchReport(
+      id: data.id.present ? data.id.value : this.id,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      query: data.query.present ? data.query.value : this.query,
+      title: data.title.present ? data.title.value : this.title,
+      summary: data.summary.present ? data.summary.value : this.summary,
+      status: data.status.present ? data.status.value : this.status,
+      totalSteps: data.totalSteps.present
+          ? data.totalSteps.value
+          : this.totalSteps,
+      completedSteps: data.completedSteps.present
+          ? data.completedSteps.value
+          : this.completedSteps,
+      totalTokens: data.totalTokens.present
+          ? data.totalTokens.value
+          : this.totalTokens,
+      inputTokens: data.inputTokens.present
+          ? data.inputTokens.value
+          : this.inputTokens,
+      outputTokens: data.outputTokens.present
+          ? data.outputTokens.value
+          : this.outputTokens,
+      thinkingTokens: data.thinkingTokens.present
+          ? data.thinkingTokens.value
+          : this.thinkingTokens,
+      modelConfigId: data.modelConfigId.present
+          ? data.modelConfigId.value
+          : this.modelConfigId,
+      enabledSources: data.enabledSources.present
+          ? data.enabledSources.value
+          : this.enabledSources,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      completedAt: data.completedAt.present
+          ? data.completedAt.value
+          : this.completedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResearchReport(')
+          ..write('id: $id, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('query: $query, ')
+          ..write('title: $title, ')
+          ..write('summary: $summary, ')
+          ..write('status: $status, ')
+          ..write('totalSteps: $totalSteps, ')
+          ..write('completedSteps: $completedSteps, ')
+          ..write('totalTokens: $totalTokens, ')
+          ..write('inputTokens: $inputTokens, ')
+          ..write('outputTokens: $outputTokens, ')
+          ..write('thinkingTokens: $thinkingTokens, ')
+          ..write('modelConfigId: $modelConfigId, ')
+          ..write('enabledSources: $enabledSources, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('completedAt: $completedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    sessionId,
+    query,
+    title,
+    summary,
+    status,
+    totalSteps,
+    completedSteps,
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    thinkingTokens,
+    modelConfigId,
+    enabledSources,
+    createdAt,
+    completedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ResearchReport &&
+          other.id == this.id &&
+          other.sessionId == this.sessionId &&
+          other.query == this.query &&
+          other.title == this.title &&
+          other.summary == this.summary &&
+          other.status == this.status &&
+          other.totalSteps == this.totalSteps &&
+          other.completedSteps == this.completedSteps &&
+          other.totalTokens == this.totalTokens &&
+          other.inputTokens == this.inputTokens &&
+          other.outputTokens == this.outputTokens &&
+          other.thinkingTokens == this.thinkingTokens &&
+          other.modelConfigId == this.modelConfigId &&
+          other.enabledSources == this.enabledSources &&
+          other.createdAt == this.createdAt &&
+          other.completedAt == this.completedAt);
+}
+
+class ResearchReportsCompanion extends UpdateCompanion<ResearchReport> {
+  final Value<String> id;
+  final Value<String?> sessionId;
+  final Value<String> query;
+  final Value<String> title;
+  final Value<String?> summary;
+  final Value<String> status;
+  final Value<int> totalSteps;
+  final Value<int> completedSteps;
+  final Value<int> totalTokens;
+  final Value<int> inputTokens;
+  final Value<int> outputTokens;
+  final Value<int> thinkingTokens;
+  final Value<String?> modelConfigId;
+  final Value<String?> enabledSources;
+  final Value<DateTime> createdAt;
+  final Value<DateTime?> completedAt;
+  final Value<int> rowid;
+  const ResearchReportsCompanion({
+    this.id = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.query = const Value.absent(),
+    this.title = const Value.absent(),
+    this.summary = const Value.absent(),
+    this.status = const Value.absent(),
+    this.totalSteps = const Value.absent(),
+    this.completedSteps = const Value.absent(),
+    this.totalTokens = const Value.absent(),
+    this.inputTokens = const Value.absent(),
+    this.outputTokens = const Value.absent(),
+    this.thinkingTokens = const Value.absent(),
+    this.modelConfigId = const Value.absent(),
+    this.enabledSources = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.completedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ResearchReportsCompanion.insert({
+    required String id,
+    this.sessionId = const Value.absent(),
+    required String query,
+    required String title,
+    this.summary = const Value.absent(),
+    this.status = const Value.absent(),
+    this.totalSteps = const Value.absent(),
+    this.completedSteps = const Value.absent(),
+    this.totalTokens = const Value.absent(),
+    this.inputTokens = const Value.absent(),
+    this.outputTokens = const Value.absent(),
+    this.thinkingTokens = const Value.absent(),
+    this.modelConfigId = const Value.absent(),
+    this.enabledSources = const Value.absent(),
+    required DateTime createdAt,
+    this.completedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       query = Value(query),
+       title = Value(title),
+       createdAt = Value(createdAt);
+  static Insertable<ResearchReport> custom({
+    Expression<String>? id,
+    Expression<String>? sessionId,
+    Expression<String>? query,
+    Expression<String>? title,
+    Expression<String>? summary,
+    Expression<String>? status,
+    Expression<int>? totalSteps,
+    Expression<int>? completedSteps,
+    Expression<int>? totalTokens,
+    Expression<int>? inputTokens,
+    Expression<int>? outputTokens,
+    Expression<int>? thinkingTokens,
+    Expression<String>? modelConfigId,
+    Expression<String>? enabledSources,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? completedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (sessionId != null) 'session_id': sessionId,
+      if (query != null) 'query': query,
+      if (title != null) 'title': title,
+      if (summary != null) 'summary': summary,
+      if (status != null) 'status': status,
+      if (totalSteps != null) 'total_steps': totalSteps,
+      if (completedSteps != null) 'completed_steps': completedSteps,
+      if (totalTokens != null) 'total_tokens': totalTokens,
+      if (inputTokens != null) 'input_tokens': inputTokens,
+      if (outputTokens != null) 'output_tokens': outputTokens,
+      if (thinkingTokens != null) 'thinking_tokens': thinkingTokens,
+      if (modelConfigId != null) 'model_config_id': modelConfigId,
+      if (enabledSources != null) 'enabled_sources': enabledSources,
+      if (createdAt != null) 'created_at': createdAt,
+      if (completedAt != null) 'completed_at': completedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ResearchReportsCompanion copyWith({
+    Value<String>? id,
+    Value<String?>? sessionId,
+    Value<String>? query,
+    Value<String>? title,
+    Value<String?>? summary,
+    Value<String>? status,
+    Value<int>? totalSteps,
+    Value<int>? completedSteps,
+    Value<int>? totalTokens,
+    Value<int>? inputTokens,
+    Value<int>? outputTokens,
+    Value<int>? thinkingTokens,
+    Value<String?>? modelConfigId,
+    Value<String?>? enabledSources,
+    Value<DateTime>? createdAt,
+    Value<DateTime?>? completedAt,
+    Value<int>? rowid,
+  }) {
+    return ResearchReportsCompanion(
+      id: id ?? this.id,
+      sessionId: sessionId ?? this.sessionId,
+      query: query ?? this.query,
+      title: title ?? this.title,
+      summary: summary ?? this.summary,
+      status: status ?? this.status,
+      totalSteps: totalSteps ?? this.totalSteps,
+      completedSteps: completedSteps ?? this.completedSteps,
+      totalTokens: totalTokens ?? this.totalTokens,
+      inputTokens: inputTokens ?? this.inputTokens,
+      outputTokens: outputTokens ?? this.outputTokens,
+      thinkingTokens: thinkingTokens ?? this.thinkingTokens,
+      modelConfigId: modelConfigId ?? this.modelConfigId,
+      enabledSources: enabledSources ?? this.enabledSources,
+      createdAt: createdAt ?? this.createdAt,
+      completedAt: completedAt ?? this.completedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<String>(sessionId.value);
+    }
+    if (query.present) {
+      map['query'] = Variable<String>(query.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (summary.present) {
+      map['summary'] = Variable<String>(summary.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (totalSteps.present) {
+      map['total_steps'] = Variable<int>(totalSteps.value);
+    }
+    if (completedSteps.present) {
+      map['completed_steps'] = Variable<int>(completedSteps.value);
+    }
+    if (totalTokens.present) {
+      map['total_tokens'] = Variable<int>(totalTokens.value);
+    }
+    if (inputTokens.present) {
+      map['input_tokens'] = Variable<int>(inputTokens.value);
+    }
+    if (outputTokens.present) {
+      map['output_tokens'] = Variable<int>(outputTokens.value);
+    }
+    if (thinkingTokens.present) {
+      map['thinking_tokens'] = Variable<int>(thinkingTokens.value);
+    }
+    if (modelConfigId.present) {
+      map['model_config_id'] = Variable<String>(modelConfigId.value);
+    }
+    if (enabledSources.present) {
+      map['enabled_sources'] = Variable<String>(enabledSources.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (completedAt.present) {
+      map['completed_at'] = Variable<DateTime>(completedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResearchReportsCompanion(')
+          ..write('id: $id, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('query: $query, ')
+          ..write('title: $title, ')
+          ..write('summary: $summary, ')
+          ..write('status: $status, ')
+          ..write('totalSteps: $totalSteps, ')
+          ..write('completedSteps: $completedSteps, ')
+          ..write('totalTokens: $totalTokens, ')
+          ..write('inputTokens: $inputTokens, ')
+          ..write('outputTokens: $outputTokens, ')
+          ..write('thinkingTokens: $thinkingTokens, ')
+          ..write('modelConfigId: $modelConfigId, ')
+          ..write('enabledSources: $enabledSources, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('completedAt: $completedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ResearchStepsTable extends ResearchSteps
+    with TableInfo<$ResearchStepsTable, ResearchStep> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ResearchStepsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _reportIdMeta = const VerificationMeta(
+    'reportId',
+  );
+  @override
+  late final GeneratedColumn<String> reportId = GeneratedColumn<String>(
+    'report_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _stepIndexMeta = const VerificationMeta(
+    'stepIndex',
+  );
+  @override
+  late final GeneratedColumn<int> stepIndex = GeneratedColumn<int>(
+    'step_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
+  @override
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+    'type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _descriptionMeta = const VerificationMeta(
+    'description',
+  );
+  @override
+  late final GeneratedColumn<String> description = GeneratedColumn<String>(
+    'description',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _searchQueryMeta = const VerificationMeta(
+    'searchQuery',
+  );
+  @override
+  late final GeneratedColumn<String> searchQuery = GeneratedColumn<String>(
+    'search_query',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _inputDataMeta = const VerificationMeta(
+    'inputData',
+  );
+  @override
+  late final GeneratedColumn<String> inputData = GeneratedColumn<String>(
+    'input_data',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _outputDataMeta = const VerificationMeta(
+    'outputData',
+  );
+  @override
+  late final GeneratedColumn<String> outputData = GeneratedColumn<String>(
+    'output_data',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _tokensUsedMeta = const VerificationMeta(
+    'tokensUsed',
+  );
+  @override
+  late final GeneratedColumn<int> tokensUsed = GeneratedColumn<int>(
+    'tokens_used',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _durationMsMeta = const VerificationMeta(
+    'durationMs',
+  );
+  @override
+  late final GeneratedColumn<int> durationMs = GeneratedColumn<int>(
+    'duration_ms',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _errorMessageMeta = const VerificationMeta(
+    'errorMessage',
+  );
+  @override
+  late final GeneratedColumn<String> errorMessage = GeneratedColumn<String>(
+    'error_message',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _startedAtMeta = const VerificationMeta(
+    'startedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> startedAt = GeneratedColumn<DateTime>(
+    'started_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _completedAtMeta = const VerificationMeta(
+    'completedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> completedAt = GeneratedColumn<DateTime>(
+    'completed_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    reportId,
+    stepIndex,
+    type,
+    title,
+    description,
+    searchQuery,
+    inputData,
+    outputData,
+    status,
+    tokensUsed,
+    durationMs,
+    errorMessage,
+    startedAt,
+    completedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'research_steps';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ResearchStep> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('report_id')) {
+      context.handle(
+        _reportIdMeta,
+        reportId.isAcceptableOrUnknown(data['report_id']!, _reportIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_reportIdMeta);
+    }
+    if (data.containsKey('step_index')) {
+      context.handle(
+        _stepIndexMeta,
+        stepIndex.isAcceptableOrUnknown(data['step_index']!, _stepIndexMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_stepIndexMeta);
+    }
+    if (data.containsKey('type')) {
+      context.handle(
+        _typeMeta,
+        type.isAcceptableOrUnknown(data['type']!, _typeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_typeMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('description')) {
+      context.handle(
+        _descriptionMeta,
+        description.isAcceptableOrUnknown(
+          data['description']!,
+          _descriptionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('search_query')) {
+      context.handle(
+        _searchQueryMeta,
+        searchQuery.isAcceptableOrUnknown(
+          data['search_query']!,
+          _searchQueryMeta,
+        ),
+      );
+    }
+    if (data.containsKey('input_data')) {
+      context.handle(
+        _inputDataMeta,
+        inputData.isAcceptableOrUnknown(data['input_data']!, _inputDataMeta),
+      );
+    }
+    if (data.containsKey('output_data')) {
+      context.handle(
+        _outputDataMeta,
+        outputData.isAcceptableOrUnknown(data['output_data']!, _outputDataMeta),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('tokens_used')) {
+      context.handle(
+        _tokensUsedMeta,
+        tokensUsed.isAcceptableOrUnknown(data['tokens_used']!, _tokensUsedMeta),
+      );
+    }
+    if (data.containsKey('duration_ms')) {
+      context.handle(
+        _durationMsMeta,
+        durationMs.isAcceptableOrUnknown(data['duration_ms']!, _durationMsMeta),
+      );
+    }
+    if (data.containsKey('error_message')) {
+      context.handle(
+        _errorMessageMeta,
+        errorMessage.isAcceptableOrUnknown(
+          data['error_message']!,
+          _errorMessageMeta,
+        ),
+      );
+    }
+    if (data.containsKey('started_at')) {
+      context.handle(
+        _startedAtMeta,
+        startedAt.isAcceptableOrUnknown(data['started_at']!, _startedAtMeta),
+      );
+    }
+    if (data.containsKey('completed_at')) {
+      context.handle(
+        _completedAtMeta,
+        completedAt.isAcceptableOrUnknown(
+          data['completed_at']!,
+          _completedAtMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ResearchStep map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ResearchStep(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      reportId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}report_id'],
+      )!,
+      stepIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}step_index'],
+      )!,
+      type: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}type'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      description: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}description'],
+      ),
+      searchQuery: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}search_query'],
+      ),
+      inputData: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}input_data'],
+      ),
+      outputData: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}output_data'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      tokensUsed: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}tokens_used'],
+      )!,
+      durationMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}duration_ms'],
+      ),
+      errorMessage: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}error_message'],
+      ),
+      startedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}started_at'],
+      ),
+      completedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}completed_at'],
+      ),
+    );
+  }
+
+  @override
+  $ResearchStepsTable createAlias(String alias) {
+    return $ResearchStepsTable(attachedDatabase, alias);
+  }
+}
+
+class ResearchStep extends DataClass implements Insertable<ResearchStep> {
+  final String id;
+  final String reportId;
+  final int stepIndex;
+  final String type;
+  final String title;
+  final String? description;
+  final String? searchQuery;
+  final String? inputData;
+  final String? outputData;
+  final String status;
+  final int tokensUsed;
+  final int? durationMs;
+  final String? errorMessage;
+  final DateTime? startedAt;
+  final DateTime? completedAt;
+  const ResearchStep({
+    required this.id,
+    required this.reportId,
+    required this.stepIndex,
+    required this.type,
+    required this.title,
+    this.description,
+    this.searchQuery,
+    this.inputData,
+    this.outputData,
+    required this.status,
+    required this.tokensUsed,
+    this.durationMs,
+    this.errorMessage,
+    this.startedAt,
+    this.completedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['report_id'] = Variable<String>(reportId);
+    map['step_index'] = Variable<int>(stepIndex);
+    map['type'] = Variable<String>(type);
+    map['title'] = Variable<String>(title);
+    if (!nullToAbsent || description != null) {
+      map['description'] = Variable<String>(description);
+    }
+    if (!nullToAbsent || searchQuery != null) {
+      map['search_query'] = Variable<String>(searchQuery);
+    }
+    if (!nullToAbsent || inputData != null) {
+      map['input_data'] = Variable<String>(inputData);
+    }
+    if (!nullToAbsent || outputData != null) {
+      map['output_data'] = Variable<String>(outputData);
+    }
+    map['status'] = Variable<String>(status);
+    map['tokens_used'] = Variable<int>(tokensUsed);
+    if (!nullToAbsent || durationMs != null) {
+      map['duration_ms'] = Variable<int>(durationMs);
+    }
+    if (!nullToAbsent || errorMessage != null) {
+      map['error_message'] = Variable<String>(errorMessage);
+    }
+    if (!nullToAbsent || startedAt != null) {
+      map['started_at'] = Variable<DateTime>(startedAt);
+    }
+    if (!nullToAbsent || completedAt != null) {
+      map['completed_at'] = Variable<DateTime>(completedAt);
+    }
+    return map;
+  }
+
+  ResearchStepsCompanion toCompanion(bool nullToAbsent) {
+    return ResearchStepsCompanion(
+      id: Value(id),
+      reportId: Value(reportId),
+      stepIndex: Value(stepIndex),
+      type: Value(type),
+      title: Value(title),
+      description: description == null && nullToAbsent
+          ? const Value.absent()
+          : Value(description),
+      searchQuery: searchQuery == null && nullToAbsent
+          ? const Value.absent()
+          : Value(searchQuery),
+      inputData: inputData == null && nullToAbsent
+          ? const Value.absent()
+          : Value(inputData),
+      outputData: outputData == null && nullToAbsent
+          ? const Value.absent()
+          : Value(outputData),
+      status: Value(status),
+      tokensUsed: Value(tokensUsed),
+      durationMs: durationMs == null && nullToAbsent
+          ? const Value.absent()
+          : Value(durationMs),
+      errorMessage: errorMessage == null && nullToAbsent
+          ? const Value.absent()
+          : Value(errorMessage),
+      startedAt: startedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(startedAt),
+      completedAt: completedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(completedAt),
+    );
+  }
+
+  factory ResearchStep.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ResearchStep(
+      id: serializer.fromJson<String>(json['id']),
+      reportId: serializer.fromJson<String>(json['reportId']),
+      stepIndex: serializer.fromJson<int>(json['stepIndex']),
+      type: serializer.fromJson<String>(json['type']),
+      title: serializer.fromJson<String>(json['title']),
+      description: serializer.fromJson<String?>(json['description']),
+      searchQuery: serializer.fromJson<String?>(json['searchQuery']),
+      inputData: serializer.fromJson<String?>(json['inputData']),
+      outputData: serializer.fromJson<String?>(json['outputData']),
+      status: serializer.fromJson<String>(json['status']),
+      tokensUsed: serializer.fromJson<int>(json['tokensUsed']),
+      durationMs: serializer.fromJson<int?>(json['durationMs']),
+      errorMessage: serializer.fromJson<String?>(json['errorMessage']),
+      startedAt: serializer.fromJson<DateTime?>(json['startedAt']),
+      completedAt: serializer.fromJson<DateTime?>(json['completedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'reportId': serializer.toJson<String>(reportId),
+      'stepIndex': serializer.toJson<int>(stepIndex),
+      'type': serializer.toJson<String>(type),
+      'title': serializer.toJson<String>(title),
+      'description': serializer.toJson<String?>(description),
+      'searchQuery': serializer.toJson<String?>(searchQuery),
+      'inputData': serializer.toJson<String?>(inputData),
+      'outputData': serializer.toJson<String?>(outputData),
+      'status': serializer.toJson<String>(status),
+      'tokensUsed': serializer.toJson<int>(tokensUsed),
+      'durationMs': serializer.toJson<int?>(durationMs),
+      'errorMessage': serializer.toJson<String?>(errorMessage),
+      'startedAt': serializer.toJson<DateTime?>(startedAt),
+      'completedAt': serializer.toJson<DateTime?>(completedAt),
+    };
+  }
+
+  ResearchStep copyWith({
+    String? id,
+    String? reportId,
+    int? stepIndex,
+    String? type,
+    String? title,
+    Value<String?> description = const Value.absent(),
+    Value<String?> searchQuery = const Value.absent(),
+    Value<String?> inputData = const Value.absent(),
+    Value<String?> outputData = const Value.absent(),
+    String? status,
+    int? tokensUsed,
+    Value<int?> durationMs = const Value.absent(),
+    Value<String?> errorMessage = const Value.absent(),
+    Value<DateTime?> startedAt = const Value.absent(),
+    Value<DateTime?> completedAt = const Value.absent(),
+  }) => ResearchStep(
+    id: id ?? this.id,
+    reportId: reportId ?? this.reportId,
+    stepIndex: stepIndex ?? this.stepIndex,
+    type: type ?? this.type,
+    title: title ?? this.title,
+    description: description.present ? description.value : this.description,
+    searchQuery: searchQuery.present ? searchQuery.value : this.searchQuery,
+    inputData: inputData.present ? inputData.value : this.inputData,
+    outputData: outputData.present ? outputData.value : this.outputData,
+    status: status ?? this.status,
+    tokensUsed: tokensUsed ?? this.tokensUsed,
+    durationMs: durationMs.present ? durationMs.value : this.durationMs,
+    errorMessage: errorMessage.present ? errorMessage.value : this.errorMessage,
+    startedAt: startedAt.present ? startedAt.value : this.startedAt,
+    completedAt: completedAt.present ? completedAt.value : this.completedAt,
+  );
+  ResearchStep copyWithCompanion(ResearchStepsCompanion data) {
+    return ResearchStep(
+      id: data.id.present ? data.id.value : this.id,
+      reportId: data.reportId.present ? data.reportId.value : this.reportId,
+      stepIndex: data.stepIndex.present ? data.stepIndex.value : this.stepIndex,
+      type: data.type.present ? data.type.value : this.type,
+      title: data.title.present ? data.title.value : this.title,
+      description: data.description.present
+          ? data.description.value
+          : this.description,
+      searchQuery: data.searchQuery.present
+          ? data.searchQuery.value
+          : this.searchQuery,
+      inputData: data.inputData.present ? data.inputData.value : this.inputData,
+      outputData: data.outputData.present
+          ? data.outputData.value
+          : this.outputData,
+      status: data.status.present ? data.status.value : this.status,
+      tokensUsed: data.tokensUsed.present
+          ? data.tokensUsed.value
+          : this.tokensUsed,
+      durationMs: data.durationMs.present
+          ? data.durationMs.value
+          : this.durationMs,
+      errorMessage: data.errorMessage.present
+          ? data.errorMessage.value
+          : this.errorMessage,
+      startedAt: data.startedAt.present ? data.startedAt.value : this.startedAt,
+      completedAt: data.completedAt.present
+          ? data.completedAt.value
+          : this.completedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResearchStep(')
+          ..write('id: $id, ')
+          ..write('reportId: $reportId, ')
+          ..write('stepIndex: $stepIndex, ')
+          ..write('type: $type, ')
+          ..write('title: $title, ')
+          ..write('description: $description, ')
+          ..write('searchQuery: $searchQuery, ')
+          ..write('inputData: $inputData, ')
+          ..write('outputData: $outputData, ')
+          ..write('status: $status, ')
+          ..write('tokensUsed: $tokensUsed, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('errorMessage: $errorMessage, ')
+          ..write('startedAt: $startedAt, ')
+          ..write('completedAt: $completedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    reportId,
+    stepIndex,
+    type,
+    title,
+    description,
+    searchQuery,
+    inputData,
+    outputData,
+    status,
+    tokensUsed,
+    durationMs,
+    errorMessage,
+    startedAt,
+    completedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ResearchStep &&
+          other.id == this.id &&
+          other.reportId == this.reportId &&
+          other.stepIndex == this.stepIndex &&
+          other.type == this.type &&
+          other.title == this.title &&
+          other.description == this.description &&
+          other.searchQuery == this.searchQuery &&
+          other.inputData == this.inputData &&
+          other.outputData == this.outputData &&
+          other.status == this.status &&
+          other.tokensUsed == this.tokensUsed &&
+          other.durationMs == this.durationMs &&
+          other.errorMessage == this.errorMessage &&
+          other.startedAt == this.startedAt &&
+          other.completedAt == this.completedAt);
+}
+
+class ResearchStepsCompanion extends UpdateCompanion<ResearchStep> {
+  final Value<String> id;
+  final Value<String> reportId;
+  final Value<int> stepIndex;
+  final Value<String> type;
+  final Value<String> title;
+  final Value<String?> description;
+  final Value<String?> searchQuery;
+  final Value<String?> inputData;
+  final Value<String?> outputData;
+  final Value<String> status;
+  final Value<int> tokensUsed;
+  final Value<int?> durationMs;
+  final Value<String?> errorMessage;
+  final Value<DateTime?> startedAt;
+  final Value<DateTime?> completedAt;
+  final Value<int> rowid;
+  const ResearchStepsCompanion({
+    this.id = const Value.absent(),
+    this.reportId = const Value.absent(),
+    this.stepIndex = const Value.absent(),
+    this.type = const Value.absent(),
+    this.title = const Value.absent(),
+    this.description = const Value.absent(),
+    this.searchQuery = const Value.absent(),
+    this.inputData = const Value.absent(),
+    this.outputData = const Value.absent(),
+    this.status = const Value.absent(),
+    this.tokensUsed = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.errorMessage = const Value.absent(),
+    this.startedAt = const Value.absent(),
+    this.completedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ResearchStepsCompanion.insert({
+    required String id,
+    required String reportId,
+    required int stepIndex,
+    required String type,
+    required String title,
+    this.description = const Value.absent(),
+    this.searchQuery = const Value.absent(),
+    this.inputData = const Value.absent(),
+    this.outputData = const Value.absent(),
+    this.status = const Value.absent(),
+    this.tokensUsed = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.errorMessage = const Value.absent(),
+    this.startedAt = const Value.absent(),
+    this.completedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       reportId = Value(reportId),
+       stepIndex = Value(stepIndex),
+       type = Value(type),
+       title = Value(title);
+  static Insertable<ResearchStep> custom({
+    Expression<String>? id,
+    Expression<String>? reportId,
+    Expression<int>? stepIndex,
+    Expression<String>? type,
+    Expression<String>? title,
+    Expression<String>? description,
+    Expression<String>? searchQuery,
+    Expression<String>? inputData,
+    Expression<String>? outputData,
+    Expression<String>? status,
+    Expression<int>? tokensUsed,
+    Expression<int>? durationMs,
+    Expression<String>? errorMessage,
+    Expression<DateTime>? startedAt,
+    Expression<DateTime>? completedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (reportId != null) 'report_id': reportId,
+      if (stepIndex != null) 'step_index': stepIndex,
+      if (type != null) 'type': type,
+      if (title != null) 'title': title,
+      if (description != null) 'description': description,
+      if (searchQuery != null) 'search_query': searchQuery,
+      if (inputData != null) 'input_data': inputData,
+      if (outputData != null) 'output_data': outputData,
+      if (status != null) 'status': status,
+      if (tokensUsed != null) 'tokens_used': tokensUsed,
+      if (durationMs != null) 'duration_ms': durationMs,
+      if (errorMessage != null) 'error_message': errorMessage,
+      if (startedAt != null) 'started_at': startedAt,
+      if (completedAt != null) 'completed_at': completedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ResearchStepsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? reportId,
+    Value<int>? stepIndex,
+    Value<String>? type,
+    Value<String>? title,
+    Value<String?>? description,
+    Value<String?>? searchQuery,
+    Value<String?>? inputData,
+    Value<String?>? outputData,
+    Value<String>? status,
+    Value<int>? tokensUsed,
+    Value<int?>? durationMs,
+    Value<String?>? errorMessage,
+    Value<DateTime?>? startedAt,
+    Value<DateTime?>? completedAt,
+    Value<int>? rowid,
+  }) {
+    return ResearchStepsCompanion(
+      id: id ?? this.id,
+      reportId: reportId ?? this.reportId,
+      stepIndex: stepIndex ?? this.stepIndex,
+      type: type ?? this.type,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      searchQuery: searchQuery ?? this.searchQuery,
+      inputData: inputData ?? this.inputData,
+      outputData: outputData ?? this.outputData,
+      status: status ?? this.status,
+      tokensUsed: tokensUsed ?? this.tokensUsed,
+      durationMs: durationMs ?? this.durationMs,
+      errorMessage: errorMessage ?? this.errorMessage,
+      startedAt: startedAt ?? this.startedAt,
+      completedAt: completedAt ?? this.completedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (reportId.present) {
+      map['report_id'] = Variable<String>(reportId.value);
+    }
+    if (stepIndex.present) {
+      map['step_index'] = Variable<int>(stepIndex.value);
+    }
+    if (type.present) {
+      map['type'] = Variable<String>(type.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (description.present) {
+      map['description'] = Variable<String>(description.value);
+    }
+    if (searchQuery.present) {
+      map['search_query'] = Variable<String>(searchQuery.value);
+    }
+    if (inputData.present) {
+      map['input_data'] = Variable<String>(inputData.value);
+    }
+    if (outputData.present) {
+      map['output_data'] = Variable<String>(outputData.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (tokensUsed.present) {
+      map['tokens_used'] = Variable<int>(tokensUsed.value);
+    }
+    if (durationMs.present) {
+      map['duration_ms'] = Variable<int>(durationMs.value);
+    }
+    if (errorMessage.present) {
+      map['error_message'] = Variable<String>(errorMessage.value);
+    }
+    if (startedAt.present) {
+      map['started_at'] = Variable<DateTime>(startedAt.value);
+    }
+    if (completedAt.present) {
+      map['completed_at'] = Variable<DateTime>(completedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResearchStepsCompanion(')
+          ..write('id: $id, ')
+          ..write('reportId: $reportId, ')
+          ..write('stepIndex: $stepIndex, ')
+          ..write('type: $type, ')
+          ..write('title: $title, ')
+          ..write('description: $description, ')
+          ..write('searchQuery: $searchQuery, ')
+          ..write('inputData: $inputData, ')
+          ..write('outputData: $outputData, ')
+          ..write('status: $status, ')
+          ..write('tokensUsed: $tokensUsed, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('errorMessage: $errorMessage, ')
+          ..write('startedAt: $startedAt, ')
+          ..write('completedAt: $completedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ResearchCitationsTable extends ResearchCitations
+    with TableInfo<$ResearchCitationsTable, ResearchCitation> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ResearchCitationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _reportIdMeta = const VerificationMeta(
+    'reportId',
+  );
+  @override
+  late final GeneratedColumn<String> reportId = GeneratedColumn<String>(
+    'report_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _citationIndexMeta = const VerificationMeta(
+    'citationIndex',
+  );
+  @override
+  late final GeneratedColumn<int> citationIndex = GeneratedColumn<int>(
+    'citation_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceTypeMeta = const VerificationMeta(
+    'sourceType',
+  );
+  @override
+  late final GeneratedColumn<String> sourceType = GeneratedColumn<String>(
+    'source_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _urlMeta = const VerificationMeta('url');
+  @override
+  late final GeneratedColumn<String> url = GeneratedColumn<String>(
+    'url',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _filePathMeta = const VerificationMeta(
+    'filePath',
+  );
+  @override
+  late final GeneratedColumn<String> filePath = GeneratedColumn<String>(
+    'file_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _snippetMeta = const VerificationMeta(
+    'snippet',
+  );
+  @override
+  late final GeneratedColumn<String> snippet = GeneratedColumn<String>(
+    'snippet',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _relevanceScoreMeta = const VerificationMeta(
+    'relevanceScore',
+  );
+  @override
+  late final GeneratedColumn<double> relevanceScore = GeneratedColumn<double>(
+    'relevance_score',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _fetchedAtMeta = const VerificationMeta(
+    'fetchedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> fetchedAt = GeneratedColumn<DateTime>(
+    'fetched_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    reportId,
+    citationIndex,
+    sourceType,
+    url,
+    filePath,
+    title,
+    snippet,
+    relevanceScore,
+    fetchedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'research_citations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ResearchCitation> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('report_id')) {
+      context.handle(
+        _reportIdMeta,
+        reportId.isAcceptableOrUnknown(data['report_id']!, _reportIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_reportIdMeta);
+    }
+    if (data.containsKey('citation_index')) {
+      context.handle(
+        _citationIndexMeta,
+        citationIndex.isAcceptableOrUnknown(
+          data['citation_index']!,
+          _citationIndexMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_citationIndexMeta);
+    }
+    if (data.containsKey('source_type')) {
+      context.handle(
+        _sourceTypeMeta,
+        sourceType.isAcceptableOrUnknown(data['source_type']!, _sourceTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sourceTypeMeta);
+    }
+    if (data.containsKey('url')) {
+      context.handle(
+        _urlMeta,
+        url.isAcceptableOrUnknown(data['url']!, _urlMeta),
+      );
+    }
+    if (data.containsKey('file_path')) {
+      context.handle(
+        _filePathMeta,
+        filePath.isAcceptableOrUnknown(data['file_path']!, _filePathMeta),
+      );
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('snippet')) {
+      context.handle(
+        _snippetMeta,
+        snippet.isAcceptableOrUnknown(data['snippet']!, _snippetMeta),
+      );
+    }
+    if (data.containsKey('relevance_score')) {
+      context.handle(
+        _relevanceScoreMeta,
+        relevanceScore.isAcceptableOrUnknown(
+          data['relevance_score']!,
+          _relevanceScoreMeta,
+        ),
+      );
+    }
+    if (data.containsKey('fetched_at')) {
+      context.handle(
+        _fetchedAtMeta,
+        fetchedAt.isAcceptableOrUnknown(data['fetched_at']!, _fetchedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ResearchCitation map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ResearchCitation(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      reportId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}report_id'],
+      )!,
+      citationIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}citation_index'],
+      )!,
+      sourceType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_type'],
+      )!,
+      url: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}url'],
+      ),
+      filePath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}file_path'],
+      ),
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      snippet: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}snippet'],
+      ),
+      relevanceScore: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}relevance_score'],
+      ),
+      fetchedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}fetched_at'],
+      ),
+    );
+  }
+
+  @override
+  $ResearchCitationsTable createAlias(String alias) {
+    return $ResearchCitationsTable(attachedDatabase, alias);
+  }
+}
+
+class ResearchCitation extends DataClass
+    implements Insertable<ResearchCitation> {
+  final String id;
+  final String reportId;
+  final int citationIndex;
+  final String sourceType;
+  final String? url;
+  final String? filePath;
+  final String title;
+  final String? snippet;
+  final double? relevanceScore;
+  final DateTime? fetchedAt;
+  const ResearchCitation({
+    required this.id,
+    required this.reportId,
+    required this.citationIndex,
+    required this.sourceType,
+    this.url,
+    this.filePath,
+    required this.title,
+    this.snippet,
+    this.relevanceScore,
+    this.fetchedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['report_id'] = Variable<String>(reportId);
+    map['citation_index'] = Variable<int>(citationIndex);
+    map['source_type'] = Variable<String>(sourceType);
+    if (!nullToAbsent || url != null) {
+      map['url'] = Variable<String>(url);
+    }
+    if (!nullToAbsent || filePath != null) {
+      map['file_path'] = Variable<String>(filePath);
+    }
+    map['title'] = Variable<String>(title);
+    if (!nullToAbsent || snippet != null) {
+      map['snippet'] = Variable<String>(snippet);
+    }
+    if (!nullToAbsent || relevanceScore != null) {
+      map['relevance_score'] = Variable<double>(relevanceScore);
+    }
+    if (!nullToAbsent || fetchedAt != null) {
+      map['fetched_at'] = Variable<DateTime>(fetchedAt);
+    }
+    return map;
+  }
+
+  ResearchCitationsCompanion toCompanion(bool nullToAbsent) {
+    return ResearchCitationsCompanion(
+      id: Value(id),
+      reportId: Value(reportId),
+      citationIndex: Value(citationIndex),
+      sourceType: Value(sourceType),
+      url: url == null && nullToAbsent ? const Value.absent() : Value(url),
+      filePath: filePath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(filePath),
+      title: Value(title),
+      snippet: snippet == null && nullToAbsent
+          ? const Value.absent()
+          : Value(snippet),
+      relevanceScore: relevanceScore == null && nullToAbsent
+          ? const Value.absent()
+          : Value(relevanceScore),
+      fetchedAt: fetchedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fetchedAt),
+    );
+  }
+
+  factory ResearchCitation.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ResearchCitation(
+      id: serializer.fromJson<String>(json['id']),
+      reportId: serializer.fromJson<String>(json['reportId']),
+      citationIndex: serializer.fromJson<int>(json['citationIndex']),
+      sourceType: serializer.fromJson<String>(json['sourceType']),
+      url: serializer.fromJson<String?>(json['url']),
+      filePath: serializer.fromJson<String?>(json['filePath']),
+      title: serializer.fromJson<String>(json['title']),
+      snippet: serializer.fromJson<String?>(json['snippet']),
+      relevanceScore: serializer.fromJson<double?>(json['relevanceScore']),
+      fetchedAt: serializer.fromJson<DateTime?>(json['fetchedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'reportId': serializer.toJson<String>(reportId),
+      'citationIndex': serializer.toJson<int>(citationIndex),
+      'sourceType': serializer.toJson<String>(sourceType),
+      'url': serializer.toJson<String?>(url),
+      'filePath': serializer.toJson<String?>(filePath),
+      'title': serializer.toJson<String>(title),
+      'snippet': serializer.toJson<String?>(snippet),
+      'relevanceScore': serializer.toJson<double?>(relevanceScore),
+      'fetchedAt': serializer.toJson<DateTime?>(fetchedAt),
+    };
+  }
+
+  ResearchCitation copyWith({
+    String? id,
+    String? reportId,
+    int? citationIndex,
+    String? sourceType,
+    Value<String?> url = const Value.absent(),
+    Value<String?> filePath = const Value.absent(),
+    String? title,
+    Value<String?> snippet = const Value.absent(),
+    Value<double?> relevanceScore = const Value.absent(),
+    Value<DateTime?> fetchedAt = const Value.absent(),
+  }) => ResearchCitation(
+    id: id ?? this.id,
+    reportId: reportId ?? this.reportId,
+    citationIndex: citationIndex ?? this.citationIndex,
+    sourceType: sourceType ?? this.sourceType,
+    url: url.present ? url.value : this.url,
+    filePath: filePath.present ? filePath.value : this.filePath,
+    title: title ?? this.title,
+    snippet: snippet.present ? snippet.value : this.snippet,
+    relevanceScore: relevanceScore.present
+        ? relevanceScore.value
+        : this.relevanceScore,
+    fetchedAt: fetchedAt.present ? fetchedAt.value : this.fetchedAt,
+  );
+  ResearchCitation copyWithCompanion(ResearchCitationsCompanion data) {
+    return ResearchCitation(
+      id: data.id.present ? data.id.value : this.id,
+      reportId: data.reportId.present ? data.reportId.value : this.reportId,
+      citationIndex: data.citationIndex.present
+          ? data.citationIndex.value
+          : this.citationIndex,
+      sourceType: data.sourceType.present
+          ? data.sourceType.value
+          : this.sourceType,
+      url: data.url.present ? data.url.value : this.url,
+      filePath: data.filePath.present ? data.filePath.value : this.filePath,
+      title: data.title.present ? data.title.value : this.title,
+      snippet: data.snippet.present ? data.snippet.value : this.snippet,
+      relevanceScore: data.relevanceScore.present
+          ? data.relevanceScore.value
+          : this.relevanceScore,
+      fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResearchCitation(')
+          ..write('id: $id, ')
+          ..write('reportId: $reportId, ')
+          ..write('citationIndex: $citationIndex, ')
+          ..write('sourceType: $sourceType, ')
+          ..write('url: $url, ')
+          ..write('filePath: $filePath, ')
+          ..write('title: $title, ')
+          ..write('snippet: $snippet, ')
+          ..write('relevanceScore: $relevanceScore, ')
+          ..write('fetchedAt: $fetchedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    reportId,
+    citationIndex,
+    sourceType,
+    url,
+    filePath,
+    title,
+    snippet,
+    relevanceScore,
+    fetchedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ResearchCitation &&
+          other.id == this.id &&
+          other.reportId == this.reportId &&
+          other.citationIndex == this.citationIndex &&
+          other.sourceType == this.sourceType &&
+          other.url == this.url &&
+          other.filePath == this.filePath &&
+          other.title == this.title &&
+          other.snippet == this.snippet &&
+          other.relevanceScore == this.relevanceScore &&
+          other.fetchedAt == this.fetchedAt);
+}
+
+class ResearchCitationsCompanion extends UpdateCompanion<ResearchCitation> {
+  final Value<String> id;
+  final Value<String> reportId;
+  final Value<int> citationIndex;
+  final Value<String> sourceType;
+  final Value<String?> url;
+  final Value<String?> filePath;
+  final Value<String> title;
+  final Value<String?> snippet;
+  final Value<double?> relevanceScore;
+  final Value<DateTime?> fetchedAt;
+  final Value<int> rowid;
+  const ResearchCitationsCompanion({
+    this.id = const Value.absent(),
+    this.reportId = const Value.absent(),
+    this.citationIndex = const Value.absent(),
+    this.sourceType = const Value.absent(),
+    this.url = const Value.absent(),
+    this.filePath = const Value.absent(),
+    this.title = const Value.absent(),
+    this.snippet = const Value.absent(),
+    this.relevanceScore = const Value.absent(),
+    this.fetchedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ResearchCitationsCompanion.insert({
+    required String id,
+    required String reportId,
+    required int citationIndex,
+    required String sourceType,
+    this.url = const Value.absent(),
+    this.filePath = const Value.absent(),
+    required String title,
+    this.snippet = const Value.absent(),
+    this.relevanceScore = const Value.absent(),
+    this.fetchedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       reportId = Value(reportId),
+       citationIndex = Value(citationIndex),
+       sourceType = Value(sourceType),
+       title = Value(title);
+  static Insertable<ResearchCitation> custom({
+    Expression<String>? id,
+    Expression<String>? reportId,
+    Expression<int>? citationIndex,
+    Expression<String>? sourceType,
+    Expression<String>? url,
+    Expression<String>? filePath,
+    Expression<String>? title,
+    Expression<String>? snippet,
+    Expression<double>? relevanceScore,
+    Expression<DateTime>? fetchedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (reportId != null) 'report_id': reportId,
+      if (citationIndex != null) 'citation_index': citationIndex,
+      if (sourceType != null) 'source_type': sourceType,
+      if (url != null) 'url': url,
+      if (filePath != null) 'file_path': filePath,
+      if (title != null) 'title': title,
+      if (snippet != null) 'snippet': snippet,
+      if (relevanceScore != null) 'relevance_score': relevanceScore,
+      if (fetchedAt != null) 'fetched_at': fetchedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ResearchCitationsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? reportId,
+    Value<int>? citationIndex,
+    Value<String>? sourceType,
+    Value<String?>? url,
+    Value<String?>? filePath,
+    Value<String>? title,
+    Value<String?>? snippet,
+    Value<double?>? relevanceScore,
+    Value<DateTime?>? fetchedAt,
+    Value<int>? rowid,
+  }) {
+    return ResearchCitationsCompanion(
+      id: id ?? this.id,
+      reportId: reportId ?? this.reportId,
+      citationIndex: citationIndex ?? this.citationIndex,
+      sourceType: sourceType ?? this.sourceType,
+      url: url ?? this.url,
+      filePath: filePath ?? this.filePath,
+      title: title ?? this.title,
+      snippet: snippet ?? this.snippet,
+      relevanceScore: relevanceScore ?? this.relevanceScore,
+      fetchedAt: fetchedAt ?? this.fetchedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (reportId.present) {
+      map['report_id'] = Variable<String>(reportId.value);
+    }
+    if (citationIndex.present) {
+      map['citation_index'] = Variable<int>(citationIndex.value);
+    }
+    if (sourceType.present) {
+      map['source_type'] = Variable<String>(sourceType.value);
+    }
+    if (url.present) {
+      map['url'] = Variable<String>(url.value);
+    }
+    if (filePath.present) {
+      map['file_path'] = Variable<String>(filePath.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (snippet.present) {
+      map['snippet'] = Variable<String>(snippet.value);
+    }
+    if (relevanceScore.present) {
+      map['relevance_score'] = Variable<double>(relevanceScore.value);
+    }
+    if (fetchedAt.present) {
+      map['fetched_at'] = Variable<DateTime>(fetchedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResearchCitationsCompanion(')
+          ..write('id: $id, ')
+          ..write('reportId: $reportId, ')
+          ..write('citationIndex: $citationIndex, ')
+          ..write('sourceType: $sourceType, ')
+          ..write('url: $url, ')
+          ..write('filePath: $filePath, ')
+          ..write('title: $title, ')
+          ..write('snippet: $snippet, ')
+          ..write('relevanceScore: $relevanceScore, ')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ResearchSectionsTable extends ResearchSections
+    with TableInfo<$ResearchSectionsTable, ResearchSection> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ResearchSectionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _reportIdMeta = const VerificationMeta(
+    'reportId',
+  );
+  @override
+  late final GeneratedColumn<String> reportId = GeneratedColumn<String>(
+    'report_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sectionIndexMeta = const VerificationMeta(
+    'sectionIndex',
+  );
+  @override
+  late final GeneratedColumn<int> sectionIndex = GeneratedColumn<int>(
+    'section_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _contentMeta = const VerificationMeta(
+    'content',
+  );
+  @override
+  late final GeneratedColumn<String> content = GeneratedColumn<String>(
+    'content',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _citationIdsMeta = const VerificationMeta(
+    'citationIds',
+  );
+  @override
+  late final GeneratedColumn<String> citationIds = GeneratedColumn<String>(
+    'citation_ids',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    reportId,
+    sectionIndex,
+    title,
+    content,
+    citationIds,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'research_sections';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ResearchSection> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('report_id')) {
+      context.handle(
+        _reportIdMeta,
+        reportId.isAcceptableOrUnknown(data['report_id']!, _reportIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_reportIdMeta);
+    }
+    if (data.containsKey('section_index')) {
+      context.handle(
+        _sectionIndexMeta,
+        sectionIndex.isAcceptableOrUnknown(
+          data['section_index']!,
+          _sectionIndexMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_sectionIndexMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('content')) {
+      context.handle(
+        _contentMeta,
+        content.isAcceptableOrUnknown(data['content']!, _contentMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_contentMeta);
+    }
+    if (data.containsKey('citation_ids')) {
+      context.handle(
+        _citationIdsMeta,
+        citationIds.isAcceptableOrUnknown(
+          data['citation_ids']!,
+          _citationIdsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ResearchSection map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ResearchSection(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      reportId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}report_id'],
+      )!,
+      sectionIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}section_index'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      content: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}content'],
+      )!,
+      citationIds: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}citation_ids'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $ResearchSectionsTable createAlias(String alias) {
+    return $ResearchSectionsTable(attachedDatabase, alias);
+  }
+}
+
+class ResearchSection extends DataClass implements Insertable<ResearchSection> {
+  final String id;
+  final String reportId;
+  final int sectionIndex;
+  final String title;
+  final String content;
+  final String? citationIds;
+  final DateTime createdAt;
+  const ResearchSection({
+    required this.id,
+    required this.reportId,
+    required this.sectionIndex,
+    required this.title,
+    required this.content,
+    this.citationIds,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['report_id'] = Variable<String>(reportId);
+    map['section_index'] = Variable<int>(sectionIndex);
+    map['title'] = Variable<String>(title);
+    map['content'] = Variable<String>(content);
+    if (!nullToAbsent || citationIds != null) {
+      map['citation_ids'] = Variable<String>(citationIds);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  ResearchSectionsCompanion toCompanion(bool nullToAbsent) {
+    return ResearchSectionsCompanion(
+      id: Value(id),
+      reportId: Value(reportId),
+      sectionIndex: Value(sectionIndex),
+      title: Value(title),
+      content: Value(content),
+      citationIds: citationIds == null && nullToAbsent
+          ? const Value.absent()
+          : Value(citationIds),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory ResearchSection.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ResearchSection(
+      id: serializer.fromJson<String>(json['id']),
+      reportId: serializer.fromJson<String>(json['reportId']),
+      sectionIndex: serializer.fromJson<int>(json['sectionIndex']),
+      title: serializer.fromJson<String>(json['title']),
+      content: serializer.fromJson<String>(json['content']),
+      citationIds: serializer.fromJson<String?>(json['citationIds']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'reportId': serializer.toJson<String>(reportId),
+      'sectionIndex': serializer.toJson<int>(sectionIndex),
+      'title': serializer.toJson<String>(title),
+      'content': serializer.toJson<String>(content),
+      'citationIds': serializer.toJson<String?>(citationIds),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  ResearchSection copyWith({
+    String? id,
+    String? reportId,
+    int? sectionIndex,
+    String? title,
+    String? content,
+    Value<String?> citationIds = const Value.absent(),
+    DateTime? createdAt,
+  }) => ResearchSection(
+    id: id ?? this.id,
+    reportId: reportId ?? this.reportId,
+    sectionIndex: sectionIndex ?? this.sectionIndex,
+    title: title ?? this.title,
+    content: content ?? this.content,
+    citationIds: citationIds.present ? citationIds.value : this.citationIds,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  ResearchSection copyWithCompanion(ResearchSectionsCompanion data) {
+    return ResearchSection(
+      id: data.id.present ? data.id.value : this.id,
+      reportId: data.reportId.present ? data.reportId.value : this.reportId,
+      sectionIndex: data.sectionIndex.present
+          ? data.sectionIndex.value
+          : this.sectionIndex,
+      title: data.title.present ? data.title.value : this.title,
+      content: data.content.present ? data.content.value : this.content,
+      citationIds: data.citationIds.present
+          ? data.citationIds.value
+          : this.citationIds,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResearchSection(')
+          ..write('id: $id, ')
+          ..write('reportId: $reportId, ')
+          ..write('sectionIndex: $sectionIndex, ')
+          ..write('title: $title, ')
+          ..write('content: $content, ')
+          ..write('citationIds: $citationIds, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    reportId,
+    sectionIndex,
+    title,
+    content,
+    citationIds,
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ResearchSection &&
+          other.id == this.id &&
+          other.reportId == this.reportId &&
+          other.sectionIndex == this.sectionIndex &&
+          other.title == this.title &&
+          other.content == this.content &&
+          other.citationIds == this.citationIds &&
+          other.createdAt == this.createdAt);
+}
+
+class ResearchSectionsCompanion extends UpdateCompanion<ResearchSection> {
+  final Value<String> id;
+  final Value<String> reportId;
+  final Value<int> sectionIndex;
+  final Value<String> title;
+  final Value<String> content;
+  final Value<String?> citationIds;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const ResearchSectionsCompanion({
+    this.id = const Value.absent(),
+    this.reportId = const Value.absent(),
+    this.sectionIndex = const Value.absent(),
+    this.title = const Value.absent(),
+    this.content = const Value.absent(),
+    this.citationIds = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ResearchSectionsCompanion.insert({
+    required String id,
+    required String reportId,
+    required int sectionIndex,
+    required String title,
+    required String content,
+    this.citationIds = const Value.absent(),
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       reportId = Value(reportId),
+       sectionIndex = Value(sectionIndex),
+       title = Value(title),
+       content = Value(content),
+       createdAt = Value(createdAt);
+  static Insertable<ResearchSection> custom({
+    Expression<String>? id,
+    Expression<String>? reportId,
+    Expression<int>? sectionIndex,
+    Expression<String>? title,
+    Expression<String>? content,
+    Expression<String>? citationIds,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (reportId != null) 'report_id': reportId,
+      if (sectionIndex != null) 'section_index': sectionIndex,
+      if (title != null) 'title': title,
+      if (content != null) 'content': content,
+      if (citationIds != null) 'citation_ids': citationIds,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ResearchSectionsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? reportId,
+    Value<int>? sectionIndex,
+    Value<String>? title,
+    Value<String>? content,
+    Value<String?>? citationIds,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return ResearchSectionsCompanion(
+      id: id ?? this.id,
+      reportId: reportId ?? this.reportId,
+      sectionIndex: sectionIndex ?? this.sectionIndex,
+      title: title ?? this.title,
+      content: content ?? this.content,
+      citationIds: citationIds ?? this.citationIds,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (reportId.present) {
+      map['report_id'] = Variable<String>(reportId.value);
+    }
+    if (sectionIndex.present) {
+      map['section_index'] = Variable<int>(sectionIndex.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (content.present) {
+      map['content'] = Variable<String>(content.value);
+    }
+    if (citationIds.present) {
+      map['citation_ids'] = Variable<String>(citationIds.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ResearchSectionsCompanion(')
+          ..write('id: $id, ')
+          ..write('reportId: $reportId, ')
+          ..write('sectionIndex: $sectionIndex, ')
+          ..write('title: $title, ')
+          ..write('content: $content, ')
+          ..write('citationIds: $citationIds, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ThinkingTracesTable extends ThinkingTraces
+    with TableInfo<$ThinkingTracesTable, ThinkingTrace> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ThinkingTracesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+    'message_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<String> sessionId = GeneratedColumn<String>(
+    'session_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _thinkingMeta = const VerificationMeta(
+    'thinking',
+  );
+  @override
+  late final GeneratedColumn<String> thinking = GeneratedColumn<String>(
+    'thinking',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _thinkingTokensMeta = const VerificationMeta(
+    'thinkingTokens',
+  );
+  @override
+  late final GeneratedColumn<int> thinkingTokens = GeneratedColumn<int>(
+    'thinking_tokens',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _modelConfigIdMeta = const VerificationMeta(
+    'modelConfigId',
+  );
+  @override
+  late final GeneratedColumn<String> modelConfigId = GeneratedColumn<String>(
+    'model_config_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    messageId,
+    sessionId,
+    thinking,
+    thinkingTokens,
+    modelConfigId,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'thinking_traces';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ThinkingTrace> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_messageIdMeta);
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sessionIdMeta);
+    }
+    if (data.containsKey('thinking')) {
+      context.handle(
+        _thinkingMeta,
+        thinking.isAcceptableOrUnknown(data['thinking']!, _thinkingMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_thinkingMeta);
+    }
+    if (data.containsKey('thinking_tokens')) {
+      context.handle(
+        _thinkingTokensMeta,
+        thinkingTokens.isAcceptableOrUnknown(
+          data['thinking_tokens']!,
+          _thinkingTokensMeta,
+        ),
+      );
+    }
+    if (data.containsKey('model_config_id')) {
+      context.handle(
+        _modelConfigIdMeta,
+        modelConfigId.isAcceptableOrUnknown(
+          data['model_config_id']!,
+          _modelConfigIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ThinkingTrace map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ThinkingTrace(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_id'],
+      )!,
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}session_id'],
+      )!,
+      thinking: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thinking'],
+      )!,
+      thinkingTokens: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}thinking_tokens'],
+      )!,
+      modelConfigId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}model_config_id'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $ThinkingTracesTable createAlias(String alias) {
+    return $ThinkingTracesTable(attachedDatabase, alias);
+  }
+}
+
+class ThinkingTrace extends DataClass implements Insertable<ThinkingTrace> {
+  final String id;
+  final String messageId;
+  final String sessionId;
+  final String thinking;
+  final int thinkingTokens;
+  final String? modelConfigId;
+  final DateTime createdAt;
+  const ThinkingTrace({
+    required this.id,
+    required this.messageId,
+    required this.sessionId,
+    required this.thinking,
+    required this.thinkingTokens,
+    this.modelConfigId,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['message_id'] = Variable<String>(messageId);
+    map['session_id'] = Variable<String>(sessionId);
+    map['thinking'] = Variable<String>(thinking);
+    map['thinking_tokens'] = Variable<int>(thinkingTokens);
+    if (!nullToAbsent || modelConfigId != null) {
+      map['model_config_id'] = Variable<String>(modelConfigId);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  ThinkingTracesCompanion toCompanion(bool nullToAbsent) {
+    return ThinkingTracesCompanion(
+      id: Value(id),
+      messageId: Value(messageId),
+      sessionId: Value(sessionId),
+      thinking: Value(thinking),
+      thinkingTokens: Value(thinkingTokens),
+      modelConfigId: modelConfigId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(modelConfigId),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory ThinkingTrace.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ThinkingTrace(
+      id: serializer.fromJson<String>(json['id']),
+      messageId: serializer.fromJson<String>(json['messageId']),
+      sessionId: serializer.fromJson<String>(json['sessionId']),
+      thinking: serializer.fromJson<String>(json['thinking']),
+      thinkingTokens: serializer.fromJson<int>(json['thinkingTokens']),
+      modelConfigId: serializer.fromJson<String?>(json['modelConfigId']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'messageId': serializer.toJson<String>(messageId),
+      'sessionId': serializer.toJson<String>(sessionId),
+      'thinking': serializer.toJson<String>(thinking),
+      'thinkingTokens': serializer.toJson<int>(thinkingTokens),
+      'modelConfigId': serializer.toJson<String?>(modelConfigId),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  ThinkingTrace copyWith({
+    String? id,
+    String? messageId,
+    String? sessionId,
+    String? thinking,
+    int? thinkingTokens,
+    Value<String?> modelConfigId = const Value.absent(),
+    DateTime? createdAt,
+  }) => ThinkingTrace(
+    id: id ?? this.id,
+    messageId: messageId ?? this.messageId,
+    sessionId: sessionId ?? this.sessionId,
+    thinking: thinking ?? this.thinking,
+    thinkingTokens: thinkingTokens ?? this.thinkingTokens,
+    modelConfigId: modelConfigId.present
+        ? modelConfigId.value
+        : this.modelConfigId,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  ThinkingTrace copyWithCompanion(ThinkingTracesCompanion data) {
+    return ThinkingTrace(
+      id: data.id.present ? data.id.value : this.id,
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      thinking: data.thinking.present ? data.thinking.value : this.thinking,
+      thinkingTokens: data.thinkingTokens.present
+          ? data.thinkingTokens.value
+          : this.thinkingTokens,
+      modelConfigId: data.modelConfigId.present
+          ? data.modelConfigId.value
+          : this.modelConfigId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ThinkingTrace(')
+          ..write('id: $id, ')
+          ..write('messageId: $messageId, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('thinking: $thinking, ')
+          ..write('thinkingTokens: $thinkingTokens, ')
+          ..write('modelConfigId: $modelConfigId, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    messageId,
+    sessionId,
+    thinking,
+    thinkingTokens,
+    modelConfigId,
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ThinkingTrace &&
+          other.id == this.id &&
+          other.messageId == this.messageId &&
+          other.sessionId == this.sessionId &&
+          other.thinking == this.thinking &&
+          other.thinkingTokens == this.thinkingTokens &&
+          other.modelConfigId == this.modelConfigId &&
+          other.createdAt == this.createdAt);
+}
+
+class ThinkingTracesCompanion extends UpdateCompanion<ThinkingTrace> {
+  final Value<String> id;
+  final Value<String> messageId;
+  final Value<String> sessionId;
+  final Value<String> thinking;
+  final Value<int> thinkingTokens;
+  final Value<String?> modelConfigId;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const ThinkingTracesCompanion({
+    this.id = const Value.absent(),
+    this.messageId = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.thinking = const Value.absent(),
+    this.thinkingTokens = const Value.absent(),
+    this.modelConfigId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ThinkingTracesCompanion.insert({
+    required String id,
+    required String messageId,
+    required String sessionId,
+    required String thinking,
+    this.thinkingTokens = const Value.absent(),
+    this.modelConfigId = const Value.absent(),
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       messageId = Value(messageId),
+       sessionId = Value(sessionId),
+       thinking = Value(thinking),
+       createdAt = Value(createdAt);
+  static Insertable<ThinkingTrace> custom({
+    Expression<String>? id,
+    Expression<String>? messageId,
+    Expression<String>? sessionId,
+    Expression<String>? thinking,
+    Expression<int>? thinkingTokens,
+    Expression<String>? modelConfigId,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (messageId != null) 'message_id': messageId,
+      if (sessionId != null) 'session_id': sessionId,
+      if (thinking != null) 'thinking': thinking,
+      if (thinkingTokens != null) 'thinking_tokens': thinkingTokens,
+      if (modelConfigId != null) 'model_config_id': modelConfigId,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ThinkingTracesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? messageId,
+    Value<String>? sessionId,
+    Value<String>? thinking,
+    Value<int>? thinkingTokens,
+    Value<String?>? modelConfigId,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return ThinkingTracesCompanion(
+      id: id ?? this.id,
+      messageId: messageId ?? this.messageId,
+      sessionId: sessionId ?? this.sessionId,
+      thinking: thinking ?? this.thinking,
+      thinkingTokens: thinkingTokens ?? this.thinkingTokens,
+      modelConfigId: modelConfigId ?? this.modelConfigId,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<String>(sessionId.value);
+    }
+    if (thinking.present) {
+      map['thinking'] = Variable<String>(thinking.value);
+    }
+    if (thinkingTokens.present) {
+      map['thinking_tokens'] = Variable<int>(thinkingTokens.value);
+    }
+    if (modelConfigId.present) {
+      map['model_config_id'] = Variable<String>(modelConfigId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ThinkingTracesCompanion(')
+          ..write('id: $id, ')
+          ..write('messageId: $messageId, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('thinking: $thinking, ')
+          ..write('thinkingTokens: $thinkingTokens, ')
+          ..write('modelConfigId: $modelConfigId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $PromptScenariosTable extends PromptScenarios
+    with TableInfo<$PromptScenariosTable, PromptScenario> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PromptScenariosTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _scenarioKeyMeta = const VerificationMeta(
+    'scenarioKey',
+  );
+  @override
+  late final GeneratedColumn<String> scenarioKey = GeneratedColumn<String>(
+    'scenario_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _displayNameMeta = const VerificationMeta(
+    'displayName',
+  );
+  @override
+  late final GeneratedColumn<String> displayName = GeneratedColumn<String>(
+    'display_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _categoryMeta = const VerificationMeta(
+    'category',
+  );
+  @override
+  late final GeneratedColumn<String> category = GeneratedColumn<String>(
+    'category',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _descriptionMeta = const VerificationMeta(
+    'description',
+  );
+  @override
+  late final GeneratedColumn<String> description = GeneratedColumn<String>(
+    'description',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _systemPromptMeta = const VerificationMeta(
+    'systemPrompt',
+  );
+  @override
+  late final GeneratedColumn<String> systemPrompt = GeneratedColumn<String>(
+    'system_prompt',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _userPromptTemplateMeta =
+      const VerificationMeta('userPromptTemplate');
+  @override
+  late final GeneratedColumn<String> userPromptTemplate =
+      GeneratedColumn<String>(
+        'user_prompt_template',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _variablesMeta = const VerificationMeta(
+    'variables',
+  );
+  @override
+  late final GeneratedColumn<String> variables = GeneratedColumn<String>(
+    'variables',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sortOrderMeta = const VerificationMeta(
+    'sortOrder',
+  );
+  @override
+  late final GeneratedColumn<int> sortOrder = GeneratedColumn<int>(
+    'sort_order',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _isBuiltinMeta = const VerificationMeta(
+    'isBuiltin',
+  );
+  @override
+  late final GeneratedColumn<bool> isBuiltin = GeneratedColumn<bool>(
+    'is_builtin',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_builtin" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    scenarioKey,
+    displayName,
+    category,
+    description,
+    systemPrompt,
+    userPromptTemplate,
+    variables,
+    sortOrder,
+    isBuiltin,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'prompt_scenarios';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<PromptScenario> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('scenario_key')) {
+      context.handle(
+        _scenarioKeyMeta,
+        scenarioKey.isAcceptableOrUnknown(
+          data['scenario_key']!,
+          _scenarioKeyMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_scenarioKeyMeta);
+    }
+    if (data.containsKey('display_name')) {
+      context.handle(
+        _displayNameMeta,
+        displayName.isAcceptableOrUnknown(
+          data['display_name']!,
+          _displayNameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_displayNameMeta);
+    }
+    if (data.containsKey('category')) {
+      context.handle(
+        _categoryMeta,
+        category.isAcceptableOrUnknown(data['category']!, _categoryMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_categoryMeta);
+    }
+    if (data.containsKey('description')) {
+      context.handle(
+        _descriptionMeta,
+        description.isAcceptableOrUnknown(
+          data['description']!,
+          _descriptionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('system_prompt')) {
+      context.handle(
+        _systemPromptMeta,
+        systemPrompt.isAcceptableOrUnknown(
+          data['system_prompt']!,
+          _systemPromptMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_systemPromptMeta);
+    }
+    if (data.containsKey('user_prompt_template')) {
+      context.handle(
+        _userPromptTemplateMeta,
+        userPromptTemplate.isAcceptableOrUnknown(
+          data['user_prompt_template']!,
+          _userPromptTemplateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('variables')) {
+      context.handle(
+        _variablesMeta,
+        variables.isAcceptableOrUnknown(data['variables']!, _variablesMeta),
+      );
+    }
+    if (data.containsKey('sort_order')) {
+      context.handle(
+        _sortOrderMeta,
+        sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta),
+      );
+    }
+    if (data.containsKey('is_builtin')) {
+      context.handle(
+        _isBuiltinMeta,
+        isBuiltin.isAcceptableOrUnknown(data['is_builtin']!, _isBuiltinMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PromptScenario map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PromptScenario(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      scenarioKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}scenario_key'],
+      )!,
+      displayName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}display_name'],
+      )!,
+      category: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}category'],
+      )!,
+      description: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}description'],
+      ),
+      systemPrompt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}system_prompt'],
+      )!,
+      userPromptTemplate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_prompt_template'],
+      ),
+      variables: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}variables'],
+      ),
+      sortOrder: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort_order'],
+      )!,
+      isBuiltin: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_builtin'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $PromptScenariosTable createAlias(String alias) {
+    return $PromptScenariosTable(attachedDatabase, alias);
+  }
+}
+
+class PromptScenario extends DataClass implements Insertable<PromptScenario> {
+  final String id;
+  final String scenarioKey;
+  final String displayName;
+  final String category;
+  final String? description;
+  final String systemPrompt;
+  final String? userPromptTemplate;
+  final String? variables;
+  final int sortOrder;
+  final bool isBuiltin;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const PromptScenario({
+    required this.id,
+    required this.scenarioKey,
+    required this.displayName,
+    required this.category,
+    this.description,
+    required this.systemPrompt,
+    this.userPromptTemplate,
+    this.variables,
+    required this.sortOrder,
+    required this.isBuiltin,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['scenario_key'] = Variable<String>(scenarioKey);
+    map['display_name'] = Variable<String>(displayName);
+    map['category'] = Variable<String>(category);
+    if (!nullToAbsent || description != null) {
+      map['description'] = Variable<String>(description);
+    }
+    map['system_prompt'] = Variable<String>(systemPrompt);
+    if (!nullToAbsent || userPromptTemplate != null) {
+      map['user_prompt_template'] = Variable<String>(userPromptTemplate);
+    }
+    if (!nullToAbsent || variables != null) {
+      map['variables'] = Variable<String>(variables);
+    }
+    map['sort_order'] = Variable<int>(sortOrder);
+    map['is_builtin'] = Variable<bool>(isBuiltin);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  PromptScenariosCompanion toCompanion(bool nullToAbsent) {
+    return PromptScenariosCompanion(
+      id: Value(id),
+      scenarioKey: Value(scenarioKey),
+      displayName: Value(displayName),
+      category: Value(category),
+      description: description == null && nullToAbsent
+          ? const Value.absent()
+          : Value(description),
+      systemPrompt: Value(systemPrompt),
+      userPromptTemplate: userPromptTemplate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(userPromptTemplate),
+      variables: variables == null && nullToAbsent
+          ? const Value.absent()
+          : Value(variables),
+      sortOrder: Value(sortOrder),
+      isBuiltin: Value(isBuiltin),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory PromptScenario.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PromptScenario(
+      id: serializer.fromJson<String>(json['id']),
+      scenarioKey: serializer.fromJson<String>(json['scenarioKey']),
+      displayName: serializer.fromJson<String>(json['displayName']),
+      category: serializer.fromJson<String>(json['category']),
+      description: serializer.fromJson<String?>(json['description']),
+      systemPrompt: serializer.fromJson<String>(json['systemPrompt']),
+      userPromptTemplate: serializer.fromJson<String?>(
+        json['userPromptTemplate'],
+      ),
+      variables: serializer.fromJson<String?>(json['variables']),
+      sortOrder: serializer.fromJson<int>(json['sortOrder']),
+      isBuiltin: serializer.fromJson<bool>(json['isBuiltin']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'scenarioKey': serializer.toJson<String>(scenarioKey),
+      'displayName': serializer.toJson<String>(displayName),
+      'category': serializer.toJson<String>(category),
+      'description': serializer.toJson<String?>(description),
+      'systemPrompt': serializer.toJson<String>(systemPrompt),
+      'userPromptTemplate': serializer.toJson<String?>(userPromptTemplate),
+      'variables': serializer.toJson<String?>(variables),
+      'sortOrder': serializer.toJson<int>(sortOrder),
+      'isBuiltin': serializer.toJson<bool>(isBuiltin),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  PromptScenario copyWith({
+    String? id,
+    String? scenarioKey,
+    String? displayName,
+    String? category,
+    Value<String?> description = const Value.absent(),
+    String? systemPrompt,
+    Value<String?> userPromptTemplate = const Value.absent(),
+    Value<String?> variables = const Value.absent(),
+    int? sortOrder,
+    bool? isBuiltin,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => PromptScenario(
+    id: id ?? this.id,
+    scenarioKey: scenarioKey ?? this.scenarioKey,
+    displayName: displayName ?? this.displayName,
+    category: category ?? this.category,
+    description: description.present ? description.value : this.description,
+    systemPrompt: systemPrompt ?? this.systemPrompt,
+    userPromptTemplate: userPromptTemplate.present
+        ? userPromptTemplate.value
+        : this.userPromptTemplate,
+    variables: variables.present ? variables.value : this.variables,
+    sortOrder: sortOrder ?? this.sortOrder,
+    isBuiltin: isBuiltin ?? this.isBuiltin,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  PromptScenario copyWithCompanion(PromptScenariosCompanion data) {
+    return PromptScenario(
+      id: data.id.present ? data.id.value : this.id,
+      scenarioKey: data.scenarioKey.present
+          ? data.scenarioKey.value
+          : this.scenarioKey,
+      displayName: data.displayName.present
+          ? data.displayName.value
+          : this.displayName,
+      category: data.category.present ? data.category.value : this.category,
+      description: data.description.present
+          ? data.description.value
+          : this.description,
+      systemPrompt: data.systemPrompt.present
+          ? data.systemPrompt.value
+          : this.systemPrompt,
+      userPromptTemplate: data.userPromptTemplate.present
+          ? data.userPromptTemplate.value
+          : this.userPromptTemplate,
+      variables: data.variables.present ? data.variables.value : this.variables,
+      sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
+      isBuiltin: data.isBuiltin.present ? data.isBuiltin.value : this.isBuiltin,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PromptScenario(')
+          ..write('id: $id, ')
+          ..write('scenarioKey: $scenarioKey, ')
+          ..write('displayName: $displayName, ')
+          ..write('category: $category, ')
+          ..write('description: $description, ')
+          ..write('systemPrompt: $systemPrompt, ')
+          ..write('userPromptTemplate: $userPromptTemplate, ')
+          ..write('variables: $variables, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('isBuiltin: $isBuiltin, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    scenarioKey,
+    displayName,
+    category,
+    description,
+    systemPrompt,
+    userPromptTemplate,
+    variables,
+    sortOrder,
+    isBuiltin,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PromptScenario &&
+          other.id == this.id &&
+          other.scenarioKey == this.scenarioKey &&
+          other.displayName == this.displayName &&
+          other.category == this.category &&
+          other.description == this.description &&
+          other.systemPrompt == this.systemPrompt &&
+          other.userPromptTemplate == this.userPromptTemplate &&
+          other.variables == this.variables &&
+          other.sortOrder == this.sortOrder &&
+          other.isBuiltin == this.isBuiltin &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class PromptScenariosCompanion extends UpdateCompanion<PromptScenario> {
+  final Value<String> id;
+  final Value<String> scenarioKey;
+  final Value<String> displayName;
+  final Value<String> category;
+  final Value<String?> description;
+  final Value<String> systemPrompt;
+  final Value<String?> userPromptTemplate;
+  final Value<String?> variables;
+  final Value<int> sortOrder;
+  final Value<bool> isBuiltin;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const PromptScenariosCompanion({
+    this.id = const Value.absent(),
+    this.scenarioKey = const Value.absent(),
+    this.displayName = const Value.absent(),
+    this.category = const Value.absent(),
+    this.description = const Value.absent(),
+    this.systemPrompt = const Value.absent(),
+    this.userPromptTemplate = const Value.absent(),
+    this.variables = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.isBuiltin = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  PromptScenariosCompanion.insert({
+    required String id,
+    required String scenarioKey,
+    required String displayName,
+    required String category,
+    this.description = const Value.absent(),
+    required String systemPrompt,
+    this.userPromptTemplate = const Value.absent(),
+    this.variables = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.isBuiltin = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       scenarioKey = Value(scenarioKey),
+       displayName = Value(displayName),
+       category = Value(category),
+       systemPrompt = Value(systemPrompt),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<PromptScenario> custom({
+    Expression<String>? id,
+    Expression<String>? scenarioKey,
+    Expression<String>? displayName,
+    Expression<String>? category,
+    Expression<String>? description,
+    Expression<String>? systemPrompt,
+    Expression<String>? userPromptTemplate,
+    Expression<String>? variables,
+    Expression<int>? sortOrder,
+    Expression<bool>? isBuiltin,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (scenarioKey != null) 'scenario_key': scenarioKey,
+      if (displayName != null) 'display_name': displayName,
+      if (category != null) 'category': category,
+      if (description != null) 'description': description,
+      if (systemPrompt != null) 'system_prompt': systemPrompt,
+      if (userPromptTemplate != null)
+        'user_prompt_template': userPromptTemplate,
+      if (variables != null) 'variables': variables,
+      if (sortOrder != null) 'sort_order': sortOrder,
+      if (isBuiltin != null) 'is_builtin': isBuiltin,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  PromptScenariosCompanion copyWith({
+    Value<String>? id,
+    Value<String>? scenarioKey,
+    Value<String>? displayName,
+    Value<String>? category,
+    Value<String?>? description,
+    Value<String>? systemPrompt,
+    Value<String?>? userPromptTemplate,
+    Value<String?>? variables,
+    Value<int>? sortOrder,
+    Value<bool>? isBuiltin,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return PromptScenariosCompanion(
+      id: id ?? this.id,
+      scenarioKey: scenarioKey ?? this.scenarioKey,
+      displayName: displayName ?? this.displayName,
+      category: category ?? this.category,
+      description: description ?? this.description,
+      systemPrompt: systemPrompt ?? this.systemPrompt,
+      userPromptTemplate: userPromptTemplate ?? this.userPromptTemplate,
+      variables: variables ?? this.variables,
+      sortOrder: sortOrder ?? this.sortOrder,
+      isBuiltin: isBuiltin ?? this.isBuiltin,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (scenarioKey.present) {
+      map['scenario_key'] = Variable<String>(scenarioKey.value);
+    }
+    if (displayName.present) {
+      map['display_name'] = Variable<String>(displayName.value);
+    }
+    if (category.present) {
+      map['category'] = Variable<String>(category.value);
+    }
+    if (description.present) {
+      map['description'] = Variable<String>(description.value);
+    }
+    if (systemPrompt.present) {
+      map['system_prompt'] = Variable<String>(systemPrompt.value);
+    }
+    if (userPromptTemplate.present) {
+      map['user_prompt_template'] = Variable<String>(userPromptTemplate.value);
+    }
+    if (variables.present) {
+      map['variables'] = Variable<String>(variables.value);
+    }
+    if (sortOrder.present) {
+      map['sort_order'] = Variable<int>(sortOrder.value);
+    }
+    if (isBuiltin.present) {
+      map['is_builtin'] = Variable<bool>(isBuiltin.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PromptScenariosCompanion(')
+          ..write('id: $id, ')
+          ..write('scenarioKey: $scenarioKey, ')
+          ..write('displayName: $displayName, ')
+          ..write('category: $category, ')
+          ..write('description: $description, ')
+          ..write('systemPrompt: $systemPrompt, ')
+          ..write('userPromptTemplate: $userPromptTemplate, ')
+          ..write('variables: $variables, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('isBuiltin: $isBuiltin, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -12295,6 +17751,20 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $WorkflowExecutionsTable workflowExecutions =
       $WorkflowExecutionsTable(this);
   late final $WorkflowLogsTable workflowLogs = $WorkflowLogsTable(this);
+  late final $ProjectsTable projects = $ProjectsTable(this);
+  late final $ResearchReportsTable researchReports = $ResearchReportsTable(
+    this,
+  );
+  late final $ResearchStepsTable researchSteps = $ResearchStepsTable(this);
+  late final $ResearchCitationsTable researchCitations =
+      $ResearchCitationsTable(this);
+  late final $ResearchSectionsTable researchSections = $ResearchSectionsTable(
+    this,
+  );
+  late final $ThinkingTracesTable thinkingTraces = $ThinkingTracesTable(this);
+  late final $PromptScenariosTable promptScenarios = $PromptScenariosTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -12319,6 +17789,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     workflowDefinitions,
     workflowExecutions,
     workflowLogs,
+    projects,
+    researchReports,
+    researchSteps,
+    researchCitations,
+    researchSections,
+    thinkingTraces,
+    promptScenarios,
   ];
 }
 
@@ -12343,6 +17820,7 @@ typedef $$SessionsTableCreateCompanionBuilder =
       Value<bool> enableFileUpload,
       Value<String?> enabledKnowledgeBaseId,
       Value<bool> isSpirit,
+      Value<String?> projectId,
       required DateTime createdAt,
       required DateTime updatedAt,
       Value<int> rowid,
@@ -12368,6 +17846,7 @@ typedef $$SessionsTableUpdateCompanionBuilder =
       Value<bool> enableFileUpload,
       Value<String?> enabledKnowledgeBaseId,
       Value<bool> isSpirit,
+      Value<String?> projectId,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<int> rowid,
@@ -12474,6 +17953,11 @@ class $$SessionsTableFilterComposer
 
   ColumnFilters<bool> get isSpirit => $composableBuilder(
     column: $table.isSpirit,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get projectId => $composableBuilder(
+    column: $table.projectId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -12592,6 +18076,11 @@ class $$SessionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -12695,6 +18184,9 @@ class $$SessionsTableAnnotationComposer
   GeneratedColumn<bool> get isSpirit =>
       $composableBuilder(column: $table.isSpirit, builder: (column) => column);
 
+  GeneratedColumn<String> get projectId =>
+      $composableBuilder(column: $table.projectId, builder: (column) => column);
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -12749,6 +18241,7 @@ class $$SessionsTableTableManager
                 Value<bool> enableFileUpload = const Value.absent(),
                 Value<String?> enabledKnowledgeBaseId = const Value.absent(),
                 Value<bool> isSpirit = const Value.absent(),
+                Value<String?> projectId = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -12772,6 +18265,7 @@ class $$SessionsTableTableManager
                 enableFileUpload: enableFileUpload,
                 enabledKnowledgeBaseId: enabledKnowledgeBaseId,
                 isSpirit: isSpirit,
+                projectId: projectId,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -12797,6 +18291,7 @@ class $$SessionsTableTableManager
                 Value<bool> enableFileUpload = const Value.absent(),
                 Value<String?> enabledKnowledgeBaseId = const Value.absent(),
                 Value<bool> isSpirit = const Value.absent(),
+                Value<String?> projectId = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -12820,6 +18315,7 @@ class $$SessionsTableTableManager
                 enableFileUpload: enableFileUpload,
                 enabledKnowledgeBaseId: enabledKnowledgeBaseId,
                 isSpirit: isSpirit,
+                projectId: projectId,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -12856,6 +18352,9 @@ typedef $$MessagesTableCreateCompanionBuilder =
       Value<bool> hasImages,
       Value<int?> tokenCount,
       Value<String?> toolCallInfo,
+      Value<String?> thinking,
+      Value<int> thinkingTokens,
+      Value<bool> showThinking,
       required DateTime createdAt,
       Value<int> rowid,
     });
@@ -12869,6 +18368,9 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<bool> hasImages,
       Value<int?> tokenCount,
       Value<String?> toolCallInfo,
+      Value<String?> thinking,
+      Value<int> thinkingTokens,
+      Value<bool> showThinking,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -12919,6 +18421,21 @@ class $$MessagesTableFilterComposer
 
   ColumnFilters<String> get toolCallInfo => $composableBuilder(
     column: $table.toolCallInfo,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thinking => $composableBuilder(
+    column: $table.thinking,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get showThinking => $composableBuilder(
+    column: $table.showThinking,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -12977,6 +18494,21 @@ class $$MessagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get thinking => $composableBuilder(
+    column: $table.thinking,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get showThinking => $composableBuilder(
+    column: $table.showThinking,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -13020,6 +18552,19 @@ class $$MessagesTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get thinking =>
+      $composableBuilder(column: $table.thinking, builder: (column) => column);
+
+  GeneratedColumn<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get showThinking => $composableBuilder(
+    column: $table.showThinking,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 }
@@ -13060,6 +18605,9 @@ class $$MessagesTableTableManager
                 Value<bool> hasImages = const Value.absent(),
                 Value<int?> tokenCount = const Value.absent(),
                 Value<String?> toolCallInfo = const Value.absent(),
+                Value<String?> thinking = const Value.absent(),
+                Value<int> thinkingTokens = const Value.absent(),
+                Value<bool> showThinking = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion(
@@ -13071,6 +18619,9 @@ class $$MessagesTableTableManager
                 hasImages: hasImages,
                 tokenCount: tokenCount,
                 toolCallInfo: toolCallInfo,
+                thinking: thinking,
+                thinkingTokens: thinkingTokens,
+                showThinking: showThinking,
                 createdAt: createdAt,
                 rowid: rowid,
               ),
@@ -13084,6 +18635,9 @@ class $$MessagesTableTableManager
                 Value<bool> hasImages = const Value.absent(),
                 Value<int?> tokenCount = const Value.absent(),
                 Value<String?> toolCallInfo = const Value.absent(),
+                Value<String?> thinking = const Value.absent(),
+                Value<int> thinkingTokens = const Value.absent(),
+                Value<bool> showThinking = const Value.absent(),
                 required DateTime createdAt,
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion.insert(
@@ -13095,6 +18649,9 @@ class $$MessagesTableTableManager
                 hasImages: hasImages,
                 tokenCount: tokenCount,
                 toolCallInfo: toolCallInfo,
+                thinking: thinking,
+                thinkingTokens: thinkingTokens,
+                showThinking: showThinking,
                 createdAt: createdAt,
                 rowid: rowid,
               ),
@@ -13135,6 +18692,11 @@ typedef $$ModelsTableCreateCompanionBuilder =
       Value<String?> mmprojFileName,
       Value<bool> isLoaded,
       Value<String> downloadStatus,
+      Value<String> thinkingMode,
+      Value<int?> thinkingBudget,
+      Value<bool> supportsThinking,
+      Value<int> minThinkingBudget,
+      Value<int> maxThinkingBudget,
       required DateTime createdAt,
       Value<int> rowid,
     });
@@ -13153,6 +18715,11 @@ typedef $$ModelsTableUpdateCompanionBuilder =
       Value<String?> mmprojFileName,
       Value<bool> isLoaded,
       Value<String> downloadStatus,
+      Value<String> thinkingMode,
+      Value<int?> thinkingBudget,
+      Value<bool> supportsThinking,
+      Value<int> minThinkingBudget,
+      Value<int> maxThinkingBudget,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -13228,6 +18795,31 @@ class $$ModelsTableFilterComposer
 
   ColumnFilters<String> get downloadStatus => $composableBuilder(
     column: $table.downloadStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thinkingMode => $composableBuilder(
+    column: $table.thinkingMode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get thinkingBudget => $composableBuilder(
+    column: $table.thinkingBudget,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get supportsThinking => $composableBuilder(
+    column: $table.supportsThinking,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get minThinkingBudget => $composableBuilder(
+    column: $table.minThinkingBudget,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get maxThinkingBudget => $composableBuilder(
+    column: $table.maxThinkingBudget,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -13311,6 +18903,31 @@ class $$ModelsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get thinkingMode => $composableBuilder(
+    column: $table.thinkingMode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get thinkingBudget => $composableBuilder(
+    column: $table.thinkingBudget,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get supportsThinking => $composableBuilder(
+    column: $table.supportsThinking,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get minThinkingBudget => $composableBuilder(
+    column: $table.minThinkingBudget,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get maxThinkingBudget => $composableBuilder(
+    column: $table.maxThinkingBudget,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -13377,6 +18994,31 @@ class $$ModelsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get thinkingMode => $composableBuilder(
+    column: $table.thinkingMode,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get thinkingBudget => $composableBuilder(
+    column: $table.thinkingBudget,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get supportsThinking => $composableBuilder(
+    column: $table.supportsThinking,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get minThinkingBudget => $composableBuilder(
+    column: $table.minThinkingBudget,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get maxThinkingBudget => $composableBuilder(
+    column: $table.maxThinkingBudget,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 }
@@ -13422,6 +19064,11 @@ class $$ModelsTableTableManager
                 Value<String?> mmprojFileName = const Value.absent(),
                 Value<bool> isLoaded = const Value.absent(),
                 Value<String> downloadStatus = const Value.absent(),
+                Value<String> thinkingMode = const Value.absent(),
+                Value<int?> thinkingBudget = const Value.absent(),
+                Value<bool> supportsThinking = const Value.absent(),
+                Value<int> minThinkingBudget = const Value.absent(),
+                Value<int> maxThinkingBudget = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ModelsCompanion(
@@ -13438,6 +19085,11 @@ class $$ModelsTableTableManager
                 mmprojFileName: mmprojFileName,
                 isLoaded: isLoaded,
                 downloadStatus: downloadStatus,
+                thinkingMode: thinkingMode,
+                thinkingBudget: thinkingBudget,
+                supportsThinking: supportsThinking,
+                minThinkingBudget: minThinkingBudget,
+                maxThinkingBudget: maxThinkingBudget,
                 createdAt: createdAt,
                 rowid: rowid,
               ),
@@ -13456,6 +19108,11 @@ class $$ModelsTableTableManager
                 Value<String?> mmprojFileName = const Value.absent(),
                 Value<bool> isLoaded = const Value.absent(),
                 Value<String> downloadStatus = const Value.absent(),
+                Value<String> thinkingMode = const Value.absent(),
+                Value<int?> thinkingBudget = const Value.absent(),
+                Value<bool> supportsThinking = const Value.absent(),
+                Value<int> minThinkingBudget = const Value.absent(),
+                Value<int> maxThinkingBudget = const Value.absent(),
                 required DateTime createdAt,
                 Value<int> rowid = const Value.absent(),
               }) => ModelsCompanion.insert(
@@ -13472,6 +19129,11 @@ class $$ModelsTableTableManager
                 mmprojFileName: mmprojFileName,
                 isLoaded: isLoaded,
                 downloadStatus: downloadStatus,
+                thinkingMode: thinkingMode,
+                thinkingBudget: thinkingBudget,
+                supportsThinking: supportsThinking,
+                minThinkingBudget: minThinkingBudget,
+                maxThinkingBudget: maxThinkingBudget,
                 createdAt: createdAt,
                 rowid: rowid,
               ),
@@ -18236,6 +23898,2398 @@ typedef $$WorkflowLogsTableProcessedTableManager =
       WorkflowLog,
       PrefetchHooks Function()
     >;
+typedef $$ProjectsTableCreateCompanionBuilder =
+    ProjectsCompanion Function({
+      required String id,
+      required String name,
+      Value<String?> description,
+      Value<String> icon,
+      Value<String> color,
+      Value<String?> systemPrompt,
+      Value<String?> knowledgeBaseId,
+      Value<String?> mcpServers,
+      Value<String?> defaultModelConfigId,
+      Value<double> temperature,
+      Value<int> maxContextMessages,
+      Value<int> sortOrder,
+      Value<bool> isArchived,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$ProjectsTableUpdateCompanionBuilder =
+    ProjectsCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String?> description,
+      Value<String> icon,
+      Value<String> color,
+      Value<String?> systemPrompt,
+      Value<String?> knowledgeBaseId,
+      Value<String?> mcpServers,
+      Value<String?> defaultModelConfigId,
+      Value<double> temperature,
+      Value<int> maxContextMessages,
+      Value<int> sortOrder,
+      Value<bool> isArchived,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$ProjectsTableFilterComposer
+    extends Composer<_$AppDatabase, $ProjectsTable> {
+  $$ProjectsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get icon => $composableBuilder(
+    column: $table.icon,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get color => $composableBuilder(
+    column: $table.color,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get knowledgeBaseId => $composableBuilder(
+    column: $table.knowledgeBaseId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mcpServers => $composableBuilder(
+    column: $table.mcpServers,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get defaultModelConfigId => $composableBuilder(
+    column: $table.defaultModelConfigId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get temperature => $composableBuilder(
+    column: $table.temperature,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get maxContextMessages => $composableBuilder(
+    column: $table.maxContextMessages,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isArchived => $composableBuilder(
+    column: $table.isArchived,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ProjectsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ProjectsTable> {
+  $$ProjectsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get icon => $composableBuilder(
+    column: $table.icon,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get color => $composableBuilder(
+    column: $table.color,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get knowledgeBaseId => $composableBuilder(
+    column: $table.knowledgeBaseId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mcpServers => $composableBuilder(
+    column: $table.mcpServers,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get defaultModelConfigId => $composableBuilder(
+    column: $table.defaultModelConfigId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get temperature => $composableBuilder(
+    column: $table.temperature,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get maxContextMessages => $composableBuilder(
+    column: $table.maxContextMessages,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isArchived => $composableBuilder(
+    column: $table.isArchived,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ProjectsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ProjectsTable> {
+  $$ProjectsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get icon =>
+      $composableBuilder(column: $table.icon, builder: (column) => column);
+
+  GeneratedColumn<String> get color =>
+      $composableBuilder(column: $table.color, builder: (column) => column);
+
+  GeneratedColumn<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get knowledgeBaseId => $composableBuilder(
+    column: $table.knowledgeBaseId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get mcpServers => $composableBuilder(
+    column: $table.mcpServers,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get defaultModelConfigId => $composableBuilder(
+    column: $table.defaultModelConfigId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get temperature => $composableBuilder(
+    column: $table.temperature,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get maxContextMessages => $composableBuilder(
+    column: $table.maxContextMessages,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get sortOrder =>
+      $composableBuilder(column: $table.sortOrder, builder: (column) => column);
+
+  GeneratedColumn<bool> get isArchived => $composableBuilder(
+    column: $table.isArchived,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$ProjectsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ProjectsTable,
+          Project,
+          $$ProjectsTableFilterComposer,
+          $$ProjectsTableOrderingComposer,
+          $$ProjectsTableAnnotationComposer,
+          $$ProjectsTableCreateCompanionBuilder,
+          $$ProjectsTableUpdateCompanionBuilder,
+          (Project, BaseReferences<_$AppDatabase, $ProjectsTable, Project>),
+          Project,
+          PrefetchHooks Function()
+        > {
+  $$ProjectsTableTableManager(_$AppDatabase db, $ProjectsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ProjectsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ProjectsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ProjectsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String?> description = const Value.absent(),
+                Value<String> icon = const Value.absent(),
+                Value<String> color = const Value.absent(),
+                Value<String?> systemPrompt = const Value.absent(),
+                Value<String?> knowledgeBaseId = const Value.absent(),
+                Value<String?> mcpServers = const Value.absent(),
+                Value<String?> defaultModelConfigId = const Value.absent(),
+                Value<double> temperature = const Value.absent(),
+                Value<int> maxContextMessages = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
+                Value<bool> isArchived = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ProjectsCompanion(
+                id: id,
+                name: name,
+                description: description,
+                icon: icon,
+                color: color,
+                systemPrompt: systemPrompt,
+                knowledgeBaseId: knowledgeBaseId,
+                mcpServers: mcpServers,
+                defaultModelConfigId: defaultModelConfigId,
+                temperature: temperature,
+                maxContextMessages: maxContextMessages,
+                sortOrder: sortOrder,
+                isArchived: isArchived,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                Value<String?> description = const Value.absent(),
+                Value<String> icon = const Value.absent(),
+                Value<String> color = const Value.absent(),
+                Value<String?> systemPrompt = const Value.absent(),
+                Value<String?> knowledgeBaseId = const Value.absent(),
+                Value<String?> mcpServers = const Value.absent(),
+                Value<String?> defaultModelConfigId = const Value.absent(),
+                Value<double> temperature = const Value.absent(),
+                Value<int> maxContextMessages = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
+                Value<bool> isArchived = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => ProjectsCompanion.insert(
+                id: id,
+                name: name,
+                description: description,
+                icon: icon,
+                color: color,
+                systemPrompt: systemPrompt,
+                knowledgeBaseId: knowledgeBaseId,
+                mcpServers: mcpServers,
+                defaultModelConfigId: defaultModelConfigId,
+                temperature: temperature,
+                maxContextMessages: maxContextMessages,
+                sortOrder: sortOrder,
+                isArchived: isArchived,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ProjectsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ProjectsTable,
+      Project,
+      $$ProjectsTableFilterComposer,
+      $$ProjectsTableOrderingComposer,
+      $$ProjectsTableAnnotationComposer,
+      $$ProjectsTableCreateCompanionBuilder,
+      $$ProjectsTableUpdateCompanionBuilder,
+      (Project, BaseReferences<_$AppDatabase, $ProjectsTable, Project>),
+      Project,
+      PrefetchHooks Function()
+    >;
+typedef $$ResearchReportsTableCreateCompanionBuilder =
+    ResearchReportsCompanion Function({
+      required String id,
+      Value<String?> sessionId,
+      required String query,
+      required String title,
+      Value<String?> summary,
+      Value<String> status,
+      Value<int> totalSteps,
+      Value<int> completedSteps,
+      Value<int> totalTokens,
+      Value<int> inputTokens,
+      Value<int> outputTokens,
+      Value<int> thinkingTokens,
+      Value<String?> modelConfigId,
+      Value<String?> enabledSources,
+      required DateTime createdAt,
+      Value<DateTime?> completedAt,
+      Value<int> rowid,
+    });
+typedef $$ResearchReportsTableUpdateCompanionBuilder =
+    ResearchReportsCompanion Function({
+      Value<String> id,
+      Value<String?> sessionId,
+      Value<String> query,
+      Value<String> title,
+      Value<String?> summary,
+      Value<String> status,
+      Value<int> totalSteps,
+      Value<int> completedSteps,
+      Value<int> totalTokens,
+      Value<int> inputTokens,
+      Value<int> outputTokens,
+      Value<int> thinkingTokens,
+      Value<String?> modelConfigId,
+      Value<String?> enabledSources,
+      Value<DateTime> createdAt,
+      Value<DateTime?> completedAt,
+      Value<int> rowid,
+    });
+
+class $$ResearchReportsTableFilterComposer
+    extends Composer<_$AppDatabase, $ResearchReportsTable> {
+  $$ResearchReportsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get query => $composableBuilder(
+    column: $table.query,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get summary => $composableBuilder(
+    column: $table.summary,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get totalSteps => $composableBuilder(
+    column: $table.totalSteps,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get completedSteps => $composableBuilder(
+    column: $table.completedSteps,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get totalTokens => $composableBuilder(
+    column: $table.totalTokens,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get inputTokens => $composableBuilder(
+    column: $table.inputTokens,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get outputTokens => $composableBuilder(
+    column: $table.outputTokens,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modelConfigId => $composableBuilder(
+    column: $table.modelConfigId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get enabledSources => $composableBuilder(
+    column: $table.enabledSources,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ResearchReportsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ResearchReportsTable> {
+  $$ResearchReportsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get query => $composableBuilder(
+    column: $table.query,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get summary => $composableBuilder(
+    column: $table.summary,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get totalSteps => $composableBuilder(
+    column: $table.totalSteps,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get completedSteps => $composableBuilder(
+    column: $table.completedSteps,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get totalTokens => $composableBuilder(
+    column: $table.totalTokens,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get inputTokens => $composableBuilder(
+    column: $table.inputTokens,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get outputTokens => $composableBuilder(
+    column: $table.outputTokens,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modelConfigId => $composableBuilder(
+    column: $table.modelConfigId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get enabledSources => $composableBuilder(
+    column: $table.enabledSources,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ResearchReportsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ResearchReportsTable> {
+  $$ResearchReportsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get sessionId =>
+      $composableBuilder(column: $table.sessionId, builder: (column) => column);
+
+  GeneratedColumn<String> get query =>
+      $composableBuilder(column: $table.query, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get summary =>
+      $composableBuilder(column: $table.summary, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<int> get totalSteps => $composableBuilder(
+    column: $table.totalSteps,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get completedSteps => $composableBuilder(
+    column: $table.completedSteps,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get totalTokens => $composableBuilder(
+    column: $table.totalTokens,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get inputTokens => $composableBuilder(
+    column: $table.inputTokens,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get outputTokens => $composableBuilder(
+    column: $table.outputTokens,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modelConfigId => $composableBuilder(
+    column: $table.modelConfigId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get enabledSources => $composableBuilder(
+    column: $table.enabledSources,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => column,
+  );
+}
+
+class $$ResearchReportsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ResearchReportsTable,
+          ResearchReport,
+          $$ResearchReportsTableFilterComposer,
+          $$ResearchReportsTableOrderingComposer,
+          $$ResearchReportsTableAnnotationComposer,
+          $$ResearchReportsTableCreateCompanionBuilder,
+          $$ResearchReportsTableUpdateCompanionBuilder,
+          (
+            ResearchReport,
+            BaseReferences<
+              _$AppDatabase,
+              $ResearchReportsTable,
+              ResearchReport
+            >,
+          ),
+          ResearchReport,
+          PrefetchHooks Function()
+        > {
+  $$ResearchReportsTableTableManager(
+    _$AppDatabase db,
+    $ResearchReportsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ResearchReportsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ResearchReportsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ResearchReportsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String?> sessionId = const Value.absent(),
+                Value<String> query = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String?> summary = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> totalSteps = const Value.absent(),
+                Value<int> completedSteps = const Value.absent(),
+                Value<int> totalTokens = const Value.absent(),
+                Value<int> inputTokens = const Value.absent(),
+                Value<int> outputTokens = const Value.absent(),
+                Value<int> thinkingTokens = const Value.absent(),
+                Value<String?> modelConfigId = const Value.absent(),
+                Value<String?> enabledSources = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> completedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ResearchReportsCompanion(
+                id: id,
+                sessionId: sessionId,
+                query: query,
+                title: title,
+                summary: summary,
+                status: status,
+                totalSteps: totalSteps,
+                completedSteps: completedSteps,
+                totalTokens: totalTokens,
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                thinkingTokens: thinkingTokens,
+                modelConfigId: modelConfigId,
+                enabledSources: enabledSources,
+                createdAt: createdAt,
+                completedAt: completedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String?> sessionId = const Value.absent(),
+                required String query,
+                required String title,
+                Value<String?> summary = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> totalSteps = const Value.absent(),
+                Value<int> completedSteps = const Value.absent(),
+                Value<int> totalTokens = const Value.absent(),
+                Value<int> inputTokens = const Value.absent(),
+                Value<int> outputTokens = const Value.absent(),
+                Value<int> thinkingTokens = const Value.absent(),
+                Value<String?> modelConfigId = const Value.absent(),
+                Value<String?> enabledSources = const Value.absent(),
+                required DateTime createdAt,
+                Value<DateTime?> completedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ResearchReportsCompanion.insert(
+                id: id,
+                sessionId: sessionId,
+                query: query,
+                title: title,
+                summary: summary,
+                status: status,
+                totalSteps: totalSteps,
+                completedSteps: completedSteps,
+                totalTokens: totalTokens,
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                thinkingTokens: thinkingTokens,
+                modelConfigId: modelConfigId,
+                enabledSources: enabledSources,
+                createdAt: createdAt,
+                completedAt: completedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ResearchReportsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ResearchReportsTable,
+      ResearchReport,
+      $$ResearchReportsTableFilterComposer,
+      $$ResearchReportsTableOrderingComposer,
+      $$ResearchReportsTableAnnotationComposer,
+      $$ResearchReportsTableCreateCompanionBuilder,
+      $$ResearchReportsTableUpdateCompanionBuilder,
+      (
+        ResearchReport,
+        BaseReferences<_$AppDatabase, $ResearchReportsTable, ResearchReport>,
+      ),
+      ResearchReport,
+      PrefetchHooks Function()
+    >;
+typedef $$ResearchStepsTableCreateCompanionBuilder =
+    ResearchStepsCompanion Function({
+      required String id,
+      required String reportId,
+      required int stepIndex,
+      required String type,
+      required String title,
+      Value<String?> description,
+      Value<String?> searchQuery,
+      Value<String?> inputData,
+      Value<String?> outputData,
+      Value<String> status,
+      Value<int> tokensUsed,
+      Value<int?> durationMs,
+      Value<String?> errorMessage,
+      Value<DateTime?> startedAt,
+      Value<DateTime?> completedAt,
+      Value<int> rowid,
+    });
+typedef $$ResearchStepsTableUpdateCompanionBuilder =
+    ResearchStepsCompanion Function({
+      Value<String> id,
+      Value<String> reportId,
+      Value<int> stepIndex,
+      Value<String> type,
+      Value<String> title,
+      Value<String?> description,
+      Value<String?> searchQuery,
+      Value<String?> inputData,
+      Value<String?> outputData,
+      Value<String> status,
+      Value<int> tokensUsed,
+      Value<int?> durationMs,
+      Value<String?> errorMessage,
+      Value<DateTime?> startedAt,
+      Value<DateTime?> completedAt,
+      Value<int> rowid,
+    });
+
+class $$ResearchStepsTableFilterComposer
+    extends Composer<_$AppDatabase, $ResearchStepsTable> {
+  $$ResearchStepsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reportId => $composableBuilder(
+    column: $table.reportId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get stepIndex => $composableBuilder(
+    column: $table.stepIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get searchQuery => $composableBuilder(
+    column: $table.searchQuery,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get inputData => $composableBuilder(
+    column: $table.inputData,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get outputData => $composableBuilder(
+    column: $table.outputData,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get tokensUsed => $composableBuilder(
+    column: $table.tokensUsed,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get errorMessage => $composableBuilder(
+    column: $table.errorMessage,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get startedAt => $composableBuilder(
+    column: $table.startedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ResearchStepsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ResearchStepsTable> {
+  $$ResearchStepsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reportId => $composableBuilder(
+    column: $table.reportId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get stepIndex => $composableBuilder(
+    column: $table.stepIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get searchQuery => $composableBuilder(
+    column: $table.searchQuery,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get inputData => $composableBuilder(
+    column: $table.inputData,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get outputData => $composableBuilder(
+    column: $table.outputData,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get tokensUsed => $composableBuilder(
+    column: $table.tokensUsed,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get errorMessage => $composableBuilder(
+    column: $table.errorMessage,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get startedAt => $composableBuilder(
+    column: $table.startedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ResearchStepsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ResearchStepsTable> {
+  $$ResearchStepsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get reportId =>
+      $composableBuilder(column: $table.reportId, builder: (column) => column);
+
+  GeneratedColumn<int> get stepIndex =>
+      $composableBuilder(column: $table.stepIndex, builder: (column) => column);
+
+  GeneratedColumn<String> get type =>
+      $composableBuilder(column: $table.type, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get searchQuery => $composableBuilder(
+    column: $table.searchQuery,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get inputData =>
+      $composableBuilder(column: $table.inputData, builder: (column) => column);
+
+  GeneratedColumn<String> get outputData => $composableBuilder(
+    column: $table.outputData,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<int> get tokensUsed => $composableBuilder(
+    column: $table.tokensUsed,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get errorMessage => $composableBuilder(
+    column: $table.errorMessage,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get startedAt =>
+      $composableBuilder(column: $table.startedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get completedAt => $composableBuilder(
+    column: $table.completedAt,
+    builder: (column) => column,
+  );
+}
+
+class $$ResearchStepsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ResearchStepsTable,
+          ResearchStep,
+          $$ResearchStepsTableFilterComposer,
+          $$ResearchStepsTableOrderingComposer,
+          $$ResearchStepsTableAnnotationComposer,
+          $$ResearchStepsTableCreateCompanionBuilder,
+          $$ResearchStepsTableUpdateCompanionBuilder,
+          (
+            ResearchStep,
+            BaseReferences<_$AppDatabase, $ResearchStepsTable, ResearchStep>,
+          ),
+          ResearchStep,
+          PrefetchHooks Function()
+        > {
+  $$ResearchStepsTableTableManager(_$AppDatabase db, $ResearchStepsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ResearchStepsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ResearchStepsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ResearchStepsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> reportId = const Value.absent(),
+                Value<int> stepIndex = const Value.absent(),
+                Value<String> type = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String?> description = const Value.absent(),
+                Value<String?> searchQuery = const Value.absent(),
+                Value<String?> inputData = const Value.absent(),
+                Value<String?> outputData = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> tokensUsed = const Value.absent(),
+                Value<int?> durationMs = const Value.absent(),
+                Value<String?> errorMessage = const Value.absent(),
+                Value<DateTime?> startedAt = const Value.absent(),
+                Value<DateTime?> completedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ResearchStepsCompanion(
+                id: id,
+                reportId: reportId,
+                stepIndex: stepIndex,
+                type: type,
+                title: title,
+                description: description,
+                searchQuery: searchQuery,
+                inputData: inputData,
+                outputData: outputData,
+                status: status,
+                tokensUsed: tokensUsed,
+                durationMs: durationMs,
+                errorMessage: errorMessage,
+                startedAt: startedAt,
+                completedAt: completedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String reportId,
+                required int stepIndex,
+                required String type,
+                required String title,
+                Value<String?> description = const Value.absent(),
+                Value<String?> searchQuery = const Value.absent(),
+                Value<String?> inputData = const Value.absent(),
+                Value<String?> outputData = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> tokensUsed = const Value.absent(),
+                Value<int?> durationMs = const Value.absent(),
+                Value<String?> errorMessage = const Value.absent(),
+                Value<DateTime?> startedAt = const Value.absent(),
+                Value<DateTime?> completedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ResearchStepsCompanion.insert(
+                id: id,
+                reportId: reportId,
+                stepIndex: stepIndex,
+                type: type,
+                title: title,
+                description: description,
+                searchQuery: searchQuery,
+                inputData: inputData,
+                outputData: outputData,
+                status: status,
+                tokensUsed: tokensUsed,
+                durationMs: durationMs,
+                errorMessage: errorMessage,
+                startedAt: startedAt,
+                completedAt: completedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ResearchStepsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ResearchStepsTable,
+      ResearchStep,
+      $$ResearchStepsTableFilterComposer,
+      $$ResearchStepsTableOrderingComposer,
+      $$ResearchStepsTableAnnotationComposer,
+      $$ResearchStepsTableCreateCompanionBuilder,
+      $$ResearchStepsTableUpdateCompanionBuilder,
+      (
+        ResearchStep,
+        BaseReferences<_$AppDatabase, $ResearchStepsTable, ResearchStep>,
+      ),
+      ResearchStep,
+      PrefetchHooks Function()
+    >;
+typedef $$ResearchCitationsTableCreateCompanionBuilder =
+    ResearchCitationsCompanion Function({
+      required String id,
+      required String reportId,
+      required int citationIndex,
+      required String sourceType,
+      Value<String?> url,
+      Value<String?> filePath,
+      required String title,
+      Value<String?> snippet,
+      Value<double?> relevanceScore,
+      Value<DateTime?> fetchedAt,
+      Value<int> rowid,
+    });
+typedef $$ResearchCitationsTableUpdateCompanionBuilder =
+    ResearchCitationsCompanion Function({
+      Value<String> id,
+      Value<String> reportId,
+      Value<int> citationIndex,
+      Value<String> sourceType,
+      Value<String?> url,
+      Value<String?> filePath,
+      Value<String> title,
+      Value<String?> snippet,
+      Value<double?> relevanceScore,
+      Value<DateTime?> fetchedAt,
+      Value<int> rowid,
+    });
+
+class $$ResearchCitationsTableFilterComposer
+    extends Composer<_$AppDatabase, $ResearchCitationsTable> {
+  $$ResearchCitationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reportId => $composableBuilder(
+    column: $table.reportId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get citationIndex => $composableBuilder(
+    column: $table.citationIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceType => $composableBuilder(
+    column: $table.sourceType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get filePath => $composableBuilder(
+    column: $table.filePath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get snippet => $composableBuilder(
+    column: $table.snippet,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get relevanceScore => $composableBuilder(
+    column: $table.relevanceScore,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get fetchedAt => $composableBuilder(
+    column: $table.fetchedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ResearchCitationsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ResearchCitationsTable> {
+  $$ResearchCitationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reportId => $composableBuilder(
+    column: $table.reportId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get citationIndex => $composableBuilder(
+    column: $table.citationIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceType => $composableBuilder(
+    column: $table.sourceType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get filePath => $composableBuilder(
+    column: $table.filePath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get snippet => $composableBuilder(
+    column: $table.snippet,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get relevanceScore => $composableBuilder(
+    column: $table.relevanceScore,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get fetchedAt => $composableBuilder(
+    column: $table.fetchedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ResearchCitationsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ResearchCitationsTable> {
+  $$ResearchCitationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get reportId =>
+      $composableBuilder(column: $table.reportId, builder: (column) => column);
+
+  GeneratedColumn<int> get citationIndex => $composableBuilder(
+    column: $table.citationIndex,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sourceType => $composableBuilder(
+    column: $table.sourceType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get url =>
+      $composableBuilder(column: $table.url, builder: (column) => column);
+
+  GeneratedColumn<String> get filePath =>
+      $composableBuilder(column: $table.filePath, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get snippet =>
+      $composableBuilder(column: $table.snippet, builder: (column) => column);
+
+  GeneratedColumn<double> get relevanceScore => $composableBuilder(
+    column: $table.relevanceScore,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get fetchedAt =>
+      $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
+}
+
+class $$ResearchCitationsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ResearchCitationsTable,
+          ResearchCitation,
+          $$ResearchCitationsTableFilterComposer,
+          $$ResearchCitationsTableOrderingComposer,
+          $$ResearchCitationsTableAnnotationComposer,
+          $$ResearchCitationsTableCreateCompanionBuilder,
+          $$ResearchCitationsTableUpdateCompanionBuilder,
+          (
+            ResearchCitation,
+            BaseReferences<
+              _$AppDatabase,
+              $ResearchCitationsTable,
+              ResearchCitation
+            >,
+          ),
+          ResearchCitation,
+          PrefetchHooks Function()
+        > {
+  $$ResearchCitationsTableTableManager(
+    _$AppDatabase db,
+    $ResearchCitationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ResearchCitationsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ResearchCitationsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ResearchCitationsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> reportId = const Value.absent(),
+                Value<int> citationIndex = const Value.absent(),
+                Value<String> sourceType = const Value.absent(),
+                Value<String?> url = const Value.absent(),
+                Value<String?> filePath = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String?> snippet = const Value.absent(),
+                Value<double?> relevanceScore = const Value.absent(),
+                Value<DateTime?> fetchedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ResearchCitationsCompanion(
+                id: id,
+                reportId: reportId,
+                citationIndex: citationIndex,
+                sourceType: sourceType,
+                url: url,
+                filePath: filePath,
+                title: title,
+                snippet: snippet,
+                relevanceScore: relevanceScore,
+                fetchedAt: fetchedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String reportId,
+                required int citationIndex,
+                required String sourceType,
+                Value<String?> url = const Value.absent(),
+                Value<String?> filePath = const Value.absent(),
+                required String title,
+                Value<String?> snippet = const Value.absent(),
+                Value<double?> relevanceScore = const Value.absent(),
+                Value<DateTime?> fetchedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ResearchCitationsCompanion.insert(
+                id: id,
+                reportId: reportId,
+                citationIndex: citationIndex,
+                sourceType: sourceType,
+                url: url,
+                filePath: filePath,
+                title: title,
+                snippet: snippet,
+                relevanceScore: relevanceScore,
+                fetchedAt: fetchedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ResearchCitationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ResearchCitationsTable,
+      ResearchCitation,
+      $$ResearchCitationsTableFilterComposer,
+      $$ResearchCitationsTableOrderingComposer,
+      $$ResearchCitationsTableAnnotationComposer,
+      $$ResearchCitationsTableCreateCompanionBuilder,
+      $$ResearchCitationsTableUpdateCompanionBuilder,
+      (
+        ResearchCitation,
+        BaseReferences<
+          _$AppDatabase,
+          $ResearchCitationsTable,
+          ResearchCitation
+        >,
+      ),
+      ResearchCitation,
+      PrefetchHooks Function()
+    >;
+typedef $$ResearchSectionsTableCreateCompanionBuilder =
+    ResearchSectionsCompanion Function({
+      required String id,
+      required String reportId,
+      required int sectionIndex,
+      required String title,
+      required String content,
+      Value<String?> citationIds,
+      required DateTime createdAt,
+      Value<int> rowid,
+    });
+typedef $$ResearchSectionsTableUpdateCompanionBuilder =
+    ResearchSectionsCompanion Function({
+      Value<String> id,
+      Value<String> reportId,
+      Value<int> sectionIndex,
+      Value<String> title,
+      Value<String> content,
+      Value<String?> citationIds,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+class $$ResearchSectionsTableFilterComposer
+    extends Composer<_$AppDatabase, $ResearchSectionsTable> {
+  $$ResearchSectionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reportId => $composableBuilder(
+    column: $table.reportId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sectionIndex => $composableBuilder(
+    column: $table.sectionIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get content => $composableBuilder(
+    column: $table.content,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get citationIds => $composableBuilder(
+    column: $table.citationIds,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ResearchSectionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ResearchSectionsTable> {
+  $$ResearchSectionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reportId => $composableBuilder(
+    column: $table.reportId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sectionIndex => $composableBuilder(
+    column: $table.sectionIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get content => $composableBuilder(
+    column: $table.content,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get citationIds => $composableBuilder(
+    column: $table.citationIds,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ResearchSectionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ResearchSectionsTable> {
+  $$ResearchSectionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get reportId =>
+      $composableBuilder(column: $table.reportId, builder: (column) => column);
+
+  GeneratedColumn<int> get sectionIndex => $composableBuilder(
+    column: $table.sectionIndex,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get content =>
+      $composableBuilder(column: $table.content, builder: (column) => column);
+
+  GeneratedColumn<String> get citationIds => $composableBuilder(
+    column: $table.citationIds,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$ResearchSectionsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ResearchSectionsTable,
+          ResearchSection,
+          $$ResearchSectionsTableFilterComposer,
+          $$ResearchSectionsTableOrderingComposer,
+          $$ResearchSectionsTableAnnotationComposer,
+          $$ResearchSectionsTableCreateCompanionBuilder,
+          $$ResearchSectionsTableUpdateCompanionBuilder,
+          (
+            ResearchSection,
+            BaseReferences<
+              _$AppDatabase,
+              $ResearchSectionsTable,
+              ResearchSection
+            >,
+          ),
+          ResearchSection,
+          PrefetchHooks Function()
+        > {
+  $$ResearchSectionsTableTableManager(
+    _$AppDatabase db,
+    $ResearchSectionsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ResearchSectionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ResearchSectionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ResearchSectionsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> reportId = const Value.absent(),
+                Value<int> sectionIndex = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String> content = const Value.absent(),
+                Value<String?> citationIds = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ResearchSectionsCompanion(
+                id: id,
+                reportId: reportId,
+                sectionIndex: sectionIndex,
+                title: title,
+                content: content,
+                citationIds: citationIds,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String reportId,
+                required int sectionIndex,
+                required String title,
+                required String content,
+                Value<String?> citationIds = const Value.absent(),
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => ResearchSectionsCompanion.insert(
+                id: id,
+                reportId: reportId,
+                sectionIndex: sectionIndex,
+                title: title,
+                content: content,
+                citationIds: citationIds,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ResearchSectionsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ResearchSectionsTable,
+      ResearchSection,
+      $$ResearchSectionsTableFilterComposer,
+      $$ResearchSectionsTableOrderingComposer,
+      $$ResearchSectionsTableAnnotationComposer,
+      $$ResearchSectionsTableCreateCompanionBuilder,
+      $$ResearchSectionsTableUpdateCompanionBuilder,
+      (
+        ResearchSection,
+        BaseReferences<_$AppDatabase, $ResearchSectionsTable, ResearchSection>,
+      ),
+      ResearchSection,
+      PrefetchHooks Function()
+    >;
+typedef $$ThinkingTracesTableCreateCompanionBuilder =
+    ThinkingTracesCompanion Function({
+      required String id,
+      required String messageId,
+      required String sessionId,
+      required String thinking,
+      Value<int> thinkingTokens,
+      Value<String?> modelConfigId,
+      required DateTime createdAt,
+      Value<int> rowid,
+    });
+typedef $$ThinkingTracesTableUpdateCompanionBuilder =
+    ThinkingTracesCompanion Function({
+      Value<String> id,
+      Value<String> messageId,
+      Value<String> sessionId,
+      Value<String> thinking,
+      Value<int> thinkingTokens,
+      Value<String?> modelConfigId,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+class $$ThinkingTracesTableFilterComposer
+    extends Composer<_$AppDatabase, $ThinkingTracesTable> {
+  $$ThinkingTracesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thinking => $composableBuilder(
+    column: $table.thinking,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modelConfigId => $composableBuilder(
+    column: $table.modelConfigId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ThinkingTracesTableOrderingComposer
+    extends Composer<_$AppDatabase, $ThinkingTracesTable> {
+  $$ThinkingTracesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get thinking => $composableBuilder(
+    column: $table.thinking,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modelConfigId => $composableBuilder(
+    column: $table.modelConfigId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ThinkingTracesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ThinkingTracesTable> {
+  $$ThinkingTracesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get sessionId =>
+      $composableBuilder(column: $table.sessionId, builder: (column) => column);
+
+  GeneratedColumn<String> get thinking =>
+      $composableBuilder(column: $table.thinking, builder: (column) => column);
+
+  GeneratedColumn<int> get thinkingTokens => $composableBuilder(
+    column: $table.thinkingTokens,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modelConfigId => $composableBuilder(
+    column: $table.modelConfigId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$ThinkingTracesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ThinkingTracesTable,
+          ThinkingTrace,
+          $$ThinkingTracesTableFilterComposer,
+          $$ThinkingTracesTableOrderingComposer,
+          $$ThinkingTracesTableAnnotationComposer,
+          $$ThinkingTracesTableCreateCompanionBuilder,
+          $$ThinkingTracesTableUpdateCompanionBuilder,
+          (
+            ThinkingTrace,
+            BaseReferences<_$AppDatabase, $ThinkingTracesTable, ThinkingTrace>,
+          ),
+          ThinkingTrace,
+          PrefetchHooks Function()
+        > {
+  $$ThinkingTracesTableTableManager(
+    _$AppDatabase db,
+    $ThinkingTracesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ThinkingTracesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ThinkingTracesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ThinkingTracesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> messageId = const Value.absent(),
+                Value<String> sessionId = const Value.absent(),
+                Value<String> thinking = const Value.absent(),
+                Value<int> thinkingTokens = const Value.absent(),
+                Value<String?> modelConfigId = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ThinkingTracesCompanion(
+                id: id,
+                messageId: messageId,
+                sessionId: sessionId,
+                thinking: thinking,
+                thinkingTokens: thinkingTokens,
+                modelConfigId: modelConfigId,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String messageId,
+                required String sessionId,
+                required String thinking,
+                Value<int> thinkingTokens = const Value.absent(),
+                Value<String?> modelConfigId = const Value.absent(),
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => ThinkingTracesCompanion.insert(
+                id: id,
+                messageId: messageId,
+                sessionId: sessionId,
+                thinking: thinking,
+                thinkingTokens: thinkingTokens,
+                modelConfigId: modelConfigId,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ThinkingTracesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ThinkingTracesTable,
+      ThinkingTrace,
+      $$ThinkingTracesTableFilterComposer,
+      $$ThinkingTracesTableOrderingComposer,
+      $$ThinkingTracesTableAnnotationComposer,
+      $$ThinkingTracesTableCreateCompanionBuilder,
+      $$ThinkingTracesTableUpdateCompanionBuilder,
+      (
+        ThinkingTrace,
+        BaseReferences<_$AppDatabase, $ThinkingTracesTable, ThinkingTrace>,
+      ),
+      ThinkingTrace,
+      PrefetchHooks Function()
+    >;
+typedef $$PromptScenariosTableCreateCompanionBuilder =
+    PromptScenariosCompanion Function({
+      required String id,
+      required String scenarioKey,
+      required String displayName,
+      required String category,
+      Value<String?> description,
+      required String systemPrompt,
+      Value<String?> userPromptTemplate,
+      Value<String?> variables,
+      Value<int> sortOrder,
+      Value<bool> isBuiltin,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$PromptScenariosTableUpdateCompanionBuilder =
+    PromptScenariosCompanion Function({
+      Value<String> id,
+      Value<String> scenarioKey,
+      Value<String> displayName,
+      Value<String> category,
+      Value<String?> description,
+      Value<String> systemPrompt,
+      Value<String?> userPromptTemplate,
+      Value<String?> variables,
+      Value<int> sortOrder,
+      Value<bool> isBuiltin,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$PromptScenariosTableFilterComposer
+    extends Composer<_$AppDatabase, $PromptScenariosTable> {
+  $$PromptScenariosTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get scenarioKey => $composableBuilder(
+    column: $table.scenarioKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get displayName => $composableBuilder(
+    column: $table.displayName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get category => $composableBuilder(
+    column: $table.category,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userPromptTemplate => $composableBuilder(
+    column: $table.userPromptTemplate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get variables => $composableBuilder(
+    column: $table.variables,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isBuiltin => $composableBuilder(
+    column: $table.isBuiltin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$PromptScenariosTableOrderingComposer
+    extends Composer<_$AppDatabase, $PromptScenariosTable> {
+  $$PromptScenariosTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get scenarioKey => $composableBuilder(
+    column: $table.scenarioKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get displayName => $composableBuilder(
+    column: $table.displayName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get category => $composableBuilder(
+    column: $table.category,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userPromptTemplate => $composableBuilder(
+    column: $table.userPromptTemplate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get variables => $composableBuilder(
+    column: $table.variables,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isBuiltin => $composableBuilder(
+    column: $table.isBuiltin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$PromptScenariosTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PromptScenariosTable> {
+  $$PromptScenariosTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get scenarioKey => $composableBuilder(
+    column: $table.scenarioKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get displayName => $composableBuilder(
+    column: $table.displayName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get category =>
+      $composableBuilder(column: $table.category, builder: (column) => column);
+
+  GeneratedColumn<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get userPromptTemplate => $composableBuilder(
+    column: $table.userPromptTemplate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get variables =>
+      $composableBuilder(column: $table.variables, builder: (column) => column);
+
+  GeneratedColumn<int> get sortOrder =>
+      $composableBuilder(column: $table.sortOrder, builder: (column) => column);
+
+  GeneratedColumn<bool> get isBuiltin =>
+      $composableBuilder(column: $table.isBuiltin, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$PromptScenariosTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $PromptScenariosTable,
+          PromptScenario,
+          $$PromptScenariosTableFilterComposer,
+          $$PromptScenariosTableOrderingComposer,
+          $$PromptScenariosTableAnnotationComposer,
+          $$PromptScenariosTableCreateCompanionBuilder,
+          $$PromptScenariosTableUpdateCompanionBuilder,
+          (
+            PromptScenario,
+            BaseReferences<
+              _$AppDatabase,
+              $PromptScenariosTable,
+              PromptScenario
+            >,
+          ),
+          PromptScenario,
+          PrefetchHooks Function()
+        > {
+  $$PromptScenariosTableTableManager(
+    _$AppDatabase db,
+    $PromptScenariosTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PromptScenariosTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PromptScenariosTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PromptScenariosTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> scenarioKey = const Value.absent(),
+                Value<String> displayName = const Value.absent(),
+                Value<String> category = const Value.absent(),
+                Value<String?> description = const Value.absent(),
+                Value<String> systemPrompt = const Value.absent(),
+                Value<String?> userPromptTemplate = const Value.absent(),
+                Value<String?> variables = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
+                Value<bool> isBuiltin = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => PromptScenariosCompanion(
+                id: id,
+                scenarioKey: scenarioKey,
+                displayName: displayName,
+                category: category,
+                description: description,
+                systemPrompt: systemPrompt,
+                userPromptTemplate: userPromptTemplate,
+                variables: variables,
+                sortOrder: sortOrder,
+                isBuiltin: isBuiltin,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String scenarioKey,
+                required String displayName,
+                required String category,
+                Value<String?> description = const Value.absent(),
+                required String systemPrompt,
+                Value<String?> userPromptTemplate = const Value.absent(),
+                Value<String?> variables = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
+                Value<bool> isBuiltin = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => PromptScenariosCompanion.insert(
+                id: id,
+                scenarioKey: scenarioKey,
+                displayName: displayName,
+                category: category,
+                description: description,
+                systemPrompt: systemPrompt,
+                userPromptTemplate: userPromptTemplate,
+                variables: variables,
+                sortOrder: sortOrder,
+                isBuiltin: isBuiltin,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$PromptScenariosTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $PromptScenariosTable,
+      PromptScenario,
+      $$PromptScenariosTableFilterComposer,
+      $$PromptScenariosTableOrderingComposer,
+      $$PromptScenariosTableAnnotationComposer,
+      $$PromptScenariosTableCreateCompanionBuilder,
+      $$PromptScenariosTableUpdateCompanionBuilder,
+      (
+        PromptScenario,
+        BaseReferences<_$AppDatabase, $PromptScenariosTable, PromptScenario>,
+      ),
+      PromptScenario,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -18278,4 +26332,18 @@ class $AppDatabaseManager {
       $$WorkflowExecutionsTableTableManager(_db, _db.workflowExecutions);
   $$WorkflowLogsTableTableManager get workflowLogs =>
       $$WorkflowLogsTableTableManager(_db, _db.workflowLogs);
+  $$ProjectsTableTableManager get projects =>
+      $$ProjectsTableTableManager(_db, _db.projects);
+  $$ResearchReportsTableTableManager get researchReports =>
+      $$ResearchReportsTableTableManager(_db, _db.researchReports);
+  $$ResearchStepsTableTableManager get researchSteps =>
+      $$ResearchStepsTableTableManager(_db, _db.researchSteps);
+  $$ResearchCitationsTableTableManager get researchCitations =>
+      $$ResearchCitationsTableTableManager(_db, _db.researchCitations);
+  $$ResearchSectionsTableTableManager get researchSections =>
+      $$ResearchSectionsTableTableManager(_db, _db.researchSections);
+  $$ThinkingTracesTableTableManager get thinkingTraces =>
+      $$ThinkingTracesTableTableManager(_db, _db.thinkingTraces);
+  $$PromptScenariosTableTableManager get promptScenarios =>
+      $$PromptScenariosTableTableManager(_db, _db.promptScenarios);
 }

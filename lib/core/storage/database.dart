@@ -35,6 +35,8 @@ class Sessions extends Table {
   BoolColumn get enableFileUpload => boolean().withDefault(const Constant(true))(); // 文件上传（默认开启）
   TextColumn get enabledKnowledgeBaseId => text().nullable()(); // 当前关联的知识库 ID
   BoolColumn get isSpirit => boolean().withDefault(const Constant(false))(); // 名灵回响会话标记
+  // v0.42.0: 项目归属（可空，兼容老数据）
+  TextColumn get projectId => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
@@ -52,6 +54,10 @@ class Messages extends Table {
   BoolColumn get hasImages => boolean().withDefault(const Constant(false))(); // 是否包含图片（多模态）
   IntColumn get tokenCount => integer().nullable()();
   TextColumn get toolCallInfo => text().nullable()(); // JSON format
+  // v0.42.0: 思考过程
+  TextColumn get thinking => text().nullable()();
+  IntColumn get thinkingTokens => integer().withDefault(const Constant(0))();
+  BoolColumn get showThinking => boolean().withDefault(const Constant(true))();
   DateTimeColumn get createdAt => dateTime()();
 
   @override
@@ -75,6 +81,13 @@ class Models extends Table {
   // 🔧 新增字段：模型状态
   BoolColumn get isLoaded => boolean().withDefault(const Constant(false))(); // 是否已加载
   TextColumn get downloadStatus => text().withDefault(const Constant('pending'))(); // pending, downloading, completed, failed
+  // v0.42.0: 思考预算配置
+  TextColumn get thinkingMode => text().withDefault(const Constant('adaptive'))();
+  // 'disabled' | 'enabled' | 'adaptive'
+  IntColumn get thinkingBudget => integer().nullable()();
+  BoolColumn get supportsThinking => boolean().withDefault(const Constant(false))();
+  IntColumn get minThinkingBudget => integer().withDefault(const Constant(1024))();
+  IntColumn get maxThinkingBudget => integer().withDefault(const Constant(100000))();
   DateTimeColumn get createdAt => dateTime()();
 
   @override
@@ -341,6 +354,146 @@ class WorkflowExecutions extends Table {
   Set<Column> get primaryKey => {instanceId};
 }
 
+/// v0.42.0 新增：项目/工作区表
+@DataClassName('Project')
+class Projects extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text().withLength(min: 1, max: 100)();
+  TextColumn get description => text().nullable()();
+  TextColumn get icon => text().withDefault(const Constant('📁'))();
+  TextColumn get color => text().withDefault(const Constant('#6750A4'))();
+  TextColumn get systemPrompt => text().nullable()();
+  TextColumn get knowledgeBaseId => text().nullable()();
+  TextColumn get mcpServers => text().nullable()(); // JSON array
+  TextColumn get defaultModelConfigId => text().nullable()();
+  RealColumn get temperature => real().withDefault(const Constant(0.7))();
+  IntColumn get maxContextMessages => integer().withDefault(const Constant(20))();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get isArchived => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// v0.42.0 新增：研究报告主表
+@DataClassName('ResearchReport')
+class ResearchReports extends Table {
+  TextColumn get id => text()();
+  TextColumn get sessionId => text().nullable()(); // 可选关联到会话
+  TextColumn get query => text()();
+  TextColumn get title => text()();
+  TextColumn get summary => text().nullable()();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  // pending | planning | searching | analyzing | synthesizing | completed | failed
+  IntColumn get totalSteps => integer().withDefault(const Constant(0))();
+  IntColumn get completedSteps => integer().withDefault(const Constant(0))();
+  IntColumn get totalTokens => integer().withDefault(const Constant(0))();
+  IntColumn get inputTokens => integer().withDefault(const Constant(0))();
+  IntColumn get outputTokens => integer().withDefault(const Constant(0))();
+  IntColumn get thinkingTokens => integer().withDefault(const Constant(0))();
+  TextColumn get modelConfigId => text().nullable()();
+  TextColumn get enabledSources => text().nullable()(); // JSON array
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get completedAt => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// v0.42.0 新增：研究步骤表
+@DataClassName('ResearchStep')
+class ResearchSteps extends Table {
+  TextColumn get id => text()();
+  TextColumn get reportId => text()();
+  IntColumn get stepIndex => integer()();
+  TextColumn get type => text()(); // planning | search | analyze | synthesize
+  TextColumn get title => text()();
+  TextColumn get description => text().nullable()();
+  TextColumn get searchQuery => text().nullable()();
+  TextColumn get inputData => text().nullable()(); // JSON
+  TextColumn get outputData => text().nullable()(); // JSON
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  // pending | running | completed | failed
+  IntColumn get tokensUsed => integer().withDefault(const Constant(0))();
+  IntColumn get durationMs => integer().nullable()();
+  TextColumn get errorMessage => text().nullable()();
+  DateTimeColumn get startedAt => dateTime().nullable()();
+  DateTimeColumn get completedAt => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// v0.42.0 新增：研究引用来源表
+@DataClassName('ResearchCitation')
+class ResearchCitations extends Table {
+  TextColumn get id => text()();
+  TextColumn get reportId => text()();
+  IntColumn get citationIndex => integer()();
+  TextColumn get sourceType => text()(); // web | file | knowledge_base | rss
+  TextColumn get url => text().nullable()();
+  TextColumn get filePath => text().nullable()();
+  TextColumn get title => text()();
+  TextColumn get snippet => text().nullable()();
+  RealColumn get relevanceScore => real().nullable()();
+  DateTimeColumn get fetchedAt => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// v0.42.0 新增：研究报告章节表
+@DataClassName('ResearchSection')
+class ResearchSections extends Table {
+  TextColumn get id => text()();
+  TextColumn get reportId => text()();
+  IntColumn get sectionIndex => integer()();
+  TextColumn get title => text()();
+  TextColumn get content => text()();
+  TextColumn get citationIds => text().nullable()(); // JSON array
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// v0.42.0 新增：思考过程表（用于消息关联的思考内容）
+@DataClassName('ThinkingTrace')
+class ThinkingTraces extends Table {
+  TextColumn get id => text()();
+  TextColumn get messageId => text()();
+  TextColumn get sessionId => text()();
+  TextColumn get thinking => text()();
+  IntColumn get thinkingTokens => integer().withDefault(const Constant(0))();
+  TextColumn get modelConfigId => text().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// v0.42.0 新增：提示词场景模板表
+@DataClassName('PromptScenario')
+class PromptScenarios extends Table {
+  TextColumn get id => text()();
+  TextColumn get scenarioKey => text().unique()(); // 业务场景标识
+  TextColumn get displayName => text()();
+  TextColumn get category => text()(); // research | code | writing | analysis | translation | education | etc
+  TextColumn get description => text().nullable()();
+  TextColumn get systemPrompt => text()();
+  TextColumn get userPromptTemplate => text().nullable()();
+  TextColumn get variables => text().nullable()(); // JSON array of variable names
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get isBuiltin => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 /// 工作流执行日志表 - 存储执行过程日志（Phase 3）
 @DataClassName('WorkflowLog')
 class WorkflowLogs extends Table {
@@ -376,12 +529,20 @@ class WorkflowLogs extends Table {
   WorkflowDefinitions,
   WorkflowExecutions,
   WorkflowLogs,
+  // v0.42.0 新增
+  Projects,
+  ResearchReports,
+  ResearchSteps,
+  ResearchCitations,
+  ResearchSections,
+  ThinkingTraces,
+  PromptScenarios,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration {
@@ -560,6 +721,91 @@ class AppDatabase extends _$AppDatabase {
           await m.createTable(workflowLogs);
         } catch (_) {
           // 忽略：安全错误
+        }
+        // v12: 思考预算 / 深度研究 / 项目工作区 / 思考过程 / 提示词场景
+        // 双重写入策略：所有 v0.42.0 新表使用 try-catch 幂等创建
+        try {
+          await m.createTable(projects);
+        } catch (_) {
+          // 忽略：表已存在
+        }
+        try {
+          await m.createTable(researchReports);
+        } catch (_) {
+          // 忽略：表已存在
+        }
+        try {
+          await m.createTable(researchSteps);
+        } catch (_) {
+          // 忽略：表已存在
+        }
+        try {
+          await m.createTable(researchCitations);
+        } catch (_) {
+          // 忽略：表已存在
+        }
+        try {
+          await m.createTable(researchSections);
+        } catch (_) {
+          // 忽略：表已存在
+        }
+        try {
+          await m.createTable(thinkingTraces);
+        } catch (_) {
+          // 忽略：表已存在
+        }
+        try {
+          await m.createTable(promptScenarios);
+        } catch (_) {
+          // 忽略：表已存在
+        }
+        // sessions 表新增 projectId 字段（兼容老数据）
+        try {
+          await m.addColumn(sessions, sessions.projectId);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        // models 表新增 thinking 相关字段
+        try {
+          await m.addColumn(models, models.thinkingMode);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        try {
+          await m.addColumn(models, models.thinkingBudget);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        try {
+          await m.addColumn(models, models.supportsThinking);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        try {
+          await m.addColumn(models, models.minThinkingBudget);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        try {
+          await m.addColumn(models, models.maxThinkingBudget);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        // messages 表新增 thinking 字段
+        try {
+          await m.addColumn(messages, messages.thinking);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        try {
+          await m.addColumn(messages, messages.thinkingTokens);
+        } catch (_) {
+          // 忽略：列已存在
+        }
+        try {
+          await m.addColumn(messages, messages.showThinking);
+        } catch (_) {
+          // 忽略：列已存在
         }
       },
     );
@@ -844,4 +1090,206 @@ class AppDatabase extends _$AppDatabase {
   /// 删除执行实例的所有日志
   Future<int> deleteWorkflowLogs(String instanceId) =>
       (delete(workflowLogs)..where((t) => t.instanceId.equals(instanceId))).go();
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  v0.42.0: Projects DAO methods
+  // ════════════════════════════════════════════════════════════════════════
+
+  /// 创建项目
+  Future<int> createProject(ProjectsCompanion project) =>
+      into(projects).insert(project);
+
+  /// 获取所有项目（未归档）
+  Future<List<Project>> getAllProjects({bool includeArchived = false}) {
+    final query = select(projects);
+    if (!includeArchived) {
+      query.where((t) => t.isArchived.equals(false));
+    }
+    query.orderBy([(t) => OrderingTerm.asc(t.sortOrder)]);
+    return query.get();
+  }
+
+  /// 根据 ID 获取项目
+  Future<Project?> getProjectById(String id) =>
+      (select(projects)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  /// 更新项目
+  Future<int> updateProject(ProjectsCompanion project) =>
+      (update(projects)..where((t) => t.id.equals(project.id.value)))
+          .write(project);
+
+  /// 删除项目
+  Future<int> deleteProject(String id) =>
+      (delete(projects)..where((t) => t.id.equals(id))).go();
+
+  /// 获取项目内的所有会话
+  Future<List<Session>> getSessionsByProject(String projectId) =>
+      (select(sessions)..where((t) => t.projectId.equals(projectId))).get();
+
+  /// 将会话绑定到项目
+  Future<int> bindSessionToProject(String sessionId, String projectId) =>
+      (update(sessions)..where((t) => t.id.equals(sessionId))).write(
+        SessionsCompanion(projectId: Value(projectId)),
+      );
+
+  /// 解绑会话
+  Future<int> unbindSessionFromProject(String sessionId) =>
+      (update(sessions)..where((t) => t.id.equals(sessionId))).write(
+        const SessionsCompanion(),
+      );
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  v0.42.0: Research Reports DAO methods
+  // ════════════════════════════════════════════════════════════════════════
+
+  /// 创建研究报告
+  Future<int> createResearchReport(ResearchReportsCompanion report) =>
+      into(researchReports).insert(report);
+
+  /// 更新研究报告
+  Future<int> updateResearchReport(String id, ResearchReportsCompanion report) =>
+      (update(researchReports)..where((t) => t.id.equals(id))).write(report);
+
+  /// 获取研究报告
+  Future<ResearchReport?> getResearchReport(String id) =>
+      (select(researchReports)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  /// 获取会话的所有研究报告
+  Future<List<ResearchReport>> getResearchReportsBySession(String sessionId) =>
+      (select(researchReports)
+            ..where((t) => t.sessionId.equals(sessionId))
+            ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+          .get();
+
+  /// 删除研究报告
+  Future<int> deleteResearchReport(String id) =>
+      (delete(researchReports)..where((t) => t.id.equals(id))).go();
+
+  // ── ResearchSteps DAO ──
+
+  /// 创建研究步骤
+  Future<int> createResearchStep(ResearchStepsCompanion step) =>
+      into(researchSteps).insert(step);
+
+  /// 更新研究步骤
+  Future<int> updateResearchStep(String id, ResearchStepsCompanion step) =>
+      (update(researchSteps)..where((t) => t.id.equals(id))).write(step);
+
+  /// 获取报告的所有步骤
+  Future<List<ResearchStep>> getResearchStepsByReport(String reportId) =>
+      (select(researchSteps)
+            ..where((t) => t.reportId.equals(reportId))
+            ..orderBy([(t) => OrderingTerm.asc(t.stepIndex)]))
+          .get();
+
+  /// 删除研究步骤
+  Future<int> deleteResearchStepsByReport(String reportId) =>
+      (delete(researchSteps)..where((t) => t.reportId.equals(reportId))).go();
+
+  // ── ResearchCitations DAO ──
+
+  /// 批量创建引用
+  Future<void> createResearchCitations(List<ResearchCitationsCompanion> items) async {
+    await batch((b) => b.insertAll(researchCitations, items));
+  }
+
+  /// 获取报告的所有引用
+  Future<List<ResearchCitation>> getResearchCitationsByReport(String reportId) =>
+      (select(researchCitations)
+            ..where((t) => t.reportId.equals(reportId))
+            ..orderBy([(t) => OrderingTerm.asc(t.citationIndex)]))
+          .get();
+
+  // ── ResearchSections DAO ──
+
+  /// 批量创建章节
+  Future<void> createResearchSections(List<ResearchSectionsCompanion> items) async {
+    await batch((b) => b.insertAll(researchSections, items));
+  }
+
+  /// 获取报告的所有章节
+  Future<List<ResearchSection>> getResearchSectionsByReport(String reportId) =>
+      (select(researchSections)
+            ..where((t) => t.reportId.equals(reportId))
+            ..orderBy([(t) => OrderingTerm.asc(t.sectionIndex)]))
+          .get();
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  v0.42.0: Thinking Traces DAO methods
+  // ════════════════════════════════════════════════════════════════════════
+
+  /// 创建思考记录
+  Future<int> createThinkingTrace(ThinkingTracesCompanion trace) =>
+      into(thinkingTraces).insert(trace);
+
+  /// 获取消息的思考记录
+  Future<ThinkingTrace?> getThinkingTraceByMessage(String messageId) =>
+      (select(thinkingTraces)..where((t) => t.messageId.equals(messageId)))
+          .getSingleOrNull();
+
+  /// 获取会话的所有思考记录
+  Future<List<ThinkingTrace>> getThinkingTracesBySession(String sessionId) =>
+      (select(thinkingTraces)
+            ..where((t) => t.sessionId.equals(sessionId))
+            ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+          .get();
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  v0.42.0: Prompt Scenarios DAO methods
+  // ════════════════════════════════════════════════════════════════════════
+
+  /// 批量创建或更新提示词场景
+  Future<void> upsertPromptScenarios(List<PromptScenariosCompanion> items) async {
+    await batch((b) => b.insertAll(
+          promptScenarios,
+          items,
+          mode: InsertMode.insertOrReplace,
+        ));
+  }
+
+  /// 获取所有提示词场景
+  Future<List<PromptScenario>> getAllPromptScenarios() =>
+      (select(promptScenarios)
+            ..orderBy([(t) => OrderingTerm.asc(t.sortOrder)]))
+          .get();
+
+  /// 按分类获取提示词场景
+  Future<List<PromptScenario>> getPromptScenariosByCategory(String category) =>
+      (select(promptScenarios)
+            ..where((t) => t.category.equals(category))
+            ..orderBy([(t) => OrderingTerm.asc(t.sortOrder)]))
+          .get();
+
+  /// 根据 key 获取场景
+  Future<PromptScenario?> getPromptScenarioByKey(String scenarioKey) =>
+      (select(promptScenarios)..where((t) => t.scenarioKey.equals(scenarioKey)))
+          .getSingleOrNull();
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  v0.42.0: Models 思考配置 DAO methods
+  // ════════════════════════════════════════════════════════════════════════
+
+  /// 根据 ID 获取模型
+  Future<Model?> getModelById(String id) =>
+      (select(models)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  /// 更新模型（部分更新）
+  Future<int> updateModel(ModelsCompanion model) {
+    return (update(models)..where((t) => t.id.equals(model.id.value)))
+        .write(model);
+  }
+
+  /// 更新模型的思考配置
+  Future<int> updateModelThinkingConfig({
+    required String modelId,
+    required String thinkingMode,
+    int? thinkingBudget,
+  }) {
+    return (update(models)..where((t) => t.id.equals(modelId))).write(
+      ModelsCompanion(
+        thinkingMode: Value(thinkingMode),
+        thinkingBudget: Value(thinkingBudget),
+      ),
+    );
+  }
 }

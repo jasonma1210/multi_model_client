@@ -19,6 +19,16 @@ class OpenAIConfig {
   final Map<String, dynamic>? logitBias;
   final String? user;
 
+  // v0.42.0: 思考预算配置
+  /// 思考模式：'disabled' | 'enabled' | 'adaptive'
+  final String? thinkingMode;
+
+  /// 思考 Token 预算（仅 enabled 模式有效）
+  final int? thinkingBudget;
+
+  /// 思考过程是否展示给用户
+  final bool? showThinkingProcess;
+
   OpenAIConfig({
     required this.apiKey,
     this.baseUrl = 'https://api.openai.com/v1',
@@ -33,6 +43,9 @@ class OpenAIConfig {
     this.frequencyPenalty,
     this.logitBias,
     this.user,
+    this.thinkingMode,
+    this.thinkingBudget,
+    this.showThinkingProcess,
   });
 
   Map<String, dynamic> toJson() {
@@ -48,7 +61,40 @@ class OpenAIConfig {
       if (frequencyPenalty != null) 'frequency_penalty': frequencyPenalty,
       if (logitBias != null) 'logit_bias': logitBias,
       if (user != null) 'user': user,
+      // v0.42.0: 注入 reasoning 参数（仅 o-series / GPT-5）
+      if (_shouldInjectReasoning()) ..._buildReasoningPayload(),
     };
+  }
+
+  /// 是否应注入 reasoning 参数
+  bool _shouldInjectReasoning() {
+    final id = model.toLowerCase();
+    final isReasoningModel = id.contains('o1') ||
+        id.contains('o3') ||
+        id.contains('o4') ||
+        id.contains('gpt-5');
+    return isReasoningModel && thinkingMode != null && thinkingMode != 'disabled';
+  }
+
+  /// 构造 reasoning payload
+  Map<String, dynamic> _buildReasoningPayload() {
+    if (thinkingMode == 'enabled' && thinkingBudget != null) {
+      // OpenAI reasoning_effort 是枚举值，需要从 budget 转换
+      final effort = _budgetToEffort(thinkingBudget!);
+      return {'reasoning': {'effort': effort}};
+    }
+    if (thinkingMode == 'adaptive') {
+      return {'reasoning': {'effort': 'medium'}};
+    }
+    return {};
+  }
+
+  /// 将 token 预算转换为 effort 等级
+  String _budgetToEffort(int budget) {
+    if (budget < 5000) return 'low';
+    if (budget < 20000) return 'medium';
+    if (budget < 50000) return 'high';
+    return 'xhigh';
   }
 }
 
@@ -147,17 +193,32 @@ class OpenAIUsage {
   final int completionTokens;
   final int totalTokens;
 
+  // v0.42.0: 思考 tokens（o-series / GPT-5 reasoning）
+  final int? reasoningTokens;
+
   OpenAIUsage({
     required this.promptTokens,
     required this.completionTokens,
     required this.totalTokens,
+    this.reasoningTokens,
   });
 
   factory OpenAIUsage.fromJson(Map<String, dynamic> json) {
+    // OpenAI reasoning tokens 字段可能命名为：
+    // - completion_tokens_details.reasoning_tokens
+    // - reasoning_tokens
+    int? reasoning;
+    final details = json['completion_tokens_details'];
+    if (details is Map<String, dynamic>) {
+      reasoning = details['reasoning_tokens'] as int?;
+    }
+    reasoning ??= json['reasoning_tokens'] as int?;
+
     return OpenAIUsage(
       promptTokens: json['prompt_tokens'] as int,
       completionTokens: json['completion_tokens'] as int,
       totalTokens: json['total_tokens'] as int,
+      reasoningTokens: reasoning,
     );
   }
 }

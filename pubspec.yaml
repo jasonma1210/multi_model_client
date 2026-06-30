@@ -2,7 +2,7 @@ name: mj_nexus
 description: "MJ Nexus - Multi-Model AI Assistant with local/remote model support, voice dialogue, RAG knowledge base, and memory engine"
 publish_to: 'none'
 
-version: 0.41.0
+version: 0.42.0
 
 environment:
   sdk: ^3.10.7
@@ -129,6 +129,18 @@ dependencies:
   google_mlkit_text_recognition: ^0.14.0
   speech_to_text: ^7.3.0
 
+  # ===== v0.42.0 新增依赖 =====
+  # 富文本编辑器（用于系统提示词、项目描述等富文本编辑）
+  flutter_quill: ^11.0.0
+  # 数据可视化（用于深度研究统计图表）
+  syncfusion_flutter_charts: ^28.2.0
+  # 任务调度（用于深度研究后台任务）
+  cron: ^0.6.1
+  # 图表节点展示
+  graphview: ^1.2.1
+  # Markdown 渲染增强
+  markdown: ^7.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -174,8 +186,6 @@ flutter:
     
     # jieba 分词词典: 11MB（保留，因为 jieba_flutter 依赖此路径）
     - assets/jieba/
-    - assets/dict.txt
-    - assets/prob_emit.txt
     
     # 应用图标
     - assets/icons/

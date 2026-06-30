@@ -27,6 +27,9 @@ import '../../features/spirit/presentation/pages/spirit_create_page.dart';
 import '../../features/spirit/presentation/pages/spirit_chat_page.dart';
 import '../../features/spirit/presentation/pages/spirit_voice_chat_page.dart';
 import '../../features/spirit/presentation/pages/spirit_detail_page.dart';
+// v0.42.0 新增
+import '../../features/research/presentation/pages/research_input_page.dart';
+import '../../features/project/presentation/pages/project_list_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -164,6 +167,15 @@ final routerProvider = Provider<GoRouter>((ref) {
                 },
               ),
             ],
+          ),
+          // v0.42.0 新增路由
+          GoRoute(
+            path: 'research',
+            builder: (context, state) => const ResearchInputPage(),
+          ),
+          GoRoute(
+            path: 'projects',
+            builder: (context, state) => const ProjectListPage(),
           ),
         ],
       ),

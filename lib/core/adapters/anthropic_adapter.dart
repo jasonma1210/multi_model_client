@@ -15,6 +15,13 @@ class AnthropicConfig {
   final List<String>? stopSequences;
   final bool stream;
 
+  // v0.42.0: Extended Thinking 配置
+  /// 思考模式：'disabled' | 'enabled' | 'adaptive'
+  final String? thinkingMode;
+
+  /// 思考 Token 预算（仅 enabled 模式有效）
+  final int? thinkingBudget;
+
   AnthropicConfig({
     required this.apiKey,
     this.baseUrl = 'https://api.anthropic.com/v1',
@@ -25,6 +32,8 @@ class AnthropicConfig {
     this.topK,
     this.stopSequences,
     this.stream = false,
+    this.thinkingMode,
+    this.thinkingBudget,
   });
 
   Map<String, dynamic> toJson() {
@@ -36,6 +45,30 @@ class AnthropicConfig {
       if (topK != null) 'top_k': topK,
       if (stopSequences != null) 'stop_sequences': stopSequences,
       'stream': stream,
+      // v0.42.0: Extended Thinking（Claude 4.5+）
+      if (_shouldInjectThinking()) ..._buildThinkingPayload(),
+    };
+  }
+
+  /// 是否应注入 thinking 参数
+  bool _shouldInjectThinking() {
+    final id = model.toLowerCase();
+    final supportsThinking = id.contains('claude-4') ||
+        id.contains('claude-3-7') ||
+        id.contains('claude-3.7');
+    return supportsThinking && thinkingMode != null && thinkingMode != 'disabled';
+  }
+
+  /// 构造 thinking payload
+  Map<String, dynamic> _buildThinkingPayload() {
+    final budget = thinkingMode == 'adaptive'
+        ? 10000  // 自适应默认 10K
+        : (thinkingBudget ?? 10000);
+    return {
+      'thinking': {
+        'type': 'enabled',
+        'budget_tokens': budget,
+      },
     };
   }
 }
@@ -144,15 +177,47 @@ class AnthropicUsage {
   final int inputTokens;
   final int outputTokens;
 
+  // v0.42.0: 思考 tokens（Extended Thinking）
+  /// Claude 4.5+ Extended Thinking 消耗的 tokens
+  /// 字段位置：usage.thinking_tokens 或 usage.output_tokens_details.thinking_tokens
+  final int? thinkingTokens;
+
+  /// 缓存读取 tokens（Anthropic Prompt Caching）
+  final int? cacheReadInputTokens;
+
+  /// 缓存写入 tokens
+  final int? cacheCreationInputTokens;
+
   AnthropicUsage({
     required this.inputTokens,
     required this.outputTokens,
+    this.thinkingTokens,
+    this.cacheReadInputTokens,
+    this.cacheCreationInputTokens,
   });
 
   factory AnthropicUsage.fromJson(Map<String, dynamic> json) {
+    // 解析 thinking tokens
+    int? thinking;
+    final outputDetails = json['output_tokens_details'];
+    if (outputDetails is Map<String, dynamic>) {
+      thinking = outputDetails['thinking_tokens'] as int?;
+    }
+    thinking ??= json['thinking_tokens'] as int?;
+
+    // 解析 cache tokens
+    int? cacheRead;
+    int? cacheCreation;
+    final cacheInfo = json['cache_read_input_tokens'] as int?;
+    cacheRead = cacheInfo;
+    cacheCreation = json['cache_creation_input_tokens'] as int?;
+
     return AnthropicUsage(
       inputTokens: json['input_tokens'] as int,
       outputTokens: json['output_tokens'] as int,
+      thinkingTokens: thinking,
+      cacheReadInputTokens: cacheRead,
+      cacheCreationInputTokens: cacheCreation,
     );
   }
 }

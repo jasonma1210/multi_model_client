@@ -570,6 +570,18 @@ class _SessionListPageState extends ConsumerState<SessionListPage>
             tooltip: '模型市场',
             onPressed: () => context.push('/model-market'),
           ),
+          // v0.42.0: 深度研究入口
+          IconButton(
+            icon: const Icon(Icons.science_outlined),
+            tooltip: '深度研究',
+            onPressed: () => context.push('/research'),
+          ),
+          // v0.42.0: 项目工作区入口
+          IconButton(
+            icon: const Icon(Icons.folder_special_outlined),
+            tooltip: '项目工作区',
+            onPressed: () => context.push('/projects'),
+          ),
           // P0 优化：添加下载管理快捷入口（带红色数字角标）
           _DownloadButtonWithBadge(
             onPressed: () => context.push('/downloads'),
